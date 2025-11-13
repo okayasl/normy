@@ -1,4 +1,3 @@
-// src/stage/lower_case.rs
 use crate::{
     context::Context,
     lang::Lang,

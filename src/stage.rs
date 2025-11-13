@@ -1,5 +1,6 @@
 pub mod lower_case;
 pub mod trim_whitespace;
+pub mod validation;
 
 use crate::context::Context;
 use std::borrow::Cow;
@@ -9,6 +10,8 @@ use thiserror::Error;
 pub enum StageError {
     #[error("Normalization failed at stage `{0}`: {1}")]
     Failed(&'static str, String),
+    #[error("Normalization validation failed at stage `{0}`: {1}")]
+    Validation(&'static str, String),
 }
 
 pub trait Stage: Send + Sync {

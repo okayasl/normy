@@ -13,8 +13,11 @@ impl Stage for TrimWhitespace {
     }
 
     /// Fast pre-check – true if the text has any leading or trailing whitespace.
-    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(text.trim_start().len() != text.len() || text.trim_end().len() != text.len())
+    fn needs_apply(&self, text: &str, _: &Context) -> Result<bool, StageError> {
+        let bytes = text.as_bytes();
+        Ok(bytes.iter().any(|&b| b.is_ascii_whitespace())
+            && (bytes.first().is_some_and(u8::is_ascii_whitespace)
+                || bytes.last().is_some_and(u8::is_ascii_whitespace)))
     }
 
     /// `apply` – zero-copy when no trimming is required.
@@ -55,7 +58,9 @@ impl CharMapper for TrimWhitespaceMapper {
 
     #[inline]
     fn needs_apply(&self, text: &str, _: &Context) -> bool {
-        text.trim_start().len() != text.len() || text.trim_end().len() != text.len()
+        let bytes = text.as_bytes();
+        bytes.first().is_some_and(u8::is_ascii_whitespace)
+            || bytes.last().is_some_and(u8::is_ascii_whitespace)
     }
 
     fn bind<'a>(&self, text: &'a str, _: &Context) -> Box<dyn Iterator<Item = char> + 'a> {

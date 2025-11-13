@@ -4,7 +4,7 @@ use crate::{
     lang::Lang,
     process::{ChainedProcess, DynProcess, EmptyProcess, Process},
     profile::{Profile, ProfileError},
-    stage::{Stage, StageError},
+    stage::{Stage, StageError, validation::Utf8Validate},
 };
 use std::borrow::Cow;
 use thiserror::Error;
@@ -72,6 +72,13 @@ impl<P: Process> NormyBuilder<P> {
         }
     }
 
+    /// **Optional** — SIMD-accelerated UTF-8 validation
+    /// Must be called **first** in production.
+    #[inline(always)]
+    pub fn with_validation(self) -> NormyBuilder<ChainedProcess<Utf8Validate, P>> {
+        self.add_stage(Utf8Validate)
+    }
+
     pub fn build(self) -> Normy<P> {
         let ctx = Context { lang: self.lang };
         Normy {
@@ -118,6 +125,13 @@ impl DynNormyBuilder {
             pipeline: self.pipeline.push(stage),
             ..self
         }
+    }
+
+    /// **Optional** — SIMD-accelerated UTF-8 validation
+    /// Must be called **first** in production.
+    #[inline(always)]
+    pub fn with_validation(self) -> Self {
+        self.add_stage(Utf8Validate)
     }
 
     pub fn build(self) -> Normy<DynProcess> {
