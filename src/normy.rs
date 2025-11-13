@@ -158,7 +158,7 @@ mod tests {
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
-        let result = normy.normalize("İSTANBUL ").unwrap();
+        let result = normy.normalize("  İSTANBUL ").unwrap();
         assert_eq!(result.to_string(), "istanbul")
     }
 
@@ -169,7 +169,7 @@ mod tests {
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
-        let result = normy.normalize("İSTANBUL ").unwrap();
+        let result = normy.normalize(" İSTANBUL ").unwrap();
         assert_eq!(result.to_string(), "istanbul")
     }
 
@@ -180,7 +180,7 @@ mod tests {
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
-        let result = normy.normalize_with_profile(&profile, "İSTANBUL ").unwrap();
+        let result = normy.normalize_with_profile(&profile, "  İSTANBUL ").unwrap();
         assert_eq!(result.to_string(), "istanbul")
     }
 
@@ -191,7 +191,7 @@ mod tests {
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
-        let result = normy.normalize_with_profile(&profile, "İSTANBUL ").unwrap();
+        let result = normy.normalize_with_profile(&profile, "  İSTANBUL ").unwrap();
         assert_eq!(result.to_string(), "istanbul")
     }
 }
