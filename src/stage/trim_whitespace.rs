@@ -1,10 +1,17 @@
+//! Unicode whitespace trimming – zero-allocation iterator path.
+//!
+//! The static path returns `&self`; the dynamic path re-uses the same `Arc`.
+
 use crate::{
     context::Context,
     stage::{CharMapper, Stage, StageError},
 };
-use std::{borrow::Cow, iter::FusedIterator, str::Chars};
+use std::borrow::Cow;
+use std::iter::FusedIterator;
+use std::str::Chars;
+use std::sync::Arc;
 
-/// Trims Unicode whitespace from the start and end of the text.
+/// Public stage – zero-sized.
 pub struct TrimWhitespace;
 
 impl Stage for TrimWhitespace {
@@ -12,55 +19,44 @@ impl Stage for TrimWhitespace {
         "trim_ws"
     }
 
-    /// Fast pre-check – true if the text has any leading or trailing whitespace.
     fn needs_apply(&self, text: &str, _: &Context) -> Result<bool, StageError> {
         let bytes = text.as_bytes();
-        Ok(bytes.iter().any(|&b| b.is_ascii_whitespace())
-            && (bytes.first().is_some_and(u8::is_ascii_whitespace)
-                || bytes.last().is_some_and(u8::is_ascii_whitespace)))
+        Ok(bytes.first().is_some_and(u8::is_ascii_whitespace)
+            || bytes.last().is_some_and(u8::is_ascii_whitespace))
     }
 
-    /// `apply` – zero-copy when no trimming is required.
+    /// Allocation-aware `apply`.  Returns `Cow::Borrowed` when no trim occurs.
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let trimmed = text.trim();
-        if trimmed.len() == text.len() {
-            Ok(text) // no allocation
-        } else {
-            Ok(Cow::Owned(trimmed.to_owned()))
-        }
+        Ok(
+            if trimmed.as_ptr() == text.as_ptr() && trimmed.len() == text.len() {
+                text
+            } else {
+                Cow::Owned(trimmed.to_string())
+            },
+        )
     }
 
-    /// **Fused, zero-allocation iterator path**
-    fn char_mapper(&self) -> Option<Box<dyn CharMapper + 'static>> {
-        Some(Box::new(TrimWhitespaceMapper))
+    // ────── STATIC PATH ──────
+    #[inline]
+    fn as_char_mapper(&self) -> Option<&dyn CharMapper> {
+        Some(self)
+    }
+
+    // ────── DYNAMIC PATH ──────
+    #[inline]
+    fn into_dyn_char_mapper(self: Arc<Self>) -> Option<Arc<dyn CharMapper>> {
+        Some(self)
     }
 }
 
-/* --------------------------------------------------------------------- */
-/*                     CharMapper implementation                         */
-/* --------------------------------------------------------------------- */
-
-/// The three phases we walk through while iterating.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TrimPhase {
-    Leading,  // drop leading whitespace
-    Middle,   // emit everything
-    Trailing, // drop trailing whitespace (entered on first non-ws)
-}
-
-struct TrimWhitespaceMapper;
-
-impl CharMapper for TrimWhitespaceMapper {
+/* ------------------------------------------------------------------ */
+/* CharMapper – directly on the stage (zero-cost)                    */
+/* ------------------------------------------------------------------ */
+impl CharMapper for TrimWhitespace {
     #[inline(always)]
     fn map(&self, c: char, _: &Context) -> char {
         c
-    }
-
-    #[inline]
-    fn needs_apply(&self, text: &str, _: &Context) -> bool {
-        let bytes = text.as_bytes();
-        bytes.first().is_some_and(u8::is_ascii_whitespace)
-            || bytes.last().is_some_and(u8::is_ascii_whitespace)
     }
 
     fn bind<'a>(&self, text: &'a str, _: &Context) -> Box<dyn Iterator<Item = char> + 'a> {
@@ -72,9 +68,15 @@ impl CharMapper for TrimWhitespaceMapper {
     }
 }
 
-/* --------------------------------------------------------------------- */
-/*                     Stateful iterator (zero-allocation)                */
-/* --------------------------------------------------------------------- */
+/* ------------------------------------------------------------------ */
+/* Trim iterator – three-phase, zero-allocation, FusedIterator       */
+/* ------------------------------------------------------------------ */
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TrimPhase {
+    Leading,  // drop leading whitespace
+    Middle,   // emit everything
+    Trailing, // drop trailing whitespace (entered on first non-ws)
+}
 
 struct TrimIter<'a> {
     chars: Chars<'a>,
@@ -98,18 +100,14 @@ impl<'a> Iterator for TrimIter<'a> {
                 }
                 TrimPhase::Middle => {
                     if c.is_whitespace() && self.chars.as_str().chars().all(char::is_whitespace) {
-                        // we just saw the last non-ws char → switch to trailing
+                        // last non-ws was just emitted → switch to trailing
                         self.phase = TrimPhase::Trailing;
                     }
                     return Some(c);
                 }
-                TrimPhase::Trailing => {
-                    // drop everything after the last non-ws char
-                    continue;
-                }
+                TrimPhase::Trailing => continue,
             }
         }
     }
 }
-
 impl<'a> FusedIterator for TrimIter<'a> {}

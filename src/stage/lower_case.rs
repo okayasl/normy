@@ -1,3 +1,8 @@
+//! Turkish-aware lower-casing.
+//!
+//! Implements both static (`&self`) and dynamic (`Arc`) paths so that a
+//! monomorphised pipeline fuses completely into a single `for c in ...` loop.
+
 use crate::{
     context::Context,
     lang::Lang,
@@ -5,8 +10,9 @@ use crate::{
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
+use std::sync::Arc;
 
-/// Lowercases text with **Turkish-aware** `I` → `ı`, `İ` → `i` rules.
+/// Public stage struct – zero-sized.
 pub struct Lowercase;
 
 impl Stage for Lowercase {
@@ -14,7 +20,7 @@ impl Stage for Lowercase {
         "lowercase"
     }
 
-    /// Fast pre-check – skip if no uppercase chars (or Turkish specials)
+    /// Fast pre-check – skip if no uppercase chars (or Turkish specials).
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
         Ok(match ctx.lang {
             Lang::Turkish => text.contains(['I', 'İ']),
@@ -22,7 +28,7 @@ impl Stage for Lowercase {
         })
     }
 
-    /// Zero-copy `apply` – uses `Cow` to avoid allocation when possible
+    /// Allocation-aware `apply`.  Used when the iterator path is unavailable.
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         if !self.needs_apply(&text, ctx)? {
             return Ok(text);
@@ -41,24 +47,26 @@ impl Stage for Lowercase {
         } else {
             text.to_lowercase()
         };
-
         Ok(Cow::Owned(result))
     }
 
-    /// **Fused, zero-allocation iterator path**
-    fn char_mapper(&self) -> Option<Box<dyn CharMapper + 'static>> {
-        Some(Box::new(LowercaseMapper))
+    // ────── STATIC PATH ──────
+    #[inline]
+    fn as_char_mapper(&self) -> Option<&dyn CharMapper> {
+        Some(self)
+    }
+
+    // ────── DYNAMIC PATH ──────
+    #[inline]
+    fn into_dyn_char_mapper(self: Arc<Self>) -> Option<Arc<dyn CharMapper>> {
+        Some(self)
     }
 }
 
 /* ------------------------------------------------------------------ */
-/*                     CharMapper – stateless, fused                  */
+/* CharMapper – implemented directly on the stage (zero-cost)        */
 /* ------------------------------------------------------------------ */
-
-#[derive(Default)]
-struct LowercaseMapper;
-
-impl CharMapper for LowercaseMapper {
+impl CharMapper for Lowercase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> char {
         match (c, ctx.lang) {
@@ -68,15 +76,6 @@ impl CharMapper for LowercaseMapper {
         }
     }
 
-    #[inline]
-    fn needs_apply(&self, text: &str, ctx: &Context) -> bool {
-        match ctx.lang {
-            Lang::Turkish => text.contains(['I', 'İ']),
-            _ => text.chars().any(char::is_uppercase),
-        }
-    }
-
-    /// **Fused iterator** – yields `char` directly, no intermediate `String`
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn Iterator<Item = char> + 'a> {
         Box::new(LowercaseIter {
             chars: text.chars(),
@@ -86,9 +85,8 @@ impl CharMapper for LowercaseMapper {
 }
 
 /* ------------------------------------------------------------------ */
-/*                 Stateful iterator – zero allocation                */
+/* Stateful iterator – zero allocation, FusedIterator                */
 /* ------------------------------------------------------------------ */
-
 struct LowercaseIter<'a> {
     chars: std::str::Chars<'a>,
     lang: Lang,
@@ -111,5 +109,4 @@ impl<'a> Iterator for LowercaseIter<'a> {
         self.chars.size_hint()
     }
 }
-
 impl<'a> FusedIterator for LowercaseIter<'a> {}
