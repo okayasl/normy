@@ -1,5 +1,3 @@
-use thiserror::Error;
-
 use crate::{
     context::Context,
     lang::Lang,
@@ -8,12 +6,13 @@ use crate::{
     stage::{Stage, StageError},
 };
 use std::{borrow::Cow, sync::Arc};
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum NormyError {
-    #[error("stage error: {0}")]
+    #[error(transparent)]
     Stage(#[from] StageError),
-    #[error("profile error: {0}")]
+    #[error(transparent)]
     Profile(#[from] ProfileError),
 }
 
@@ -27,24 +26,28 @@ impl Normy {
         NormyBuilder::default()
     }
 
-    pub fn normalize<'a>(&self, text: Cow<'a, str>) -> Result<Cow<'a, str>, NormyError> {
-        let results = self.pipeline.process(text, &self.ctx)?;
-        Ok(results)
+    // Public API: &str → zero-copy default
+    pub fn normalize<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
+        self.pipeline
+            .process(Cow::Borrowed(text), &self.ctx)
+            .map_err(Into::into)
     }
 
+    // Profile API: accepts Cow because it may be in the middle of a pipeline
     pub fn normalize_with_profile<'a>(
         &self,
-        profile: Profile,
-        text: Cow<'a, str>,
+        profile: &Profile,
+        text: &'a str, // still &str — user-facing
     ) -> Result<Cow<'a, str>, NormyError> {
-        let results = profile.run(text, &self.ctx)?;
-        Ok(results)
+        profile
+            .run(Cow::Borrowed(text), &self.ctx)
+            .map_err(Into::into)
     }
 }
 
 pub struct NormyBuilder {
     lang: Lang,
-    stages: Vec<Arc<dyn Stage + Send + Sync>>,
+    stages: Vec<Arc<dyn Stage>>, // No extra bounds needed
 }
 
 impl Default for NormyBuilder {
@@ -62,7 +65,7 @@ impl NormyBuilder {
         self
     }
 
-    pub fn add_stage<T: crate::stage::Stage + Send + Sync + 'static>(mut self, stage: T) -> Self {
+    pub fn add_stage<T: Stage + 'static>(mut self, stage: T) -> Self {
         self.stages.push(Arc::new(stage));
         self
     }
