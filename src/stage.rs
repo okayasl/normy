@@ -1,4 +1,6 @@
 pub mod lower_case;
+pub mod trim_whitespace;
+
 use crate::context::Context;
 use std::borrow::Cow;
 use thiserror::Error;
@@ -9,8 +11,7 @@ pub enum StageError {
     Failed(&'static str, String),
 }
 
-/// Object-safe trait: used for dynamic dispatch and extensibility
-pub trait Stage: Send + Sync + 'static {
+pub trait Stage: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Fast pre-check: can we skip this stage entirely?
