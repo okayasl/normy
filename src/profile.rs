@@ -6,30 +6,24 @@ use crate::{
 use std::borrow::Cow;
 use thiserror::Error;
 
-/// Errors returned from a profile.
 #[derive(Debug, Error)]
 pub enum ProfileError {
     #[error("Normalization failed at profile `{0}`: {1}")]
     Failed(&'static str, String),
 }
 
-/// A pre-built pipeline – internally just a `Process`.
 pub struct Profile<P: Process> {
     name: &'static str,
     pipeline: P,
 }
 
 impl<P: Process> Profile<P> {
-    /// Run the profile.  The public API is identical to `Normy::normalize`.
     pub fn run<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, ProfileError> {
         self.pipeline
             .process(text, ctx)
             .map_err(|e| ProfileError::Failed(self.name, e.to_string()))
     }
 }
-
-/* ---------- 1. Static (monomorphised) builder ---------- */
-
 impl Profile<EmptyProcess> {
     pub fn builder(name: &'static str) -> ProfileBuilder<EmptyProcess> {
         ProfileBuilder::new(name)
@@ -68,10 +62,7 @@ impl<P: Process> ProfileBuilder<P> {
         }
     }
 }
-
-/* ---------- 2. Dynamic (plugin) builder ---------- */
 impl Profile<DynProcess> {
-    /// **Exactly like `Normy::plugin_builder()`**
     pub fn plugin_builder(name: &'static str) -> DynProfileBuilder {
         DynProfileBuilder {
             name,

@@ -19,19 +19,12 @@ pub trait Process {
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
 }
 
-/* ------------------------------------------------------------------ */
-/* Empty sentinel – the starting point of every builder               */
-/* ------------------------------------------------------------------ */
 pub struct EmptyProcess;
 impl Process for EmptyProcess {
     fn process<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(text)
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* Monomorphised chain – **this is where fusion happens**            */
-/* ------------------------------------------------------------------ */
 pub struct ChainedProcess<S: Stage, P: Process> {
     pub stage: S,
     pub previous: P,
@@ -39,34 +32,21 @@ pub struct ChainedProcess<S: Stage, P: Process> {
 
 impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // 1. Run the previous part of the pipeline
         let current = self.previous.process(text, ctx)?;
-
-        // 2. Fast-path: skip if the stage says it would do nothing
         if !self.stage.needs_apply(&current, ctx)? {
             return Ok(current);
         }
-
-        // 3. **Zero-allocation iterator path** – only taken for static pipelines
         if let Some(mapper) = self.stage.as_char_mapper(ctx) {
-            // Bind the iterator **once** – the compiler will inline everything
             let iter = mapper.bind(&current, ctx);
-            // Collect into a `String` only when mutation is required
             let mut out = String::with_capacity(current.len());
             for c in iter {
                 out.push(c);
             }
             return Ok(Cow::Owned(out));
         }
-
-        // 4. Fallback – allocation-aware `apply` (still zero-copy when possible)
         self.stage.apply(current, ctx)
     }
 }
-
-/* ------------------------------------------------------------------ */
-/* Dynamic plugin pipeline – unchanged (uses `Arc<dyn Stage>`)       */
-/* ------------------------------------------------------------------ */
 #[derive(Default)]
 pub struct DynProcess {
     stages: Vec<Arc<dyn Stage + Send + Sync>>,
