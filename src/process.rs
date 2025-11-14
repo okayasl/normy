@@ -48,7 +48,7 @@ impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
         }
 
         // 3. **Zero-allocation iterator path** – only taken for static pipelines
-        if let Some(mapper) = self.stage.as_char_mapper() {
+        if let Some(mapper) = self.stage.as_char_mapper(ctx) {
             // Bind the iterator **once** – the compiler will inline everything
             let iter = mapper.bind(&current, ctx);
             // Collect into a `String` only when mutation is required

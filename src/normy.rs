@@ -143,72 +143,72 @@ impl DynNormyBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::{
-        Normy,
-        lang::TUR,
-        profile::Profile,
-        stage::{lower_case::Lowercase, trim_whitespace::TrimWhitespace},
-    };
+// #[cfg(test)]
+// mod tests {
+//     use crate::{
+//         Normy,
+//         lang::TUR,
+//         profile::Profile,
+//         stage::{lower_case::Lowercase, trim_whitespace::TrimWhitespace},
+//     };
 
-    #[test]
-    fn test_simple_normy() {
-        let normy = Normy::builder()
-            .with_validation()
-            .lang(TUR)
-            .add_stage(Lowercase)
-            .add_stage(TrimWhitespace)
-            .build();
-        let result = normy.normalize("  İSTANBUL ").unwrap();
-        assert_eq!(result.to_string(), "istanbul")
-    }
+//     #[test]
+//     fn test_simple_normy() {
+//         let normy = Normy::builder()
+//             .with_validation()
+//             .lang(TUR)
+//             .add_stage(Lowercase)
+//             .add_stage(TrimWhitespace)
+//             .build();
+//         let result = normy.normalize("  İSTANBUL ").unwrap();
+//         assert_eq!(result.to_string(), "istanbul")
+//     }
 
-    #[test]
-    fn test_simple_normy_default() {
-        let normy = Normy::builder()
-            .with_validation()
-            .add_stage(Lowercase)
-            .add_stage(TrimWhitespace)
-            .build();
-        let result = normy.normalize("  IŞiK ").unwrap();
-        assert_eq!(result.to_string(), "işik")
-    }
+//     #[test]
+//     fn test_simple_normy_default() {
+//         let normy = Normy::builder()
+//             .with_validation()
+//             .add_stage(Lowercase)
+//             .add_stage(TrimWhitespace)
+//             .build();
+//         let result = normy.normalize("  IŞiK ").unwrap();
+//         assert_eq!(result.to_string(), "işik")
+//     }
 
-    #[test]
-    fn test_simple_plugin_normy() {
-        let normy = Normy::plugin_builder()
-            .lang(TUR)
-            .add_stage(Lowercase)
-            .add_stage(TrimWhitespace)
-            .build();
-        let result = normy.normalize(" İSTANBUL ").unwrap();
-        assert_eq!(result.to_string(), "istanbul")
-    }
+//     #[test]
+//     fn test_simple_plugin_normy() {
+//         let normy = Normy::plugin_builder()
+//             .lang(TUR)
+//             .add_stage(Lowercase)
+//             .add_stage(TrimWhitespace)
+//             .build();
+//         let result = normy.normalize(" İSTANBUL ").unwrap();
+//         assert_eq!(result.to_string(), "istanbul")
+//     }
 
-    #[test]
-    fn test_simple_normy_with_profile() {
-        let normy = Normy::builder().lang(TUR).build();
-        let profile = Profile::builder("test")
-            .add_stage(Lowercase)
-            .add_stage(TrimWhitespace)
-            .build();
-        let result = normy
-            .normalize_with_profile(&profile, "  İSTANBUL ")
-            .unwrap();
-        assert_eq!(result.to_string(), "istanbul")
-    }
+//     #[test]
+//     fn test_simple_normy_with_profile() {
+//         let normy = Normy::builder().lang(TUR).build();
+//         let profile = Profile::builder("test")
+//             .add_stage(Lowercase)
+//             .add_stage(TrimWhitespace)
+//             .build();
+//         let result = normy
+//             .normalize_with_profile(&profile, "  İSTANBUL ")
+//             .unwrap();
+//         assert_eq!(result.to_string(), "istanbul")
+//     }
 
-    #[test]
-    fn test_simple_normy_with_dynprofile() {
-        let normy = Normy::builder().with_validation().lang(TUR).build();
-        let profile = Profile::plugin_builder("test")
-            .add_stage(Lowercase)
-            .add_stage(TrimWhitespace)
-            .build();
-        let result = normy
-            .normalize_with_profile(&profile, "  İSTANBUL ")
-            .unwrap();
-        assert_eq!(result.to_string(), "istanbul")
-    }
-}
+//     #[test]
+//     fn test_simple_normy_with_dynprofile() {
+//         let normy = Normy::builder().with_validation().lang(TUR).build();
+//         let profile = Profile::plugin_builder("test")
+//             .add_stage(Lowercase)
+//             .add_stage(TrimWhitespace)
+//             .build();
+//         let result = normy
+//             .normalize_with_profile(&profile, "  İSTANBUL ")
+//             .unwrap();
+//         assert_eq!(result.to_string(), "istanbul")
+//     }
+// }

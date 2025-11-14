@@ -1,10 +1,5 @@
 //! # Normy Language Layer — FULL, ZERO-COST, MACRO-DRIVEN (2025)
-//! * **No enum, no match, no duplication**
-//! * **All behavior in `define_lang!` — including `needs_segmentation`**
-//! * **phf perfect-hash** — O(1), compile-time
 //! * **Single source of truth** — change only in define_lang!
-
-#![allow(dead_code)]
 
 use phf::{Map, phf_map};
 
@@ -139,7 +134,7 @@ define_languages! {
     // Turkic languages
     TUR, "TUR", "Turkish",
         case: [ 'I' => 'ı', 'İ' => 'i' ],
-        fold: [],
+        fold: [ 'I' => "ı", 'İ' => "i" ],
         diac: [],
         segment: false;
 
@@ -164,7 +159,7 @@ define_languages! {
     // Germanic
     DEU, "DEU", "German",
         case: [],
-        fold: [ 'ß' => "SS" ],
+        fold: [ 'ß' => "ss" ],
         diac: [],
         segment: false;
 

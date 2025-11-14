@@ -21,7 +21,9 @@
 //! simply return `None` for both methods – they fall back to the `Cow<str>`
 //! allocation path, which is the correct, safe behaviour.
 
+pub mod case_fold;
 pub mod lower_case;
+pub mod remove_diacritics;
 pub mod trim_whitespace;
 pub mod utf8_validate;
 pub use utf8_validate::Utf8Validate;
@@ -65,7 +67,7 @@ pub trait Stage: Send + Sync {
     /// pointer to the concrete iterator implementation – no heap, no vtable,
     /// full inlining + loop fusion.
     #[inline]
-    fn as_char_mapper(&self) -> Option<&dyn CharMapper> {
+    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
         None
     }
 
@@ -80,7 +82,7 @@ pub trait Stage: Send + Sync {
     /// `DynProcess` stores stages in a `Vec<Arc<dyn Stage>>`.  Converting to
     /// `Arc<dyn CharMapper>` re-uses the same reference count – no extra allocation.
     #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>) -> Option<Arc<dyn CharMapper>> {
+    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
         None
     }
 }

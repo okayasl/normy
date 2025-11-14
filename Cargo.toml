@@ -9,7 +9,10 @@ phf = { version = "0.13.1", features = ["macros"] }
 simdutf8 = { version = "0.1.5", optional = true }
 thiserror = "2.0.17"
 
+[dev-dependencies]
+proptest = "1.9.0"
 
 [features]
-default = ["simd"]
+default = ["simd", "ascii-fast"]
 simd = ["simdutf8"]
+ascii-fast = []

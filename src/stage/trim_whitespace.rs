@@ -1,4 +1,3 @@
-//! Unicode whitespace trimming – zero-allocation iterator path.
 use crate::{
     context::Context,
     stage::{CharMapper, Stage, StageError},
@@ -16,9 +15,17 @@ impl Stage for TrimWhitespace {
     }
 
     fn needs_apply(&self, text: &str, _: &Context) -> Result<bool, StageError> {
+        // Fast path for ASCII
         let b = text.as_bytes();
-        Ok(b.first().is_some_and(u8::is_ascii_whitespace)
-            || b.last().is_some_and(u8::is_ascii_whitespace))
+        if b.first().is_some_and(u8::is_ascii_whitespace)
+            || b.last().is_some_and(u8::is_ascii_whitespace)
+        {
+            return Ok(true);
+        }
+
+        // Fallback for Unicode whitespace
+        Ok(text.chars().next().is_some_and(char::is_whitespace)
+            || text.chars().next_back().is_some_and(char::is_whitespace))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
@@ -33,11 +40,11 @@ impl Stage for TrimWhitespace {
     }
 
     #[inline]
-    fn as_char_mapper(&self) -> Option<&dyn CharMapper> {
+    fn as_char_mapper(&self, _: &Context) -> Option<&dyn CharMapper> {
         Some(self)
     }
     #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>) -> Option<Arc<dyn CharMapper>> {
+    fn into_dyn_char_mapper(self: Arc<Self>, _: &Context) -> Option<Arc<dyn CharMapper>> {
         Some(self)
     }
 }

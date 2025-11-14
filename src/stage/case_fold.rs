@@ -1,24 +1,24 @@
 use crate::{
     context::Context,
-    lang::{CaseMap, LocaleBehavior},
+    lang::{FoldMap, LocaleBehavior},
     stage::{CharMapper, Stage, StageError},
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
-pub struct Lowercase;
+pub struct CaseFold;
 
-impl Stage for Lowercase {
+impl Stage for CaseFold {
     fn name(&self) -> &'static str {
-        "lowercase"
+        "case_fold"
     }
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        let case_map = ctx.lang.case_map();
+        let fold_map = ctx.lang.fold_map();
 
-        if case_map.is_empty() {
+        if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
                 return Ok(text.bytes().any(|b| b.is_ascii_uppercase()));
@@ -28,13 +28,13 @@ impl Stage for Lowercase {
 
         Ok(text
             .chars()
-            .any(|c| case_map.iter().any(|m| m.from == c) || c.to_lowercase().next() != Some(c)))
+            .any(|c| fold_map.iter().any(|m| m.from == c) || c.to_lowercase().next() != Some(c)))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let case_map = ctx.lang.case_map();
+        let fold_map = ctx.lang.fold_map();
 
-        if case_map.is_empty() {
+        if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
                 let mut out = text.into_owned().into_bytes();
@@ -50,10 +50,10 @@ impl Stage for Lowercase {
             ));
         }
 
-        let mut out = String::with_capacity(text.len());
+        let mut out = String::with_capacity(text.len() * 2); // worst-case expansion: ß → ss
         for c in text.chars() {
-            if let Some(map) = case_map.iter().find(|m| m.from == c) {
-                out.push(map.to); // ← 1:1 only
+            if let Some(map) = fold_map.iter().find(|m| m.from == c) {
+                out.push_str(map.to);
             } else {
                 out.extend(c.to_lowercase());
             }
@@ -81,52 +81,55 @@ impl Stage for Lowercase {
     }
 }
 
-impl CharMapper for Lowercase {
+impl CharMapper for CaseFold {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> char {
-        let case_map = ctx.lang.case_map();
-        if case_map.is_empty() {
+        let fold_map = ctx.lang.fold_map();
+
+        if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if c.is_ascii() {
                 return c.to_ascii_lowercase();
             }
             return c.to_lowercase().next().unwrap_or(c);
         }
-        case_map
+
+        // Only take first char for CharMapper (multi-char handled in apply)
+        fold_map
             .iter()
             .find(|m| m.from == c)
-            .map(|m| m.to)
+            .map(|m| m.to.chars().next().unwrap_or(c))
             .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn Iterator<Item = char> + 'a> {
-        let case_map = ctx.lang.case_map();
+        let fold_map = ctx.lang.fold_map();
 
-        if case_map.is_empty() {
+        if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
-                return Box::new(AsciiLowercaseIter {
+                return Box::new(AsciiCaseFoldIter {
                     bytes: text.as_bytes(),
                 });
             }
             return Box::new(text.chars().flat_map(|c| c.to_lowercase()));
         }
 
-        Box::new(LowercaseIter {
+        Box::new(CaseFoldIter {
             chars: text.chars(),
-            case_map,
+            fold_map,
         })
     }
 }
 
 // ────── ASCII FAST PATH ITERATOR ──────
 #[cfg(feature = "ascii-fast")]
-struct AsciiLowercaseIter<'a> {
+struct AsciiCaseFoldIter<'a> {
     bytes: &'a [u8],
 }
 
 #[cfg(feature = "ascii-fast")]
-impl<'a> Iterator for AsciiLowercaseIter<'a> {
+impl<'a> Iterator for AsciiCaseFoldIter<'a> {
     type Item = char;
 
     #[inline(always)]
@@ -146,27 +149,24 @@ impl<'a> Iterator for AsciiLowercaseIter<'a> {
 }
 
 #[cfg(feature = "ascii-fast")]
-impl<'a> FusedIterator for AsciiLowercaseIter<'a> {}
+impl<'a> FusedIterator for AsciiCaseFoldIter<'a> {}
 
-// ────── UNICODE FALLBACK ITERATOR ──────
-struct LowercaseIter<'a> {
+// ────── UNICODE / Multi-char CASE FOLD ITERATOR ──────
+struct CaseFoldIter<'a> {
     chars: std::str::Chars<'a>,
-    case_map: &'a [CaseMap],
+    fold_map: &'a [FoldMap],
 }
 
-impl<'a> Iterator for LowercaseIter<'a> {
+impl<'a> Iterator for CaseFoldIter<'a> {
     type Item = char;
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        Some(
-            self.case_map
-                .iter()
-                .find(|m| m.from == c)
-                .map(|m| m.to)
-                .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c)),
-        )
+        if let Some(map) = self.fold_map.iter().find(|m| m.from == c) {
+            return map.to.chars().next(); // only first char, rest handled in apply()
+        }
+        c.to_lowercase().next()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -174,4 +174,4 @@ impl<'a> Iterator for LowercaseIter<'a> {
     }
 }
 
-impl<'a> FusedIterator for LowercaseIter<'a> {}
+impl<'a> FusedIterator for CaseFoldIter<'a> {}

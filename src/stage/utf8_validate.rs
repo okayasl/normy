@@ -1,5 +1,3 @@
-//! SIMD-accelerated UTF-8 validation – **Basic Flavor** (§4.2)
-//! Uses `simdutf8::basic::from_utf8` – up to 23× faster than scalar.
 use crate::{
     context::Context,
     stage::{Stage, StageError},
@@ -37,11 +35,14 @@ impl Stage for Utf8Validate {
     }
 
     #[inline]
-    fn as_char_mapper(&self) -> Option<&dyn crate::stage::CharMapper> {
+    fn as_char_mapper(&self, _: &Context) -> Option<&dyn crate::stage::CharMapper> {
         None
     }
     #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>) -> Option<Arc<dyn crate::stage::CharMapper>> {
+    fn into_dyn_char_mapper(
+        self: Arc<Self>,
+        _: &Context,
+    ) -> Option<Arc<dyn crate::stage::CharMapper>> {
         None
     }
 }
