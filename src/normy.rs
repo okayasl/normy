@@ -1,6 +1,7 @@
 use crate::{
+    Lang,
     context::Context,
-    lang::Lang,
+    lang::DEFAULT_LANG,
     process::{ChainedProcess, DynProcess, EmptyProcess, Process},
     profile::{Profile, ProfileError},
     stage::{Stage, StageError},
@@ -51,7 +52,7 @@ pub struct NormyBuilder<P: Process> {
 impl Default for NormyBuilder<EmptyProcess> {
     fn default() -> Self {
         Self {
-            lang: Lang::English,
+            lang: DEFAULT_LANG,
             current: EmptyProcess,
         }
     }
@@ -73,8 +74,7 @@ impl<P: Process> NormyBuilder<P> {
         }
     }
 
-    /// **Optional** — SIMD-accelerated UTF-8 validation
-    /// Must be called **first** in production.
+    /// **Optional** Must be called **first** in production.
     #[inline(always)]
     pub fn with_validation(self) -> NormyBuilder<ChainedProcess<DefaultValidate, P>> {
         self.add_stage(DefaultValidate)
@@ -111,7 +111,7 @@ pub struct DynNormyBuilder {
 impl DynNormyBuilder {
     fn new() -> Self {
         Self {
-            lang: Lang::English,
+            lang: DEFAULT_LANG,
             pipeline: DynProcess::new(),
         }
     }
@@ -128,8 +128,7 @@ impl DynNormyBuilder {
         }
     }
 
-    /// **Optional** — SIMD-accelerated UTF-8 validation
-    /// Must be called **first** in production.
+    /// **Optional** Must be called **first** in production.
     #[inline(always)]
     pub fn with_validation(self) -> Self {
         self.add_stage(DefaultValidate)
@@ -147,7 +146,8 @@ impl DynNormyBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{
-        Lang, Normy,
+        Normy,
+        lang::TUR,
         profile::Profile,
         stage::{lower_case::Lowercase, trim_whitespace::TrimWhitespace},
     };
@@ -156,7 +156,7 @@ mod tests {
     fn test_simple_normy() {
         let normy = Normy::builder()
             .with_validation()
-            .lang(Lang::Turkish)
+            .lang(TUR)
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
@@ -165,9 +165,20 @@ mod tests {
     }
 
     #[test]
+    fn test_simple_normy_default() {
+        let normy = Normy::builder()
+            .with_validation()
+            .add_stage(Lowercase)
+            .add_stage(TrimWhitespace)
+            .build();
+        let result = normy.normalize("  IŞiK ").unwrap();
+        assert_eq!(result.to_string(), "işik")
+    }
+
+    #[test]
     fn test_simple_plugin_normy() {
         let normy = Normy::plugin_builder()
-            .lang(Lang::Turkish)
+            .lang(TUR)
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
@@ -177,7 +188,7 @@ mod tests {
 
     #[test]
     fn test_simple_normy_with_profile() {
-        let normy = Normy::builder().lang(Lang::Turkish).build();
+        let normy = Normy::builder().lang(TUR).build();
         let profile = Profile::builder("test")
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
@@ -190,10 +201,7 @@ mod tests {
 
     #[test]
     fn test_simple_normy_with_dynprofile() {
-        let normy = Normy::builder()
-            .with_validation()
-            .lang(Lang::Turkish)
-            .build();
+        let normy = Normy::builder().with_validation().lang(TUR).build();
         let profile = Profile::plugin_builder("test")
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
