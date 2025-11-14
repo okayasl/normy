@@ -4,5 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-simdutf8 = "0.1.5"
+simdutf8 = { version = "0.1.5", optional = true }
 thiserror = "2.0.17"
+
+
+[features]
+default = ["simd"]
+simd = ["simdutf8"]

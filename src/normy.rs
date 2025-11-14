@@ -1,13 +1,14 @@
-// src/normy.rs
 use crate::{
     context::Context,
     lang::Lang,
     process::{ChainedProcess, DynProcess, EmptyProcess, Process},
     profile::{Profile, ProfileError},
-    stage::{Stage, StageError, validation::Utf8Validate},
+    stage::{Stage, StageError},
 };
 use std::borrow::Cow;
 use thiserror::Error;
+
+use crate::stage::Utf8Validate as DefaultValidate;
 
 #[derive(Debug, Error)]
 pub enum NormyError {
@@ -75,8 +76,8 @@ impl<P: Process> NormyBuilder<P> {
     /// **Optional** — SIMD-accelerated UTF-8 validation
     /// Must be called **first** in production.
     #[inline(always)]
-    pub fn with_validation(self) -> NormyBuilder<ChainedProcess<Utf8Validate, P>> {
-        self.add_stage(Utf8Validate)
+    pub fn with_validation(self) -> NormyBuilder<ChainedProcess<DefaultValidate, P>> {
+        self.add_stage(DefaultValidate)
     }
 
     pub fn build(self) -> Normy<P> {
@@ -131,7 +132,7 @@ impl DynNormyBuilder {
     /// Must be called **first** in production.
     #[inline(always)]
     pub fn with_validation(self) -> Self {
-        self.add_stage(Utf8Validate)
+        self.add_stage(DefaultValidate)
     }
 
     pub fn build(self) -> Normy<DynProcess> {
@@ -154,6 +155,7 @@ mod tests {
     #[test]
     fn test_simple_normy() {
         let normy = Normy::builder()
+            .with_validation()
             .lang(Lang::Turkish)
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
@@ -180,18 +182,25 @@ mod tests {
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
-        let result = normy.normalize_with_profile(&profile, "  İSTANBUL ").unwrap();
+        let result = normy
+            .normalize_with_profile(&profile, "  İSTANBUL ")
+            .unwrap();
         assert_eq!(result.to_string(), "istanbul")
     }
 
     #[test]
     fn test_simple_normy_with_dynprofile() {
-        let normy = Normy::builder().lang(Lang::Turkish).build();
+        let normy = Normy::builder()
+            .with_validation()
+            .lang(Lang::Turkish)
+            .build();
         let profile = Profile::plugin_builder("test")
             .add_stage(Lowercase)
             .add_stage(TrimWhitespace)
             .build();
-        let result = normy.normalize_with_profile(&profile, "  İSTANBUL ").unwrap();
+        let result = normy
+            .normalize_with_profile(&profile, "  İSTANBUL ")
+            .unwrap();
         assert_eq!(result.to_string(), "istanbul")
     }
 }

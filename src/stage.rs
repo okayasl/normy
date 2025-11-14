@@ -23,7 +23,8 @@
 
 pub mod lower_case;
 pub mod trim_whitespace;
-pub mod validation;
+pub mod utf8_validate;
+pub use utf8_validate::Utf8Validate;
 
 use crate::context::Context;
 use std::borrow::Cow;
