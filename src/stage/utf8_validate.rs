@@ -11,7 +11,7 @@ pub struct Utf8Validate;
 
 impl Stage for Utf8Validate {
     fn name(&self) -> &'static str {
-        "simd_utf8_validate"
+        "utf8_validate"
     }
 
     fn needs_apply(&self, _: &str, _: &Context) -> Result<bool, StageError> {

@@ -32,7 +32,7 @@ pub struct ChainedProcess<S: Stage, P: Process> {
 
 impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let current = self.previous.process(text, ctx)?;
+        let current: Cow<'_, str> = self.previous.process(text, ctx)?;
         if !self.stage.needs_apply(&current, ctx)? {
             return Ok(current);
         }
