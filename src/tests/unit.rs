@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod unit_tests {
 
-    use crate::{CaseFold, DEU, ENG, JPN, Lowercase, Normy, TUR, TrimWhitespace};
+    use crate::{CaseFold, DEU, ENG,NLD, JPN, Lowercase, Normy, TUR, TrimWhitespace};
     use std::borrow::Cow;
     #[test]
     fn ascii_fast_path() {
@@ -92,5 +92,26 @@ mod unit_tests {
         let input = "a".repeat(1000);
         let result = normy.normalize(&input).unwrap();
         assert_eq!(result, input);
+    }
+
+    #[test]
+    fn case_fold_idempotent() {
+        let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
+        let s = "ẞ";
+        let once = normy.normalize(s).unwrap().into_owned();
+        let twice = normy.normalize(&once).unwrap().into_owned();
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn dutch_ij_sequence() {
+        let n = Normy::builder().lang(NLD).add_stage(CaseFold).build();
+        let cases = ["IJssel", "IJsland", "IJmuiden", "ijsselmeer"];
+        for s in cases {
+            let once = n.normalize(s).unwrap().into_owned();
+            let twice = n.normalize(&once).unwrap().into_owned();
+            assert_eq!(once, twice);
+            assert!(once.contains("ij")); // always the digraph
+        }
     }
 }

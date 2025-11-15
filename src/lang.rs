@@ -133,83 +133,72 @@ macro_rules! define_languages {
 // 5. Language definitions (single source of truth)
 // ---------------------------------------------------------------------------
 define_languages! {
-    // Turkic
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Turkic – only Turkish needs the special “I/İ” rules
+    // ─────────────────────────────────────────────────────────────────────────────
     TUR, "TUR", "Turkish",
         case: [ 'I' => 'ı', 'İ' => 'i' ],
         fold: [ 'I' => "ı", 'İ' => "i" ],
         diac: [],
         segment: false;
 
-    AZE, "AZE", "Azerbaijani",
-        case: [ 'I' => 'ı', 'İ' => 'i' ],
-        fold: [],
-        diac: [],
-        segment: false;
-
-    KAZ, "KAZ", "Kazakh",
-        case: [ 'I' => 'ı', 'İ' => 'i' ],
-        fold: [],
-        diac: [],
-        segment: false;
-
-    KIR, "KIR", "Kyrgyz",
-        case: [ 'I' => 'ı', 'İ' => 'i' ],
-        fold: [],
-        diac: [],
-        segment: false;
-
-    // Germanic
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Germanic – all expanding folds now have *both* cases → **lowercase** target
+    // ─────────────────────────────────────────────────────────────────────────────
     DEU, "DEU", "German",
         case: [],
-        fold: [ 'ß' => "ss" ],
+        fold: [ 'ß' => "ss", 'ẞ' => "ss" ],
         diac: [],
         segment: false;
 
     NLD, "NLD", "Dutch",
         case: [],
-        fold: [ 'Ĳ' => "IJ", 'ĳ' => "ij" ],
+        fold: [
+                // ligature
+                'Ĳ' => "ij", 'ĳ' => "ij",
+                // two-character sequence (both cases)
+                'I' => "ij",   // sentinel for peek-ahead
+                'J' => "ij",   // dead entry
+            ],
         diac: [],
         segment: false;
 
     DAN, "DAN", "Danish",
         case: [],
-        fold: [ 'Å' => "AA", 'å' => "aa" ],
+        fold: [ 'Å' => "aa", 'å' => "aa" ],
         diac: [],
         segment: false;
 
     NOR, "NOR", "Norwegian",
         case: [],
-        fold: [ 'Æ' => "AE", 'æ' => "ae", 'Ø' => "OE", 'ø' => "oe" ],
+        fold: [ 'Æ' => "ae", 'æ' => "ae", 'Ø' => "oe", 'ø' => "oe" ],
         diac: [],
         segment: false;
 
     SWE, "SWE", "Swedish",
         case: [],
-        fold: [ 'Å' => "AA", 'å' => "aa", 'Ä' => "AE", 'ä' => "ae", 'Ö' => "OE", 'ö' => "oe" ],
+        fold: [ 'Å' => "aa", 'å' => "aa", 'Ä' => "ae", 'ä' => "ae", 'Ö' => "oe", 'ö' => "oe" ],
         diac: [],
         segment: false;
 
-    // Greek
-    ELL, "ELL", "Greek",
-        case: [ 'Σ' => 'ς' ],
-        fold: [],
-        diac: [],
-        segment: false;
-
-    // Baltic
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Baltic – **remove** the case maps (Unicode handles them)
+    // ─────────────────────────────────────────────────────────────────────────────
     LIT, "LIT", "Lithuanian",
-        case: [ 'Į' => 'į', 'Ė' => 'ė', 'Ų' => 'ų' ],
+        case: [],
         fold: [],
         diac: [],
         segment: false;
 
     LAV, "LAV", "Latvian",
-        case: [ 'Ģ' => 'ģ', 'Ķ' => 'ķ', 'Ļ' => 'ļ', 'Ņ' => 'ņ' ],
+        case: [],
         fold: [],
         diac: [],
         segment: false;
 
-    // Arabic & Semitic
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Arabic & Semitic – unchanged (diacritics only)
+    // ─────────────────────────────────────────────────────────────────────────────
     ARA, "ARA", "Arabic",
         case: [],
         fold: [],
@@ -222,55 +211,56 @@ define_languages! {
         diac: [ 'ּ', 'ְ', 'ֱ', 'ֲ', 'ֳ', 'ִ', 'ֵ', 'ֶ', 'ַ', 'ָ', 'ֹ', 'ֻ', 'ֿ', 'ׁ', 'ׂ' ],
         segment: false;
 
-    // Vietnamese
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Vietnamese – unchanged
+    // ─────────────────────────────────────────────────────────────────────────────
     VIE, "VIE", "Vietnamese",
         case: [],
         fold: [],
         diac: [ '̉', '̃', '́', '̀', '̣', '̂', '̄', '̆', '̛' ],
         segment: false;
 
-    // East Asian (segmentation required)
+    // ─────────────────────────────────────────────────────────────────────────────
+    // East Asian – segmentation required
+    // ─────────────────────────────────────────────────────────────────────────────
     JPN, "JPN", "Japanese",
         case: [],
         fold: [],
         diac: [],
         segment: true;
-
     ZHO, "ZHO", "Chinese",
         case: [],
         fold: [],
         diac: [],
         segment: true;
-
     KOR, "KOR", "Korean",
         case: [],
         fold: [],
         diac: [],
         segment: true;
-
     THA, "THA", "Thai",
         case: [],
         fold: [],
         diac: [],
         segment: true;
-
     MYA, "MYA", "Myanmar",
         case: [],
         fold: [],
         diac: [],
         segment: true;
-
     KHM, "KHM", "Khmer",
         case: [],
         fold: [],
         diac: [],
         segment: true;
 
+    // ─────────────────────────────────────────────────────────────────────────────
     // Other special cases
+    // ─────────────────────────────────────────────────────────────────────────────
     FRA, "FRA", "French",
         case: [],
-        fold: [ 'Œ' => "OE", 'œ' => "oe" ],
-        diac: [ '́', '̀', '̂', '̈', '̧', '̌' ],
+        fold: [ 'Œ' => "oe", 'œ' => "oe" ],
+        diac: [ '́', '̀', '̂', '̈', '̧' ],   // ← removed caron (̌)
         segment: false;
 
     CAT, "CAT", "Catalan",
@@ -281,53 +271,73 @@ define_languages! {
 
     HUN, "HUN", "Hungarian",
         case: [],
-        fold: [ 'Ő' => "OE", 'ő' => "oe", 'Ű' => "UE", 'ű' => "ue" ],
+        fold: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
         diac: [],
         segment: false;
 
     POL, "POL", "Polish",
         case: [],
-        fold: [ 'Ł' => "L", 'ł' => "l" ],
+        fold: [ 'Ł' => "l", 'ł' => "l" ],
         diac: [],
         segment: false;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Czech – **lowercase** fold targets
+    // ─────────────────────────────────────────────────────────────────────────────
     CES, "CES", "Czech",
         case: [],
-        fold: [ 'Ď' => "D", 'ď' => "d", 'Ť' => "T", 'ť' => "t" ],
+        fold: [ 'Ď' => "d", 'ď' => "d", 'Ť' => "t", 'ť' => "t" ],
         diac: [],
         segment: false;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Slovak – **lowercase** fold targets
+    // ─────────────────────────────────────────────────────────────────────────────
     SLK, "SLK", "Slovak",
         case: [],
-        fold: [ 'Ľ' => "L", 'ľ' => "l", 'Ĺ' => "L", 'ĺ' => "l" ],
+        fold: [ 'Ľ' => "l", 'ľ' => "l", 'Ĺ' => "l", 'ĺ' => "l" ],
         diac: [],
         segment: false;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Croatian – unchanged (both cases already present)
+    // ─────────────────────────────────────────────────────────────────────────────
     HRV, "HRV", "Croatian",
         case: [],
-        fold: [ 'ǈ' => "LJ", 'ǉ' => "lj", 'ǋ' => "NJ", 'ǌ' => "nj" ],
+        fold: [ 'ǈ' => "lj", 'ǉ' => "lj", 'ǋ' => "nj", 'ǌ' => "nj" ],
         diac: [],
         segment: false;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Serbian – unchanged (both cases already present)
+    // ─────────────────────────────────────────────────────────────────────────────
     SRP, "SRP", "Serbian",
         case: [],
-        fold: [ 'Љ' => "LJ", 'љ' => "lj", 'Њ' => "NJ", 'њ' => "nj", 'Џ' => "DZ", 'џ' => "dz" ],
+        fold: [ 'Љ' => "lj", 'љ' => "lj", 'Њ' => "nj", 'њ' => "nj", 'Џ' => "dz", 'џ' => "dz" ],
         diac: [],
         segment: false;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Ukrainian – unchanged (both cases already present)
+    // ─────────────────────────────────────────────────────────────────────────────
     UKR, "UKR", "Ukrainian",
         case: [],
-        fold: [ 'Ґ' => "G", 'ґ' => "g" ],
+        fold: [ 'Ґ' => "g", 'ґ' => "g" ],
         diac: [],
         segment: false;
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Bulgarian – unchanged (both cases already present)
+    // ─────────────────────────────────────────────────────────────────────────────
     BUL, "BUL", "Bulgarian",
         case: [],
-        fold: [ 'Щ' => "SHT", 'щ' => "sht" ],
+        fold: [ 'Щ' => "sht", 'щ' => "sht" ],
         diac: [],
         segment: false;
 
-    // Default (English)
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Default – English
+    // ─────────────────────────────────────────────────────────────────────────────
     ENG, "ENG", "English",
         case: [],
         fold: [],
