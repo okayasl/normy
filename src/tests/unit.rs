@@ -2,7 +2,7 @@
 mod unit_tests {
 
     use crate::{
-        CaseFold, DEU, ENG, FRA, JPN, Lowercase, NLD, Normy, RemoveDiacritics, TUR, TrimWhitespace,
+        CaseFold, DEU, ENG, FRA, JPN, Lowercase, NLD, Normy, RemoveDiacritics, TUR, Trim,
     };
     use std::borrow::Cow;
     #[test]
@@ -68,7 +68,7 @@ mod unit_tests {
 
     #[test]
     fn zero_copy_no_whitespace() {
-        let normy = Normy::builder().lang(ENG).add_stage(TrimWhitespace).build();
+        let normy = Normy::builder().lang(ENG).add_stage(Trim).build();
         let input = "hello";
         let result = normy.normalize(input).unwrap();
         assert!(matches!(result, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr()));
@@ -76,13 +76,13 @@ mod unit_tests {
 
     #[test]
     fn trims_all_ascii_whitespace() {
-        let normy = Normy::builder().lang(ENG).add_stage(TrimWhitespace).build();
-        assert_eq!(normy.normalize(" \t\n hello \r\n ").unwrap(), "hello");
+        let normy = Normy::builder().lang(ENG).add_stage(Trim).build();
+        assert_eq!(normy.normalize(" \t\n hello \r\n pop ").unwrap(), "hello \r\n pop");
     }
 
     #[test]
     fn full_width_spaces_japanese() {
-        let normy = Normy::builder().lang(JPN).add_stage(TrimWhitespace).build();
+        let normy = Normy::builder().lang(JPN).add_stage(Trim).build();
         assert_eq!(normy.normalize("　こんにちは　").unwrap(), "こんにちは");
     }
 

@@ -14,7 +14,7 @@ pub use normy::Normy;
 pub use stage::case_fold::CaseFold;
 pub use stage::lower_case::Lowercase;
 pub use stage::remove_diacritics::RemoveDiacritics;
-pub use stage::trim_whitespace::TrimWhitespace;
+pub use stage::trim::Trim;
 
 #[cfg(test)]
 mod tests {

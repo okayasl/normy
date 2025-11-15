@@ -24,7 +24,7 @@
 pub mod case_fold;
 pub mod lower_case;
 pub mod remove_diacritics;
-pub mod trim_whitespace;
+pub mod trim;
 
 use crate::context::Context;
 use std::borrow::Cow;

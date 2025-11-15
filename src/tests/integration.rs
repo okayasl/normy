@@ -2,7 +2,7 @@
 mod integration_tests {
 
     use crate::{
-        ARA, CaseFold, DEU, Lowercase, Normy, TUR, TrimWhitespace,
+        ARA, CaseFold, DEU, Lowercase, Normy, TUR, Trim,
         stage::remove_diacritics::RemoveDiacritics,
     };
 
@@ -10,7 +10,7 @@ mod integration_tests {
     fn production_pipeline_turkish() {
         let normy = Normy::builder()
             .lang(TUR)
-            .add_stage(TrimWhitespace)
+            .add_stage(Trim)
             .add_stage(Lowercase)
             .build();
 
@@ -23,7 +23,7 @@ mod integration_tests {
     fn production_pipeline_arabic_diacritics() {
         let normy = Normy::builder()
             .lang(ARA)
-            .add_stage(TrimWhitespace)
+            .add_stage(Trim)
             .add_stage(RemoveDiacritics)
             .add_stage(CaseFold)
             .build();
@@ -37,7 +37,7 @@ mod integration_tests {
     fn production_pipeline_german() {
         let normy = Normy::builder()
             .lang(DEU)
-            .add_stage(TrimWhitespace)
+            .add_stage(Trim)
             .add_stage(CaseFold)
             .build();
 
