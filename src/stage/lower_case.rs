@@ -1,6 +1,21 @@
+//! stage/lower_case.rs – **Simple lowercase transformation**
+//!
+//! # Difference from CaseFold
+//! - **Lowercase**: Simple case conversion (NFC-preserving where possible)
+//! - **CaseFold**: Case-insensitive comparison (may expand: ß → ss)
+//!
+//! This stage uses `case_map` (1→1 only) instead of `fold_map`.
+//!
+//! # Language Support
+//! - Turkish: 'İ' → 'i', 'I' → 'ı' (via case_map)
+//! - All others: Standard Unicode lowercase
+//! - **No multi-char expansions** (ß stays ß, not ss)
+//! - **No peek-ahead** (IJ stays IJ in lowercase, not treated as digraph)
+
 use crate::{
+    Lang,
     context::Context,
-    lang::{CaseMap, LocaleBehavior},
+    lang::LocaleBehavior,
     stage::{CharMapper, Stage, StageError},
 };
 use std::borrow::Cow;
@@ -16,44 +31,39 @@ impl Stage for Lowercase {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        let case_map = ctx.lang.case_map();
-
-        if case_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if text.is_ascii() {
-                return Ok(text.bytes().any(|b| b.is_ascii_uppercase()));
-            }
-            return Ok(text.chars().any(|c| c.to_lowercase().next() != Some(c)));
-        }
-
-        Ok(text
-            .chars()
-            .any(|c| case_map.iter().any(|m| m.from == c) || c.to_lowercase().next() != Some(c)))
+        // Use lang.rs helper (checks case_map slice + Unicode)
+        Ok(text.chars().any(|c| ctx.lang.needs_lowercase(c)))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let case_map = ctx.lang.case_map();
 
+        // ═══════════════════════════════════════════════════════════════
+        // Fast path: No language-specific case mapping
+        // ═══════════════════════════════════════════════════════════════
         if case_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
-                let mut out = text.into_owned().into_bytes();
-                for b in &mut out {
+                let mut bytes = text.into_owned().into_bytes();
+                for b in &mut bytes {
                     if b.is_ascii_uppercase() {
                         *b = b.to_ascii_lowercase();
                     }
                 }
-                return Ok(Cow::Owned(unsafe { String::from_utf8_unchecked(out) }));
+                return Ok(Cow::Owned(unsafe { String::from_utf8_unchecked(bytes) }));
             }
             return Ok(Cow::Owned(
                 text.chars().flat_map(|c| c.to_lowercase()).collect(),
             ));
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // Language-specific case mapping (Turkish only currently)
+        // ═══════════════════════════════════════════════════════════════
         let mut out = String::with_capacity(text.len());
         for c in text.chars() {
             if let Some(map) = case_map.iter().find(|m| m.from == c) {
-                out.push(map.to); // ← 1:1 only
+                out.push(map.to); // Always 1→1 (CaseMap is char → char)
             } else {
                 out.extend(c.to_lowercase());
             }
@@ -62,43 +72,26 @@ impl Stage for Lowercase {
     }
 
     #[inline]
-    fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        let fold_map = ctx.lang.fold_map();
-        if fold_map.is_empty() || fold_map.iter().any(|m| m.to.len() > 1) {
-            None // ← Critical: disable for ß → "ss"
-        } else {
-            Some(self)
-        }
+    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+        // Lowercase is always 1→1
+        Some(self)
     }
+
     #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        let fold_map = ctx.lang.fold_map();
-        if fold_map.is_empty() || fold_map.iter().any(|m| m.to.len() > 1) {
-            None // ← Critical: disable for ß → "ss"
-        } else {
-            Some(self)
-        }
+    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+        // Always eligible for CharMapper (1→1 by definition)
+        Some(self)
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// CharMapper implementation (zero-copy path)
+// ═══════════════════════════════════════════════════════════════════════════
 impl CharMapper for Lowercase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        let case_map = ctx.lang.case_map();
-        if case_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if c.is_ascii() {
-                return Some(c.to_ascii_lowercase());
-            }
-            return Some(c.to_lowercase().next().unwrap_or(c));
-        }
-        Some(
-            case_map
-                .iter()
-                .find(|m| m.from == c)
-                .map(|m| m.to)
-                .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c)),
-        )
+        // ✅ Use helper method
+        Some(ctx.lang.lowercase_char(c))
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
@@ -114,9 +107,10 @@ impl CharMapper for Lowercase {
             return Box::new(text.chars().flat_map(|c| c.to_lowercase()));
         }
 
+        // ✅ Pass Lang instead of case_map
         Box::new(LowercaseIter {
             chars: text.chars(),
-            case_map,
+            lang: ctx.lang,
         })
     }
 }
@@ -150,10 +144,10 @@ impl<'a> Iterator for AsciiLowercaseIter<'a> {
 #[cfg(feature = "ascii-fast")]
 impl<'a> FusedIterator for AsciiLowercaseIter<'a> {}
 
-// ────── UNICODE FALLBACK ITERATOR ──────
+// ────── UNICODE / LANGUAGE-SPECIFIC LOWERCASE ITERATOR ──────
 struct LowercaseIter<'a> {
     chars: std::str::Chars<'a>,
-    case_map: &'a [CaseMap],
+    lang: Lang,
 }
 
 impl<'a> Iterator for LowercaseIter<'a> {
@@ -162,13 +156,7 @@ impl<'a> Iterator for LowercaseIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        Some(
-            self.case_map
-                .iter()
-                .find(|m| m.from == c)
-                .map(|m| m.to)
-                .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c)),
-        )
+        Some(self.lang.lowercase_char(c)) // ✅ Use helper
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -177,3 +165,118 @@ impl<'a> Iterator for LowercaseIter<'a> {
 }
 
 impl<'a> FusedIterator for LowercaseIter<'a> {}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tests
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lang::{DEU, ENG, NLD, TUR};
+
+    fn make_context(lang: crate::lang::Lang) -> Context {
+        Context { lang }
+    }
+
+    #[test]
+    fn test_english_basic() {
+        let stage = Lowercase;
+        let ctx = make_context(ENG);
+
+        assert!(stage.needs_apply("HELLO", &ctx).unwrap());
+        assert!(!stage.needs_apply("hello", &ctx).unwrap());
+
+        let result = stage.apply(Cow::Borrowed("HELLO"), &ctx).unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_turkish_dotted_i() {
+        let stage = Lowercase;
+        let ctx = make_context(TUR);
+
+        // Turkish İ → i
+        let result = stage.apply(Cow::Borrowed("İSTANBUL"), &ctx).unwrap();
+        assert_eq!(result, "istanbul");
+
+        // Turkish I → ı (not i)
+        let result = stage.apply(Cow::Borrowed("ISPARTA"), &ctx).unwrap();
+        assert_eq!(result, "ısparta");
+    }
+
+    #[test]
+    fn test_german_eszett_not_expanded() {
+        let stage = Lowercase;
+        let ctx = make_context(DEU);
+
+        // Lowercase does NOT expand ß → ss (that's case_fold's job)
+        let result = stage.apply(Cow::Borrowed("STRAẞE"), &ctx).unwrap();
+        assert_eq!(result, "straße"); // ẞ → ß (lowercase), not "ss"
+    }
+
+    #[test]
+    fn test_dutch_ij_no_digraph_handling() {
+        let stage = Lowercase;
+        let ctx = make_context(NLD);
+
+        // Lowercase does NOT treat IJ as digraph (that's case_fold's job)
+        // Just lowercase each character independently
+        let result = stage.apply(Cow::Borrowed("IJssel"), &ctx).unwrap();
+        assert_eq!(result, "ijssel"); // I→i, J→j separately
+
+        // Ligature still works (it's in fold_map but also Unicode lowercase)
+        let result = stage.apply(Cow::Borrowed("Ĳssel"), &ctx).unwrap();
+        assert_eq!(result, "ĳssel"); // Ĳ → ĳ (Unicode lowercase of ligature)
+    }
+
+    #[test]
+    fn test_char_mapper_always_eligible() {
+        let stage = Lowercase;
+
+        // Lowercase is always 1→1, so always eligible for CharMapper
+        assert!(stage.as_char_mapper(&make_context(ENG)).is_some());
+        assert!(stage.as_char_mapper(&make_context(TUR)).is_some());
+        assert!(stage.as_char_mapper(&make_context(DEU)).is_some());
+        assert!(stage.as_char_mapper(&make_context(NLD)).is_some());
+    }
+
+    #[test]
+    fn test_idempotency() {
+        let stage = Lowercase;
+        let ctx = make_context(TUR);
+
+        let text = "İSTANBUL";
+        let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
+        let second = stage.apply(Cow::Borrowed(&first), &ctx).unwrap();
+
+        assert_eq!(first, "istanbul");
+        assert_eq!(first, second, "Should be idempotent");
+    }
+
+    #[test]
+    #[cfg(feature = "ascii-fast")]
+    fn test_ascii_fast_path() {
+        let stage = Lowercase;
+        let ctx = make_context(ENG);
+
+        let result = stage.apply(Cow::Borrowed("HELLO123"), &ctx).unwrap();
+        assert_eq!(result, "hello123");
+    }
+
+    #[test]
+    fn test_difference_from_case_fold() {
+        // Demonstrate the key difference between lowercase and case_fold
+
+        // 1. German ß: lowercase preserves it, case_fold expands it
+        let lowercase = Lowercase;
+        let ctx = make_context(DEU);
+
+        let result = lowercase.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap();
+        assert_eq!(result, "groß"); // NOT "gross"
+
+        // 2. Dutch IJ: lowercase treats separately, case_fold treats as digraph
+        let ctx = make_context(NLD);
+        let result = lowercase.apply(Cow::Borrowed("IJssel"), &ctx).unwrap();
+        assert_eq!(result, "ijssel"); // Just I→i, J→j (no digraph handling)
+    }
+}

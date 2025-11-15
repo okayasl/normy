@@ -452,6 +452,10 @@ pub trait LocaleBehavior {
 
         // Fast path: no language-specific rules
         if fold_map.is_empty() {
+            #[cfg(feature = "ascii-fast")]
+            if c.is_ascii() {
+                return c.to_ascii_lowercase(); // ✨ Add this
+            }
             return c.to_lowercase().next().unwrap_or(c);
         }
 
@@ -470,6 +474,44 @@ pub trait LocaleBehavior {
                 );
                 first
             })
+            .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
+    }
+
+    #[inline(always)]
+    fn needs_lowercase(&self, c: char) -> bool {
+        let case_map = self.case_map();
+
+        // Check language-specific case_map first (O(k) where k is tiny, ~2 for Turkish)
+        if case_map.iter().any(|m| m.from == c) {
+            return true;
+        }
+
+        // Fallback to Unicode lowercase check
+        c.to_lowercase().next() != Some(c)
+    }
+
+    // Add this after fold_char()
+
+    /// Lowercase a single character (1→1 always, uses case_map).
+    /// This is for the Lowercase stage, not CaseFold.
+    #[inline(always)]
+    fn lowercase_char(&self, c: char) -> char {
+        let case_map = self.case_map();
+
+        // Fast path: no language-specific rules
+        if case_map.is_empty() {
+            #[cfg(feature = "ascii-fast")]
+            if c.is_ascii() {
+                return c.to_ascii_lowercase();
+            }
+            return c.to_lowercase().next().unwrap_or(c);
+        }
+
+        // Language-specific mapping (Turkish: 'İ' → 'i', 'I' → 'ı')
+        case_map
+            .iter()
+            .find(|m| m.from == c)
+            .map(|m| m.to)
             .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
     }
 
