@@ -102,7 +102,7 @@ impl CharMapper for CaseFold {
             .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
     }
 
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn Iterator<Item = char> + 'a> {
+    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         let fold_map = ctx.lang.fold_map();
 
         if fold_map.is_empty() {

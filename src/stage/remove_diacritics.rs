@@ -79,7 +79,7 @@ impl CharMapper for RemoveDiacritics {
         }
     }
 
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn Iterator<Item = char> + 'a> {
+    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         let diacritics = ctx.lang.diacritics();
 
         if diacritics.is_none() {

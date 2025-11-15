@@ -99,7 +99,7 @@ impl CharMapper for Lowercase {
             .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
     }
 
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn Iterator<Item = char> + 'a> {
+    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         let case_map = ctx.lang.case_map();
 
         if case_map.is_empty() {

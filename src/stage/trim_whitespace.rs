@@ -55,7 +55,7 @@ impl CharMapper for TrimWhitespace {
         c
     }
 
-    fn bind<'a>(&self, text: &'a str, _: &Context) -> Box<dyn Iterator<Item = char> + 'a> {
+    fn bind<'a>(&self, text: &'a str, _: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(TrimIter {
             chars: text.chars(),
             phase: TrimPhase::Leading,

@@ -30,6 +30,7 @@ pub use utf8_validate::Utf8Validate;
 
 use crate::context::Context;
 use std::borrow::Cow;
+use std::iter::FusedIterator;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -94,5 +95,5 @@ pub trait CharMapper: Send + Sync {
 
     /// Bind the mapper to a concrete `&str`.  The returned iterator must be
     /// `FusedIterator` so the compiler can eliminate bounds checks.
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn Iterator<Item = char> + 'a>;
+    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a>;
 }
