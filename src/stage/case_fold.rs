@@ -1,13 +1,14 @@
 //! stage/case_fold.rs – **Zero-copy, locale-accurate case folding**
-//! * Turkish “İ → i / I → ı”
-//! * German “ß → ss” (multi-char expansion)
+//! * Turkish "İ → i / I → ı"
+//! * German "ß → ss" (multi-char expansion)
+//! * Dutch "IJ → ij" (two-char peek-ahead)
 //! * Fast ASCII path (optional)
-//! * CharMapper path **only when every mapping is 1→1**
+//! * CharMapper path **only when every mapping is 1→1 and no peek-ahead**
 //! * Fully compliant with the white-paper §5.1, §5.2, §3.3
 
 use crate::{
     context::Context,
-    lang::{FoldMap, LocaleBehavior},
+    lang::LocaleBehavior,
     stage::{CharMapper, FusedIterator, Stage, StageError},
 };
 use std::borrow::Cow;
@@ -23,27 +24,16 @@ impl Stage for CaseFold {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        let fold_map = ctx.lang.fold_map();
-
-        // Fast-path: no language-specific folding → rely on Unicode lowercase
-        if fold_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if text.is_ascii() {
-                return Ok(text.bytes().any(|b| b.is_ascii_uppercase()));
-            }
-            return Ok(text.chars().any(|c| c.to_lowercase().next() != Some(c)));
-        }
-
-        // Language-specific folding present
-        Ok(text
-            .chars()
-            .any(|c| fold_map.iter().any(|m| m.from == c) || c.to_lowercase().next() != Some(c)))
+        // Use lang.rs helper for O(k) check
+        Ok(text.chars().any(|c| ctx.lang.needs_case_fold(c)))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let fold_map = ctx.lang.fold_map();
 
-        // No language-specific rules → use Unicode lowercase
+        // ═══════════════════════════════════════════════════════════════
+        // Fast path: No language-specific rules → Unicode lowercase only
+        // ═══════════════════════════════════════════════════════════════
         if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
@@ -61,7 +51,16 @@ impl Stage for CaseFold {
             ));
         }
 
-        // Language-specific folding (may expand: ß → "ss")
+        // ═══════════════════════════════════════════════════════════════
+        // Context-sensitive path: Dutch IJ, or future multi-char sequences
+        // ═══════════════════════════════════════════════════════════════
+        if ctx.lang.requires_peek_ahead() {
+            return apply_with_peek_ahead(text, ctx);
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // Standard path: Language-specific folding without peek-ahead
+        // ═══════════════════════════════════════════════════════════════
         let mut out = String::with_capacity(text.len() * 2);
         for c in text.chars() {
             if let Some(m) = fold_map.iter().find(|m| m.from == c) {
@@ -75,50 +74,67 @@ impl Stage for CaseFold {
 
     #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        let fold_map = ctx.lang.fold_map();
-        if fold_map.is_empty() || fold_map.iter().any(|m| m.to.len() > 1) {
-            None
-        } else {
+        // Use lang.rs helpers instead of manual checks
+        if ctx.lang.has_one_to_one_folds() && !ctx.lang.requires_peek_ahead() {
             Some(self)
+        } else {
+            None
         }
     }
 
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        let fold_map = ctx.lang.fold_map();
-        if fold_map.is_empty() || fold_map.iter().any(|m| m.to.len() > 1) {
-            None
-        } else {
+        if ctx.lang.has_one_to_one_folds() && !ctx.lang.requires_peek_ahead() {
             Some(self)
+        } else {
+            None
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Peek-ahead implementation for Dutch IJ and similar sequences
+// ═══════════════════════════════════════════════════════════════════════════
+fn apply_with_peek_ahead<'a>(
+    text: Cow<'a, str>,
+    ctx: &Context,
+) -> Result<Cow<'a, str>, StageError> {
+    let fold_map = ctx.lang.fold_map();
+    let mut out = String::with_capacity(text.len() * 2);
+    let mut chars = text.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        // Check if this starts a two-char fold sequence
+        if let Some(target) = ctx.lang.peek_ahead_fold(c, chars.peek().copied()) {
+            chars.next(); // Consume the second character
+            out.push_str(target);
+            continue;
+        }
+
+        // Normal single-char fold
+        if let Some(m) = fold_map.iter().find(|m| m.from == c) {
+            out.push_str(m.to);
+        } else {
+            out.extend(c.to_lowercase());
+        }
+    }
+    Ok(Cow::Owned(out))
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CharMapper implementation (zero-copy path)
+// ═══════════════════════════════════════════════════════════════════════════
 impl CharMapper for CaseFold {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        let fold_map = ctx.lang.fold_map();
-        if fold_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if c.is_ascii() {
-                return Some(c.to_ascii_lowercase());
-            }
-            return Some(c.to_lowercase().next().unwrap_or(c));
-        }
-
-        // 1→1 only: take first char of mapping
-        Some(
-            fold_map
-                .iter()
-                .find(|m| m.from == c)
-                .and_then(|m| m.to.chars().next())
-                .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c)),
-        )
+        // Use lang.rs helper for 1→1 folding
+        Some(ctx.lang.fold_char(c))
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         let fold_map = ctx.lang.fold_map();
 
+        // Fast path: no language-specific rules
         if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
@@ -129,9 +145,10 @@ impl CharMapper for CaseFold {
             return Box::new(text.chars().flat_map(|c| c.to_lowercase()));
         }
 
+        // Language-specific 1→1 iterator
         Box::new(CaseFoldIter {
             chars: text.chars(),
-            fold_map,
+            lang: ctx.lang,
         })
     }
 }
@@ -166,9 +183,11 @@ impl<'a> Iterator for AsciiCaseFoldIter<'a> {
 impl<'a> FusedIterator for AsciiCaseFoldIter<'a> {}
 
 // ────── UNICODE / 1→1 CASE FOLD ITERATOR ──────
+use crate::lang::Lang;
+
 struct CaseFoldIter<'a> {
     chars: std::str::Chars<'a>,
-    fold_map: &'a [FoldMap],
+    lang: Lang,
 }
 
 impl<'a> Iterator for CaseFoldIter<'a> {
@@ -177,11 +196,8 @@ impl<'a> Iterator for CaseFoldIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        self.fold_map
-            .iter()
-            .find(|m| m.from == c)
-            .and_then(|m| m.to.chars().next())
-            .or_else(|| c.to_lowercase().next())
+        // Use lang.rs helper for 1→1 folding
+        Some(self.lang.fold_char(c))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -190,3 +206,139 @@ impl<'a> Iterator for CaseFoldIter<'a> {
 }
 
 impl<'a> FusedIterator for CaseFoldIter<'a> {}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Tests
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lang::{DEU, ENG, NLD, TUR};
+
+    fn make_context(lang: Lang) -> Context {
+        Context { lang }
+    }
+
+    #[test]
+    fn test_english_basic() {
+        let stage = CaseFold;
+        let ctx = make_context(ENG);
+
+        assert!(stage.needs_apply("HELLO", &ctx).unwrap());
+        assert!(!stage.needs_apply("hello", &ctx).unwrap());
+
+        let result = stage.apply(Cow::Borrowed("HELLO"), &ctx).unwrap();
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_turkish_dotted_i() {
+        let stage = CaseFold;
+        let ctx = make_context(TUR);
+
+        let result = stage.apply(Cow::Borrowed("İSTANBUL"), &ctx).unwrap();
+        assert_eq!(result, "istanbul");
+
+        let result = stage.apply(Cow::Borrowed("ISPARTA"), &ctx).unwrap();
+        assert_eq!(result, "ısparta"); // Turkish I → ı
+    }
+
+    #[test]
+    fn test_german_eszett() {
+        let stage = CaseFold;
+        let ctx = make_context(DEU);
+
+        let result = stage.apply(Cow::Borrowed("Straße"), &ctx).unwrap();
+        assert_eq!(result, "strasse");
+
+        let result = stage.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap();
+        assert_eq!(result, "gross");
+    }
+
+    #[test]
+    fn test_dutch_ij_uppercase() {
+        let stage = CaseFold;
+        let ctx = make_context(NLD);
+
+        // Two-char sequence "IJ"
+        let result = stage.apply(Cow::Borrowed("IJssel"), &ctx).unwrap();
+        assert_eq!(result, "ijssel");
+
+        let result = stage.apply(Cow::Borrowed("IJZER"), &ctx).unwrap();
+        assert_eq!(result, "ijzer");
+    }
+
+    #[test]
+    fn test_dutch_ij_lowercase() {
+        let stage = CaseFold;
+        let ctx = make_context(NLD);
+
+        // Already lowercase
+        let result = stage.apply(Cow::Borrowed("ijssel"), &ctx).unwrap();
+        assert_eq!(result, "ijssel");
+    }
+
+    #[test]
+    fn test_dutch_ij_ligature() {
+        let stage = CaseFold;
+        let ctx = make_context(NLD);
+
+        // Ligature 'Ĳ' (U+0132)
+        let result = stage.apply(Cow::Borrowed("Ĳssel"), &ctx).unwrap();
+        assert_eq!(result, "ijssel");
+    }
+
+    #[test]
+    fn test_dutch_ij_not_sequence() {
+        let stage = CaseFold;
+        let ctx = make_context(NLD);
+
+        // "IK" should not trigger peek-ahead
+        let result = stage.apply(Cow::Borrowed("IK"), &ctx).unwrap();
+        assert_eq!(result, "ik");
+    }
+
+    #[test]
+    fn test_dutch_ij_idempotency() {
+        let stage = CaseFold;
+        let ctx = make_context(NLD);
+
+        let text = "IJssel";
+        let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
+        let second = stage.apply(Cow::Borrowed(&first), &ctx).unwrap();
+
+        assert_eq!(first, "ijssel");
+        assert_eq!(first, second, "Should be idempotent");
+    }
+
+    #[test]
+    fn test_char_mapper_eligibility() {
+        let stage = CaseFold;
+
+        // English: 1→1, no peek-ahead → CharMapper eligible
+        let ctx = make_context(ENG);
+        assert!(stage.as_char_mapper(&ctx).is_some());
+
+        // Turkish: 1→1, no peek-ahead → CharMapper eligible
+        let ctx = make_context(TUR);
+        assert!(stage.as_char_mapper(&ctx).is_some());
+
+        // German: multi-char (ß→ss) → NOT eligible
+        let ctx = make_context(DEU);
+        assert!(stage.as_char_mapper(&ctx).is_none());
+
+        // Dutch: peek-ahead required → NOT eligible
+        let ctx = make_context(NLD);
+        assert!(stage.as_char_mapper(&ctx).is_none());
+    }
+
+    #[test]
+    #[cfg(feature = "ascii-fast")]
+    fn test_ascii_fast_path() {
+        let stage = CaseFold;
+        let ctx = make_context(ENG);
+
+        let result = stage.apply(Cow::Borrowed("HELLO123"), &ctx).unwrap();
+        assert_eq!(result, "hello123");
+    }
+}

@@ -1,9 +1,7 @@
 #[cfg(test)]
 mod unit_tests {
 
-    use crate::{
-        CaseFold, DEU, ENG, FRA, JPN, Lowercase, NLD, Normy, RemoveDiacritics, TUR, Trim,
-    };
+    use crate::{CaseFold, DEU, ENG, FRA, JPN, Lowercase, NLD, Normy, RemoveDiacritics, TUR, Trim};
     use std::borrow::Cow;
     #[test]
     fn ascii_fast_path() {
@@ -77,7 +75,10 @@ mod unit_tests {
     #[test]
     fn trims_all_ascii_whitespace() {
         let normy = Normy::builder().lang(ENG).add_stage(Trim).build();
-        assert_eq!(normy.normalize(" \t\n hello \r\n pop ").unwrap(), "hello \r\n pop");
+        assert_eq!(
+            normy.normalize(" \t\n hello \r\n pop ").unwrap(),
+            "hello \r\n pop"
+        );
     }
 
     #[test]
@@ -120,6 +121,75 @@ mod unit_tests {
             let twice = n.normalize(&once).unwrap().into_owned();
             assert_eq!(once, twice);
             assert!(once.contains("ij")); // always the digraph
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 1. Turkish 1-to-1 mapping must use CharMapper → zero allocation
+    // ─────────────────────────────────────────────────────────────────────────────
+    #[test]
+    fn turkish_zero_alloc_when_already_lower() {
+        use crate::{lang::TUR, normy::Normy, stage::case_fold::CaseFold};
+
+        // Build a pipeline that only contains CaseFold (no other stages)
+        let normy = Normy::builder().lang(TUR).add_stage(CaseFold).build();
+
+        // Input is already lower-case Turkish text → no change required
+        let input = "istanbul";
+
+        // The result **must** be `Cow::Borrowed` (no heap allocation)
+        let result = normy.normalize(input).unwrap();
+        assert!(
+            matches!(result, std::borrow::Cow::Borrowed(_)),
+            "Turkish 1-to-1 case-fold should be zero-copy, got Owned"
+        );
+
+        // Also verify correctness
+        assert_eq!(result.as_ref(), "istanbul");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // 2. Dutch “IJ” two-character sequence must be handled with peek-ahead
+    // ─────────────────────────────────────────────────────────────────────────────
+    fn count_ij_digraphs(s: &str) -> usize {
+        let mut count = 0;
+        let mut chars = s.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if (c == 'I' || c == 'i') && chars.peek() == Some(&'J') || chars.peek() == Some(&'j') {
+                count += 1;
+                chars.next(); // Consume the 'J'
+            }
+        }
+        count
+    }
+
+    #[test]
+    fn dutch_ij_sequence_is_idempotent_and_correct() {
+        use crate::{lang::NLD, normy::Normy, stage::case_fold::CaseFold};
+        let normy = Normy::builder().lang(NLD).add_stage(CaseFold).build();
+
+        let cases = ["IJssel", "IJsland", "IJmuiden", "ijsselmeer", "IJzer"];
+
+        for &word in &cases {
+            let once = normy.normalize(word).unwrap().into_owned();
+            let twice = normy.normalize(&once).unwrap().into_owned();
+
+            assert_eq!(
+                once, twice,
+                "Dutch case-fold is not idempotent for `{}`: `{}` → `{}`",
+                word, once, twice
+            );
+
+            // Count IJ digraphs in original and result
+            let original_digraphs = count_ij_digraphs(word);
+            let result_digraphs = once.matches("ij").count();
+
+            assert_eq!(
+                result_digraphs, original_digraphs,
+                "Dutch `{}` should contain exactly {} `ij` digraph(s), got {}",
+                word, original_digraphs, result_digraphs
+            );
         }
     }
 }

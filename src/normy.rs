@@ -30,7 +30,6 @@ pub struct Normy<P: Process> {
 }
 
 impl<P: Process> Normy<P> {
-    // Public API: &str → zero-copy default
     pub fn normalize<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]
         assert_utf8(text);
@@ -39,7 +38,6 @@ impl<P: Process> Normy<P> {
             .map_err(Into::into)
     }
 
-    // Profile API: accepts Cow because it may be in the middle of a pipeline
     pub fn normalize_with_profile<'a, Q: Process>(
         &self,
         profile: &Profile<Q>,
@@ -97,13 +95,10 @@ impl Normy<EmptyProcess> {
 }
 
 impl Normy<DynProcess> {
-    /// Start a **plugin** pipeline – stages are added at run-time.
     pub fn plugin_builder() -> DynNormyBuilder {
         DynNormyBuilder::new()
     }
 }
-
-/* ---------- Dyn builder ---------- */
 pub struct DynNormyBuilder {
     lang: Lang,
     pipeline: DynProcess,
