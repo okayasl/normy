@@ -1,10 +1,13 @@
 //! # Normy Language Layer — FULL, ZERO-COST, MACRO-DRIVEN (2025)
-//! * **Single source of truth** — change only in define_lang!
+//! * **Single source of truth** – edit only `define_languages!`
+//! * **Zero-runtime dispatch** – `phf` perfect-hash lookup, all data `'static`
+//! * **Locale-accurate** – Turkish “İ/i”, German ß→ss, Arabic diacritics, …
 
+use paste::paste;
 use phf::{Map, phf_map};
 
 /// ---------------------------------------------------------------------------
-/// 1. Static Language Identifier
+/// 1. Public Language Identifier
 /// ---------------------------------------------------------------------------
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Lang {
@@ -17,13 +20,14 @@ impl Lang {
     pub const fn code(&self) -> &'static str {
         self.code
     }
+
     #[inline(always)]
     pub const fn name(&self) -> &'static str {
         self.name
     }
 }
 
-/// Default: English
+/// Default language (used when none is supplied).
 pub const DEFAULT_LANG: Lang = Lang {
     code: "ENG",
     name: "English",
@@ -47,11 +51,10 @@ pub struct FoldMap {
 pub type DiacriticSet = &'static [char];
 
 /// ---------------------------------------------------------------------------
-/// 3. Internal Entry
+/// 3. Public entry type (required because `LANG_TABLE` is public)
 /// ---------------------------------------------------------------------------
 #[derive(Clone, Copy)]
 pub struct LangEntry {
-    pub id: Lang,
     pub case_map: &'static [CaseMap],
     pub fold_map: &'static [FoldMap],
     pub diacritics: Option<DiacriticSet>,
@@ -59,7 +62,7 @@ pub struct LangEntry {
 }
 
 /// ---------------------------------------------------------------------------
-/// 4. Macro that generates EVERYTHING
+/// 4. Macro – generates **everything** from a single table
 /// ---------------------------------------------------------------------------
 macro_rules! define_languages {
     ($(
@@ -69,17 +72,14 @@ macro_rules! define_languages {
         diac: [ $($d:expr),* $(,)? ],
         segment: $segment:expr
     );* $(;)?) => {
-        // Generate constants for each language
+        // 4.1 Public `Lang` constants
         $(
-            pub const $code: Lang = Lang {
-                code: $code_str,
-                name: $name,
-            };
+            pub const $code: Lang = Lang { code: $code_str, name: $name };
         )*
 
-        // Generate data modules for each language
+        // 4.2 Per-language static data modules
         $(
-            paste::paste! {
+            paste! {
                 mod [<$code:lower _data>] {
                     use super::*;
 
@@ -98,12 +98,11 @@ macro_rules! define_languages {
             }
         )*
 
-        // Generate the lookup table
-        paste::paste! {
+        // 4.3 Global lookup table (public)
+        paste! {
             pub static LANG_TABLE: Map<&'static str, LangEntry> = phf_map! {
                 $(
                     $code_str => LangEntry {
-                        id: $code,
                         case_map: [<$code:lower _data>]::CASE,
                         fold_map: [<$code:lower _data>]::FOLD,
                         diacritics: if [<$code:lower _data>]::DIAC.is_empty() {
@@ -117,7 +116,7 @@ macro_rules! define_languages {
             };
         }
 
-        // Helper function to get language by code string
+        // 4.4 Helper: `Lang::from_code`
         pub fn from_code(code: &str) -> Option<Lang> {
             let upper = code.to_uppercase();
             match upper.as_str() {
@@ -130,8 +129,11 @@ macro_rules! define_languages {
     };
 }
 
+// ---------------------------------------------------------------------------
+// 5. Language definitions (single source of truth)
+// ---------------------------------------------------------------------------
 define_languages! {
-    // Turkic languages
+    // Turkic
     TUR, "TUR", "Turkish",
         case: [ 'I' => 'ı', 'İ' => 'i' ],
         fold: [ 'I' => "ı", 'İ' => "i" ],
@@ -227,7 +229,7 @@ define_languages! {
         diac: [ '̉', '̃', '́', '̀', '̣', '̂', '̄', '̆', '̛' ],
         segment: false;
 
-    // East Asian (Segmentation Required)
+    // East Asian (segmentation required)
     JPN, "JPN", "Japanese",
         case: [],
         fold: [],
@@ -264,7 +266,7 @@ define_languages! {
         diac: [],
         segment: true;
 
-    // Other Special Cases
+    // Other special cases
     FRA, "FRA", "French",
         case: [],
         fold: [ 'Œ' => "OE", 'œ' => "oe" ],
@@ -334,7 +336,7 @@ define_languages! {
 }
 
 /// ---------------------------------------------------------------------------
-/// 6. LocaleBehavior Trait — **ZERO RUNTIME BRANCH**
+/// 6. LocaleBehavior – **zero-runtime branch** lookup
 /// ---------------------------------------------------------------------------
 pub trait LocaleBehavior {
     fn id(&self) -> Lang;
