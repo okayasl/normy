@@ -51,8 +51,8 @@ impl Stage for TrimWhitespace {
 
 impl CharMapper for TrimWhitespace {
     #[inline(always)]
-    fn map(&self, c: char, _: &Context) -> char {
-        c
+    fn map(&self, c: char, _: &Context) -> Option<char> {
+        Some(c)
     }
 
     fn bind<'a>(&self, text: &'a str, _: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {

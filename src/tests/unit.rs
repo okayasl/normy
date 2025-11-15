@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod unit_tests {
 
-    use crate::{CaseFold, DEU, ENG,NLD, JPN, Lowercase, Normy, TUR, TrimWhitespace};
+    use crate::{
+        CaseFold, DEU, ENG, FRA, JPN, Lowercase, NLD, Normy, RemoveDiacritics, TUR, TrimWhitespace,
+    };
     use std::borrow::Cow;
     #[test]
     fn ascii_fast_path() {
@@ -42,6 +44,20 @@ mod unit_tests {
     }
 
     #[test]
+    fn french_diacritic_removed() {
+        let n = Normy::builder()
+            .lang(FRA)
+            .add_stage(RemoveDiacritics)
+            .build();
+        assert_eq!(
+            n.normalize("café résumé naïve").unwrap(),
+            "cafe resume naive"
+        );
+        // Edge: composed → decomposed → stripped
+        assert_eq!(n.normalize(" naïve").unwrap(), " naive"); // U+00E9 → e + ́ → e
+    }
+
+    #[test]
     fn length_expansion() {
         let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
         let input = "ß";
@@ -72,23 +88,15 @@ mod unit_tests {
 
     #[test]
     fn valid_utf8_no_alloc() {
-        let normy = Normy::builder().lang(ENG).with_validation().build();
+        let normy = Normy::builder().lang(ENG).build();
         let input = "hello 世界";
         let result = normy.normalize(input).unwrap();
         assert!(matches!(result, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr()));
     }
 
     #[test]
-    fn rejects_invalid_utf8() {
-        let normy = Normy::builder().lang(ENG).with_validation().build();
-        let invalid = b"hello \xFF world".to_vec();
-        let input = unsafe { std::str::from_utf8_unchecked(&invalid) };
-        assert!(normy.normalize(input).is_err());
-    }
-
-    #[test]
     fn simd_enabled_by_default() {
-        let normy = Normy::builder().lang(ENG).with_validation().build();
+        let normy = Normy::builder().lang(ENG).build();
         let input = "a".repeat(1000);
         let result = normy.normalize(&input).unwrap();
         assert_eq!(result, input);

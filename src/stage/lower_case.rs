@@ -83,20 +83,22 @@ impl Stage for Lowercase {
 
 impl CharMapper for Lowercase {
     #[inline(always)]
-    fn map(&self, c: char, ctx: &Context) -> char {
+    fn map(&self, c: char, ctx: &Context) -> Option<char> {
         let case_map = ctx.lang.case_map();
         if case_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if c.is_ascii() {
-                return c.to_ascii_lowercase();
+                return Some(c.to_ascii_lowercase());
             }
-            return c.to_lowercase().next().unwrap_or(c);
+            return Some(c.to_lowercase().next().unwrap_or(c));
         }
-        case_map
-            .iter()
-            .find(|m| m.from == c)
-            .map(|m| m.to)
-            .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
+        Some(
+            case_map
+                .iter()
+                .find(|m| m.from == c)
+                .map(|m| m.to)
+                .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c)),
+        )
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {

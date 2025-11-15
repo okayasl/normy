@@ -1,5 +1,5 @@
 mod prop_tests {
-    use crate::{CaseFold, DEU, ENG, Lowercase, Normy, TUR, TrimWhitespace};
+    use crate::{CaseFold, DEU, ENG, Lowercase, Normy, TUR, TrimWhitespace,RemoveDiacritics,FRA};
     use proptest::prelude::*;
 
     proptest! {
@@ -74,7 +74,7 @@ mod prop_tests {
 
         #[test]
         fn valid_utf8_passes(s in ".{0,1000}") {
-            let normy = Normy::builder().lang(ENG).with_validation().build();
+            let normy = Normy::builder().lang(ENG).build();
             let result = normy.normalize(&s);
             prop_assert!(result.is_ok());
             let cow = result.unwrap();
@@ -82,13 +82,11 @@ mod prop_tests {
         }
 
         #[test]
-        fn invalid_sequences_rejected(bytes in proptest::collection::vec(any::<u8>(), 0..1000)) {
-            if std::str::from_utf8(&bytes).is_ok() {
-                return Ok(());
-            }
-            let input = unsafe { std::str::from_utf8_unchecked(&bytes) };
-            let normy = Normy::builder().lang(ENG).with_validation().build();
-            prop_assert!(normy.normalize(input).is_err());
+        fn prop_remove_diacritics_idempotent(s in "\\PC*") {
+            let n = Normy::builder().lang(FRA).add_stage(RemoveDiacritics).build();
+            let once = n.normalize(&s).unwrap().into_owned();
+            let twice = n.normalize(&once).unwrap().into_owned();
+            prop_assert_eq![once, twice];
         }
     }
 }

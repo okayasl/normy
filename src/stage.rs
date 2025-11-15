@@ -25,8 +25,6 @@ pub mod case_fold;
 pub mod lower_case;
 pub mod remove_diacritics;
 pub mod trim_whitespace;
-pub mod utf8_validate;
-pub use utf8_validate::Utf8Validate;
 
 use crate::context::Context;
 use std::borrow::Cow;
@@ -91,7 +89,8 @@ pub trait Stage: Send + Sync {
 /// The heart of fused, zero-allocation pipelines.
 pub trait CharMapper: Send + Sync {
     /// Map a single Unicode scalar value.
-    fn map(&self, c: char, ctx: &Context) -> char;
+    /// Return `None` if the character should be **removed**.
+    fn map(&self, c: char, ctx: &Context) -> Option<char>;
 
     /// Bind the mapper to a concrete `&str`.  The returned iterator must be
     /// `FusedIterator` so the compiler can eliminate bounds checks.

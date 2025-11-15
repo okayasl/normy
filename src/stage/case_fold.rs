@@ -96,22 +96,24 @@ impl Stage for CaseFold {
 
 impl CharMapper for CaseFold {
     #[inline(always)]
-    fn map(&self, c: char, ctx: &Context) -> char {
+    fn map(&self, c: char, ctx: &Context) -> Option<char> {
         let fold_map = ctx.lang.fold_map();
         if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if c.is_ascii() {
-                return c.to_ascii_lowercase();
+                return Some(c.to_ascii_lowercase());
             }
-            return c.to_lowercase().next().unwrap_or(c);
+            return Some(c.to_lowercase().next().unwrap_or(c));
         }
 
         // 1→1 only: take first char of mapping
-        fold_map
-            .iter()
-            .find(|m| m.from == c)
-            .and_then(|m| m.to.chars().next())
-            .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
+        Some(
+            fold_map
+                .iter()
+                .find(|m| m.from == c)
+                .and_then(|m| m.to.chars().next())
+                .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c)),
+        )
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {

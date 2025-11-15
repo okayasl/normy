@@ -1,13 +1,15 @@
 #[cfg(test)]
 mod integration_tests {
 
-    use crate::{ARA, CaseFold, DEU, Lowercase, Normy, TUR, TrimWhitespace, stage::remove_diacritics::RemoveDiacritics};
+    use crate::{
+        ARA, CaseFold, DEU, Lowercase, Normy, TUR, TrimWhitespace,
+        stage::remove_diacritics::RemoveDiacritics,
+    };
 
     #[test]
     fn production_pipeline_turkish() {
         let normy = Normy::builder()
             .lang(TUR)
-            .with_validation()
             .add_stage(TrimWhitespace)
             .add_stage(Lowercase)
             .build();
@@ -21,7 +23,6 @@ mod integration_tests {
     fn production_pipeline_arabic_diacritics() {
         let normy = Normy::builder()
             .lang(ARA)
-            .with_validation()
             .add_stage(TrimWhitespace)
             .add_stage(RemoveDiacritics)
             .add_stage(CaseFold)
@@ -36,7 +37,6 @@ mod integration_tests {
     fn production_pipeline_german() {
         let normy = Normy::builder()
             .lang(DEU)
-            .with_validation()
             .add_stage(TrimWhitespace)
             .add_stage(CaseFold)
             .build();

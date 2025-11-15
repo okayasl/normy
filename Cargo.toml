@@ -8,6 +8,7 @@ paste = "1.0.15"
 phf = { version = "0.13.1", features = ["macros"] }
 simdutf8 = { version = "0.1.5", optional = true }
 thiserror = "2.0.17"
+unicode-normalization = "0.1.25"
 
 [dev-dependencies]
 proptest = "1.9.0"

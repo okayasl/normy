@@ -9,14 +9,19 @@ use crate::{
 use std::borrow::Cow;
 use thiserror::Error;
 
-use crate::stage::Utf8Validate as DefaultValidate;
-
 #[derive(Debug, Error)]
 pub enum NormyError {
     #[error(transparent)]
     Stage(#[from] StageError),
     #[error(transparent)]
     Profile(#[from] ProfileError),
+}
+
+/// # Safety: `text` **must** be valid UTF-8.
+#[cfg(debug_assertions)]
+#[inline(always)]
+fn assert_utf8(text: &str) {
+    debug_assert!(std::str::from_utf8(text.as_bytes()).is_ok());
 }
 
 pub struct Normy<P: Process> {
@@ -27,6 +32,8 @@ pub struct Normy<P: Process> {
 impl<P: Process> Normy<P> {
     // Public API: &str → zero-copy default
     pub fn normalize<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
+        #[cfg(debug_assertions)]
+        assert_utf8(text);
         self.pipeline
             .process(Cow::Borrowed(text), &self.ctx)
             .map_err(Into::into)
@@ -72,12 +79,6 @@ impl<P: Process> NormyBuilder<P> {
                 previous: self.current,
             },
         }
-    }
-
-    /// **Optional** Must be called **first** in production.
-    #[inline(always)]
-    pub fn with_validation(self) -> NormyBuilder<ChainedProcess<DefaultValidate, P>> {
-        self.add_stage(DefaultValidate)
     }
 
     pub fn build(self) -> Normy<P> {
@@ -128,12 +129,6 @@ impl DynNormyBuilder {
         }
     }
 
-    /// **Optional** Must be called **first** in production.
-    #[inline(always)]
-    pub fn with_validation(self) -> Self {
-        self.add_stage(DefaultValidate)
-    }
-
     pub fn build(self) -> Normy<DynProcess> {
         let ctx = Context { lang: self.lang };
         Normy {
@@ -142,73 +137,3 @@ impl DynNormyBuilder {
         }
     }
 }
-
-// #[cfg(test)]
-// mod tests {
-//     use crate::{
-//         Normy,
-//         lang::TUR,
-//         profile::Profile,
-//         stage::{lower_case::Lowercase, trim_whitespace::TrimWhitespace},
-//     };
-
-//     #[test]
-//     fn test_simple_normy() {
-//         let normy = Normy::builder()
-//             .with_validation()
-//             .lang(TUR)
-//             .add_stage(Lowercase)
-//             .add_stage(TrimWhitespace)
-//             .build();
-//         let result = normy.normalize("  İSTANBUL ").unwrap();
-//         assert_eq!(result.to_string(), "istanbul")
-//     }
-
-//     #[test]
-//     fn test_simple_normy_default() {
-//         let normy = Normy::builder()
-//             .with_validation()
-//             .add_stage(Lowercase)
-//             .add_stage(TrimWhitespace)
-//             .build();
-//         let result = normy.normalize("  IŞiK ").unwrap();
-//         assert_eq!(result.to_string(), "işik")
-//     }
-
-//     #[test]
-//     fn test_simple_plugin_normy() {
-//         let normy = Normy::plugin_builder()
-//             .lang(TUR)
-//             .add_stage(Lowercase)
-//             .add_stage(TrimWhitespace)
-//             .build();
-//         let result = normy.normalize(" İSTANBUL ").unwrap();
-//         assert_eq!(result.to_string(), "istanbul")
-//     }
-
-//     #[test]
-//     fn test_simple_normy_with_profile() {
-//         let normy = Normy::builder().lang(TUR).build();
-//         let profile = Profile::builder("test")
-//             .add_stage(Lowercase)
-//             .add_stage(TrimWhitespace)
-//             .build();
-//         let result = normy
-//             .normalize_with_profile(&profile, "  İSTANBUL ")
-//             .unwrap();
-//         assert_eq!(result.to_string(), "istanbul")
-//     }
-
-//     #[test]
-//     fn test_simple_normy_with_dynprofile() {
-//         let normy = Normy::builder().with_validation().lang(TUR).build();
-//         let profile = Profile::plugin_builder("test")
-//             .add_stage(Lowercase)
-//             .add_stage(TrimWhitespace)
-//             .build();
-//         let result = normy
-//             .normalize_with_profile(&profile, "  İSTANBUL ")
-//             .unwrap();
-//         assert_eq!(result.to_string(), "istanbul")
-//     }
-// }
