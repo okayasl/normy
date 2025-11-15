@@ -72,6 +72,19 @@ impl Process for DynProcess {
             if !stage.needs_apply(&text, ctx)? {
                 continue;
             }
+
+            // === ZERO-COPY DYNAMIC PATH ===
+            if let Some(mapper) = stage.clone().into_dyn_char_mapper(ctx) {
+                let iter = mapper.bind(&text, ctx);
+                let mut out = String::with_capacity(text.len());
+                for c in iter {
+                    out.push(c);
+                }
+                text = Cow::Owned(out);
+                continue;
+            }
+
+            // === FALLBACK PATH ===
             text = stage.apply(text, ctx)?;
         }
         Ok(text)

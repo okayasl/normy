@@ -1,4 +1,4 @@
-//! Core normalisation stage abstraction.
+//! Core normalization stage abstraction.
 //!
 //! # Zero-Allocation Loop Fusion (White-Paper §3.3)
 //!
