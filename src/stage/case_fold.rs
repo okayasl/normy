@@ -365,18 +365,10 @@ mod tests {
 
         // "IJ" is a two-character sequence that must be folded to "ij"
         let text = "IJssel";
-
-        // Your current needs_apply:
-        // text.chars().any(|c| ctx.lang.needs_case_fold(c))
-        // → 'I' → needs_case_fold('I') = false (in Dutch, 'I' alone folds to 'i', but not flagged as "needs_fold")
-        // → 'J' → needs_case_fold('J') = false
-        // → Returns `false` → thinks no change needed → **WRONG**
-
         assert!(
             stage.needs_apply(text, &ctx).unwrap(),
             "needs_apply must return true for 'IJssel' in Dutch"
         );
-
         let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
         assert_eq!(result, "ijssel");
     }
@@ -386,13 +378,7 @@ mod tests {
         let stage = CaseFold;
         let ctx = make_context(NLD);
         let text = "Ĳssel"; // Ĳ (U+0132) is the single-char ligature → must fold to "ijssel"
-
-        // Your needs_apply:
-        // chars: 'Ĳ' → needs_case_fold('Ĳ') = true (fold_map has 'Ĳ' → "ij")
-        // But if fold_char_slice = ['Ĳ', 'ĳ'] → contains('Ĳ') = true → any = true
-
         assert!(stage.needs_apply(text, &ctx).unwrap()); // Passes if slice contains
-
         let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
         assert_eq!(result, "ijssel");
     }
@@ -402,13 +388,7 @@ mod tests {
         let stage = CaseFold;
         let ctx = make_context(DEU);
         let text = "straße"; // All lowercase, but 'ß' → "ss" for case-fold
-
-        // Your needs_apply:
-        // chars: 's' = false, 't' = false, 'r' = false, 'a' = false, 'ß' = true (fold_map has 'ß' → "ss")
-        // fold_char_slice = ['ß', 'ẞ'] → contains('ß') = true → any = true
-
         assert!(stage.needs_apply(text, &ctx).unwrap()); // Passes
-
         let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
         assert_eq!(result, "strasse");
     }
@@ -418,14 +398,6 @@ mod tests {
         let stage = CaseFold;
         let ctx = make_context(NLD);
         let text = "ijssel"; // Already "ij", but if peek_ahead_fold checks lowercase
-
-        // needs_apply: 'i' = false (lowercase), 'j' = false
-        // No fold_map.from for 'i' or 'j' (fold_map has 'Ĳ', 'ĳ' only)
-        // fold_char_slice = ['Ĳ', 'ĳ'] → no 'i' or 'j'
-        // to_lowercase() = same → false
-
-        // So any = false → skips stage → correct (idempotent, no change)
-
         assert!(!stage.needs_apply(text, &ctx).unwrap()); // Should be false
     }
 }
