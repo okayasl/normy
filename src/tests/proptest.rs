@@ -1,5 +1,5 @@
 mod prop_tests {
-    use crate::{CaseFold, DEU, ENG, Lowercase, Normy, TUR, Trim,RemoveDiacritics,FRA};
+    use crate::{CaseFold, DEU, ENG, LowerCase, Normy, TUR, Trim,RemoveDiacritics,FRA};
     use proptest::prelude::*;
 
     proptest! {
@@ -21,7 +21,7 @@ mod prop_tests {
 
             #[test]
         fn lowercase_idempotent(s in ".{0,1000}") {
-            let normy = Normy::builder().lang(ENG).add_stage(Lowercase).build();
+            let normy = Normy::builder().lang(ENG).add_stage(LowerCase).build();
             let once = normy.normalize(&s).unwrap().into_owned();
             let twice = normy.normalize(&once).unwrap().into_owned();
             prop_assert_eq!(once, twice);
@@ -29,14 +29,14 @@ mod prop_tests {
 
         #[test]
         fn turkish_i_mapping(s in "[İıI]{1,100}") {
-            let normy = Normy::builder().lang(TUR).add_stage(Lowercase).build();
+            let normy = Normy::builder().lang(TUR).add_stage(LowerCase).build();
             let result = normy.normalize(&s).unwrap();
             prop_assert!(result.chars().all(|c| c == 'i' || c == 'ı'));
         }
 
         #[test]
         fn zero_copy_no_change(s in "[a-z ]{0,1000}") {
-            let normy = Normy::builder().lang(ENG).add_stage(Lowercase).build();
+            let normy = Normy::builder().lang(ENG).add_stage(LowerCase).build();
             let input = s.as_str();
             let result = normy.normalize(input).unwrap();
             prop_assert!(matches!(result, std::borrow::Cow::Borrowed(b) if b.as_ptr() == input.as_ptr()));

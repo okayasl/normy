@@ -22,9 +22,9 @@ use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
-pub struct Lowercase;
+pub struct LowerCase;
 
-impl Stage for Lowercase {
+impl Stage for LowerCase {
     fn name(&self) -> &'static str {
         "lowercase"
     }
@@ -88,11 +88,11 @@ impl Stage for Lowercase {
 // ═══════════════════════════════════════════════════════════════════════════
 // CharMapper implementation (zero-copy path)
 // ═══════════════════════════════════════════════════════════════════════════
-impl CharMapper for Lowercase {
+impl CharMapper for LowerCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         // ✅ Use helper method
-        ctx.lang.lowercase_char(c)
+        Some(ctx.lang.lowercase_char(c))
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
@@ -157,7 +157,7 @@ impl<'a> Iterator for LowercaseIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        self.lang.lowercase_char(c) // ✅ Use helper
+        Some(self.lang.lowercase_char(c)) // ✅ Use helper
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_english_basic() {
-        let stage = Lowercase;
+        let stage = LowerCase;
         let ctx = make_context(ENG);
 
         assert!(stage.needs_apply("HELLO", &ctx).unwrap());
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn test_turkish_dotted_i() {
-        let stage = Lowercase;
+        let stage = LowerCase;
         let ctx = make_context(TUR);
 
         // Turkish İ → i
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_german_eszett_not_expanded() {
-        let stage = Lowercase;
+        let stage = LowerCase;
         let ctx = make_context(DEU);
 
         // Lowercase does NOT expand ß → ss (that's case_fold's job)
@@ -217,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_no_digraph_handling() {
-        let stage = Lowercase;
+        let stage = LowerCase;
         let ctx = make_context(NLD);
 
         // Lowercase does NOT treat IJ as digraph (that's case_fold's job)
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_char_mapper_always_eligible() {
-        let stage = Lowercase;
+        let stage = LowerCase;
 
         // Lowercase is always 1→1, so always eligible for CharMapper
         assert!(stage.as_char_mapper(&make_context(ENG)).is_some());
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_idempotency() {
-        let stage = Lowercase;
+        let stage = LowerCase;
         let ctx = make_context(TUR);
 
         let text = "İSTANBUL";
@@ -257,7 +257,7 @@ mod tests {
     #[test]
     #[cfg(feature = "ascii-fast")]
     fn test_ascii_fast_path() {
-        let stage = Lowercase;
+        let stage = LowerCase;
         let ctx = make_context(ENG);
 
         let result = stage.apply(Cow::Borrowed("HELLO123"), &ctx).unwrap();
@@ -269,7 +269,7 @@ mod tests {
         // Demonstrate the key difference between lowercase and case_fold
 
         // 1. German ß: lowercase preserves it, case_fold expands it
-        let lowercase = Lowercase;
+        let lowercase = LowerCase;
         let ctx = make_context(DEU);
 
         let result = lowercase.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap();

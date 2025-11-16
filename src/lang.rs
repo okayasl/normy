@@ -258,7 +258,7 @@ define_languages! {
     ARA, "ARA", "Arabic",
         case: [],
         fold: [],
-        diac: [ 'َ', 'ِ', 'ُ', 'ً', 'ٌ', 'ٍ', 'ْ', 'ّ', 'ٓ', 'ٔ', 'ٕ' ],
+        diac: [ 'َ', 'ِ', 'ُ', 'ً', 'ٌ', 'ٍ', 'ْ', 'ّ', 'ٓ', 'ٔ', 'ٕ', 'ٰ' ],
         segment: false,
         peek_ahead: false,
         peek_pairs: [];
@@ -498,26 +498,21 @@ pub trait LocaleBehavior {
     /// Lowercase a single character (1→1 always, uses case_map).
     /// This is for the Lowercase stage, not CaseFold.
     #[inline(always)]
-    fn lowercase_char(&self, c: char) -> Option<char> {
+    fn lowercase_char(&self, c: char) -> char {
         let case_map = self.case_map();
 
-        // Fast path: no language-specific rules
-        if case_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if c.is_ascii() {
-                return Some(c.to_ascii_lowercase());
-            }
-            return c.to_lowercase().next();
-        }
-
-        // Check if character has language-specific mapping
+        // Language-specific 1→1 (Turkish, etc.)
         if let Some(m) = case_map.iter().find(|m| m.from == c) {
-            // Found in case_map (always 1→1 by definition)
-            return Some(m.to);
+            return m.to;
         }
 
-        // Not found - use Unicode lowercase
-        c.to_lowercase().next()
+        #[cfg(feature = "ascii-fast")]
+        if c.is_ascii() {
+            return c.to_ascii_lowercase();
+        }
+
+        // Unicode guarantees at least one char
+        c.to_lowercase().next().unwrap_or(c)
     }
 
     /// Can this language use CharMapper (zero-copy path)?
@@ -990,21 +985,21 @@ mod tests {
     #[test]
     fn test_lowercase_char_always_one_to_one() {
         // German: lowercase is always 1→1 (ẞ→ß, not →"ss")
-        assert_eq!(DEU.lowercase_char('ẞ'), Some('ß'));
-        assert_eq!(DEU.lowercase_char('ß'), Some('ß'));
+        assert_eq!(DEU.lowercase_char('ẞ'), 'ß');
+        assert_eq!(DEU.lowercase_char('ß'), 'ß');
 
         // Turkish
-        assert_eq!(TUR.lowercase_char('İ'), Some('i'));
-        assert_eq!(TUR.lowercase_char('I'), Some('ı'));
+        assert_eq!(TUR.lowercase_char('İ'), 'i');
+        assert_eq!(TUR.lowercase_char('I'), 'ı');
 
         // English
-        assert_eq!(ENG.lowercase_char('A'), Some('a'));
+        assert_eq!(ENG.lowercase_char('A'), 'a');
     }
 
     #[test]
     fn test_fold_vs_lowercase_difference() {
         // German ẞ (capital eszett)
-        assert_eq!(DEU.lowercase_char('ẞ'), Some('ß'), "Lowercase: ẞ→ß");
+        assert_eq!(DEU.lowercase_char('ẞ'), 'ß', "Lowercase: ẞ→ß");
         assert_eq!(
             DEU.fold_char('ẞ'),
             None,
@@ -1012,7 +1007,7 @@ mod tests {
         );
 
         // German ß (lowercase eszett)
-        assert_eq!(DEU.lowercase_char('ß'), Some('ß'), "Already lowercase");
+        assert_eq!(DEU.lowercase_char('ß'), 'ß', "Already lowercase");
         assert_eq!(
             DEU.fold_char('ß'),
             None,
@@ -1039,5 +1034,14 @@ mod tests {
             println!("  Found in fold_map: {:?}", found.is_some());
             println!("  fold_char result: {:?}", DEU.fold_char(c));
         }
+    }
+
+    #[test]
+    fn lowercase_char_is_infallible() {
+        assert_eq!(TUR.lowercase_char('İ'), 'i');
+        assert_eq!(TUR.lowercase_char('I'), 'ı');
+        assert_eq!(ENG.lowercase_char('A'), 'a');
+        assert_eq!(DEU.lowercase_char('ẞ'), 'ß');
+        assert_eq!(ARA.lowercase_char('ا'), 'ا'); // unchanged
     }
 }

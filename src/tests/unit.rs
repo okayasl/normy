@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod unit_tests {
 
-    use crate::{CaseFold, DEU, ENG, FRA, JPN, Lowercase, NLD, Normy, RemoveDiacritics, TUR, Trim};
+    use crate::{CaseFold, DEU, ENG, FRA, JPN, LowerCase, NLD, Normy, RemoveDiacritics, TUR, Trim};
     use std::borrow::Cow;
     #[test]
     fn ascii_fast_path() {
-        let normy = Normy::builder().lang(ENG).add_stage(Lowercase).build();
+        let normy = Normy::builder().lang(ENG).add_stage(LowerCase).build();
         let input = "HELLO WORLD";
         let result = normy.normalize(input).unwrap();
         assert!(matches!(result, Cow::Owned(_)));
@@ -14,14 +14,14 @@ mod unit_tests {
 
     #[test]
     fn turkish_i() {
-        let normy = Normy::builder().lang(TUR).add_stage(Lowercase).build();
+        let normy = Normy::builder().lang(TUR).add_stage(LowerCase).build();
         assert_eq!(normy.normalize("İSTANBUL").unwrap(), "istanbul");
         assert_eq!(normy.normalize("IĞDIR").unwrap(), "ığdır");
     }
 
     #[test]
     fn zero_copy_when_already_lower() {
-        let normy = Normy::builder().lang(ENG).add_stage(Lowercase).build();
+        let normy = Normy::builder().lang(ENG).add_stage(LowerCase).build();
         let input = "already lower";
         let result = normy.normalize(input).unwrap();
         assert!(matches!(result, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr()));
@@ -166,7 +166,6 @@ mod unit_tests {
 
     #[test]
     fn dutch_ij_sequence_is_idempotent_and_correct() {
-        use crate::{lang::NLD, normy::Normy, stage::case_fold::CaseFold};
         let normy = Normy::builder().lang(NLD).add_stage(CaseFold).build();
 
         let cases = ["IJssel", "IJsland", "IJmuiden", "ijsselmeer", "IJzer"];

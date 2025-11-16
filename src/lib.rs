@@ -12,7 +12,7 @@ pub use lang::{
 };
 pub use normy::Normy;
 pub use stage::case_fold::CaseFold;
-pub use stage::lower_case::Lowercase;
+pub use stage::lower_case::LowerCase;
 pub use stage::remove_diacritics::RemoveDiacritics;
 pub use stage::trim::Trim;
 
