@@ -4,6 +4,7 @@ pub mod normy;
 pub mod process;
 pub mod profile;
 pub mod stage;
+pub mod unicode;
 
 pub use lang::Lang;
 pub use lang::{

@@ -125,8 +125,6 @@ impl<I: Iterator<Item = char>> Iterator for RemoveDiacriticsIter<I> {
 
 impl<I: Iterator<Item = char>> FusedIterator for RemoveDiacriticsIter<I> {}
 
-// Tests remain the same...
-
 // ---------------------------------------------------------------------
 // Tests (add to the file)
 // ---------------------------------------------------------------------

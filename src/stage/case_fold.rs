@@ -400,4 +400,21 @@ mod tests {
         let text = "ijssel"; // Already "ij", but if peek_ahead_fold checks lowercase
         assert!(!stage.needs_apply(text, &ctx).unwrap()); // Should be false
     }
+
+    #[test]
+    fn test_dutch_german_charmapper_contract() {
+        let ctx_nld = make_context(NLD);
+        let ctx_deu = make_context(DEU);
+
+        // These MUST be None or CharMapper will break
+        assert!(
+            CaseFold.as_char_mapper(&ctx_nld).is_none(),
+            "CRITICAL: Dutch needs peek-ahead, cannot use CharMapper"
+        );
+
+        assert!(
+            CaseFold.as_char_mapper(&ctx_deu).is_none(),
+            "CRITICAL: German has multi-char folds, cannot use CharMapper"
+        );
+    }
 }

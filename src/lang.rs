@@ -676,52 +676,6 @@ impl LocaleBehavior for Lang {
     }
 }
 
-/// ---------------------------------------------------------------------------
-/// 7. Format control characters (for RemoveFormatControls stage)
-/// ---------------------------------------------------------------------------
-pub static FORMAT_CONTROLS: &[char] = &[
-    '\u{200B}', // Zero-width space
-    '\u{200C}', // Zero-width non-joiner
-    '\u{200D}', // Zero-width joiner
-    '\u{200E}', // Left-to-right mark
-    '\u{200F}', // Right-to-left mark
-    '\u{202A}', // Left-to-right embedding
-    '\u{202B}', // Right-to-left embedding
-    '\u{202C}', // Pop directional formatting
-    '\u{202D}', // Left-to-right override
-    '\u{202E}', // Right-to-left override
-    '\u{2060}', // Word joiner
-    '\u{2061}', // Function application
-    '\u{2062}', // Invisible times
-    '\u{2063}', // Invisible separator
-    '\u{2064}', // Invisible plus
-    '\u{206A}', // Inhibit symmetric swapping
-    '\u{206B}', // Activate symmetric swapping
-    '\u{206C}', // Inhibit Arabic form shaping
-    '\u{206D}', // Activate Arabic form shaping
-    '\u{206E}', // National digit shapes
-    '\u{206F}', // Nominal digit shapes
-    '\u{FEFF}', // Zero-width no-break space (BOM)
-];
-
-pub static FORMAT_CONTROLS_SLICE: &[char] = &[
-    '\u{200B}', '\u{200C}', '\u{200D}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202B}', '\u{202C}',
-    '\u{202D}', '\u{202E}', '\u{2060}', '\u{2061}', '\u{2062}', '\u{2063}', '\u{2064}', '\u{206A}',
-    '\u{206B}', '\u{206C}', '\u{206D}', '\u{206E}', '\u{206F}', '\u{FEFF}',
-];
-
-/// Is this character a format control?
-#[inline(always)]
-pub fn is_format_control(c: char) -> bool {
-    FORMAT_CONTROLS_SLICE.contains(&c)
-}
-
-/// Does this text contain any format controls?
-#[inline]
-pub fn contains_format_controls(text: &str) -> bool {
-    text.chars().any(is_format_control)
-}
-
 // ---------------------------------------------------------------------------
 // 8. Tests (kept largely in your original spirit; adjust as needed)
 // ---------------------------------------------------------------------------
@@ -777,15 +731,6 @@ mod tests {
         assert!(!ARA.is_diacritic('ا'));
         assert!(ARA.contains_diacritics("مَرْحَبًا"));
         assert!(!ARA.contains_diacritics("مرحبا"));
-    }
-
-    #[test]
-    fn test_format_controls() {
-        assert!(is_format_control('\u{200B}'));
-        assert!(is_format_control('\u{FEFF}'));
-        assert!(!is_format_control('a'));
-        assert!(contains_format_controls("hello\u{200B}world"));
-        assert!(!contains_format_controls("hello world"));
     }
 
     #[test]

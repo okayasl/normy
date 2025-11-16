@@ -24,6 +24,7 @@
 pub mod case_fold;
 pub mod lower_case;
 pub mod remove_diacritics;
+pub mod remove_format_controls;
 pub mod trim;
 
 use crate::context::Context;
