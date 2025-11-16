@@ -84,12 +84,6 @@ impl LangEntry {
         }
         self.fold_map.iter().all(|m| m.to.chars().count() == 1)
     }
-
-    /// Check if any fold mapping expands to multiple characters.
-    #[inline]
-    pub fn has_multi_char_folds(&self) -> bool {
-        self.fold_map.iter().any(|m| m.to.chars().count() > 1)
-    }
 }
 
 /// ---------------------------------------------------------------------------
@@ -524,15 +518,6 @@ pub trait LocaleBehavior {
             .unwrap_or(true)
     }
 
-    /// Does any fold mapping expand to multiple characters?
-    #[inline(always)]
-    fn has_multi_char_folds(&self) -> bool {
-        LANG_TABLE
-            .get(self.id().code())
-            .map(|e| e.has_multi_char_folds())
-            .unwrap_or(false)
-    }
-
     /// Does this language need context-sensitive folding (peek-ahead)?
     #[inline(always)]
     fn requires_peek_ahead(&self) -> bool {
@@ -574,33 +559,6 @@ pub trait LocaleBehavior {
         } else {
             None
         }
-    }
-
-    /// Convenience: should we consume the next char as part of a two-char fold?
-    #[inline]
-    fn should_consume_next(&self, current: char, next: Option<char>) -> bool {
-        self.peek_ahead_fold(current, next).is_some()
-    }
-
-    // -------------------------------------------------------------------------
-    // Deprecated: Dutch-specific helpers (kept for backward compatibility)
-    // -------------------------------------------------------------------------
-    #[inline(always)]
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use peek_ahead_fold() for language-agnostic code"
-    )]
-    fn is_ij_start(&self, c: char, next: Option<char>) -> bool {
-        self.peek_ahead_fold(c, next).is_some() && c == 'I' && next == Some('J')
-    }
-
-    #[inline(always)]
-    #[deprecated(
-        since = "0.1.0",
-        note = "Use peek_ahead_fold() for language-agnostic code"
-    )]
-    fn is_ij_start_lower(&self, c: char, next: Option<char>) -> bool {
-        self.peek_ahead_fold(c, next).is_some() && c == 'i' && next == Some('j')
     }
 
     // -------------------------------------------------------------------------
@@ -736,7 +694,6 @@ mod tests {
     #[test]
     fn test_turkish_metadata() {
         let entry = LANG_TABLE.get("TUR").unwrap();
-        assert!(!entry.has_multi_char_folds());
         assert!(entry.has_one_to_one_folds());
         assert!(!TUR.requires_peek_ahead());
         assert!(TUR.needs_case_fold('İ'));
@@ -748,7 +705,6 @@ mod tests {
     #[test]
     fn test_german_metadata() {
         let entry = LANG_TABLE.get("DEU").unwrap();
-        assert!(entry.has_multi_char_folds());
         assert!(!entry.has_one_to_one_folds());
         assert!(!DEU.requires_peek_ahead());
         assert!(DEU.needs_case_fold('ß'));
@@ -757,7 +713,6 @@ mod tests {
     #[test]
     fn test_dutch_metadata() {
         let entry = LANG_TABLE.get("NLD").unwrap();
-        assert!(entry.has_multi_char_folds());
         assert!(!entry.has_one_to_one_folds());
         assert!(NLD.requires_peek_ahead());
 
@@ -772,7 +727,6 @@ mod tests {
     #[test]
     fn test_english_metadata() {
         let entry = LANG_TABLE.get("ENG").unwrap();
-        assert!(!entry.has_multi_char_folds());
         assert!(entry.has_one_to_one_folds());
         assert!(!ENG.requires_peek_ahead());
         assert!(ENG.needs_case_fold('A'));
@@ -835,7 +789,6 @@ mod tests {
         assert_eq!(i_mapping.to.chars().count(), 1);
         let entry = LANG_TABLE.get("TUR").unwrap();
         assert!(entry.has_one_to_one_folds());
-        assert!(!entry.has_multi_char_folds());
     }
 
     #[test]
@@ -847,10 +800,6 @@ mod tests {
 
         for lang in langs {
             let entry = LANG_TABLE.get(lang.code()).expect("Entry exists");
-
-            if entry.has_one_to_one_folds() {
-                assert!(!entry.has_multi_char_folds());
-            }
 
             if entry.requires_peek_ahead {
                 assert!(!entry.fold_map.is_empty() || !entry.peek_pairs.is_empty());
@@ -864,16 +813,6 @@ mod tests {
                         char_count,
                         1,
                         "{}: fold {} -> {} should be 1→1",
-                        lang.code(),
-                        fold.from,
-                        fold.to
-                    );
-                }
-
-                if char_count > 1 {
-                    assert!(
-                        entry.has_multi_char_folds(),
-                        "{}: fold {} -> {} is multi-char but flag not set",
                         lang.code(),
                         fold.from,
                         fold.to

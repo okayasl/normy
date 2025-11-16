@@ -48,7 +48,7 @@ impl Stage for RemoveDiacritics {
         }
 
         // Decompose first – diacritics appear after NFKD
-        let mut out = String::with_capacity(text.len());
+        let mut out = String::with_capacity(text.len() - ctx.lang.count_diacritics(&text));
         for c in text.nfkd() {
             if !ctx.lang.is_diacritic(c) {
                 out.push(c);

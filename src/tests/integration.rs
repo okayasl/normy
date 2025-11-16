@@ -78,14 +78,13 @@ mod integration_tests {
     }
 
     #[test]
-    fn dutch_lowercase_is_one_to_one() {
-        let normy = Normy::builder()
+    fn dutch_case_fold_is_canonical() {
+        let out = Normy::builder()
             .lang(NLD)
             .add_stage(CaseFold)
-            .build();
-
-        let out = normy.normalize("IJsselmeer").unwrap();
-        // Dutch has no custom case map → Unicode fallback: I→i, J→j
-        assert_eq!(out, "ijsselmeer");
+            .build()
+            .normalize("IJsselmeer")
+            .unwrap();
+        assert_eq!(out, "ijsselmeer"); // ← CORRECT
     }
 }
