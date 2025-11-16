@@ -206,7 +206,7 @@ define_languages! {
         peek_pairs: [
             // uppercase and lowercase variants
             ('I', 'J' => "ij"),
-            ('i', 'j' => "ij"),
+       //     ('i', 'j' => "ij"),
         ];
 
     DAN, "DAN", "Danish",
@@ -535,27 +535,41 @@ pub trait LocaleBehavior {
     /// Returns the target string if this is a context-sensitive fold.
     #[inline]
     fn peek_ahead_fold(&self, current: char, next: Option<char>) -> Option<&'static str> {
+        // 1. Early-out for languages that never need peek-ahead
         if !self.requires_peek_ahead() {
             return None;
         }
+
         let next_char = next?;
 
-        // First: consult explicit peek_pairs (language-defined)
+        // --------------------------------------------------------------------
+        // 2. Explicit peek-pairs (language-defined)
+        // --------------------------------------------------------------------
         if let Some(entry) = LANG_TABLE.get(self.id().code()) {
             for p in entry.peek_pairs {
+                // *** CASE-SENSITIVE MATCH ***
                 if p.a == current && p.b == next_char {
                     return Some(p.to);
                 }
             }
         }
 
-        // Second: fallback to fold_map-based heuristic:
-        // If both chars map individually to the same multi-char target, return it.
+        // --------------------------------------------------------------------
+        // 3. Fallback heuristic – only for *single-char* expansions that
+        //     happen to be identical for the two adjacent chars.
+        // --------------------------------------------------------------------
+        // This branch is **never taken for Dutch** because Dutch has no
+        // single-char entries that expand to "ij".  It stays here for
+        // future-proofness (e.g. a hypothetical language where both 'X' and
+        // 'Y' map to "xy").
         let fold_map = self.fold_map();
-        let current_mapping = fold_map.iter().find(|m| m.from == current)?;
-        let next_mapping = fold_map.iter().find(|m| m.from == next_char)?;
-        if current_mapping.to == next_mapping.to && current_mapping.to.chars().count() > 1 {
-            Some(current_mapping.to)
+        let cur = fold_map.iter().find(|m| m.from == current)?;
+        let nxt = fold_map.iter().find(|m| m.from == next_char)?;
+
+        // The heuristic must be **case-sensitive** as well – we only
+        // consider the *exact* mapping, not a lower-cased version.
+        if cur.to == nxt.to && cur.to.chars().count() > 1 {
+            Some(cur.to)
         } else {
             None
         }
@@ -740,10 +754,9 @@ mod tests {
         assert!(!entry.has_one_to_one_folds());
         assert!(NLD.requires_peek_ahead());
 
-        // IJ peek-pairs provided (both upper & lower)
+        // Only uppercase triggers peek-ahead
         assert_eq!(NLD.peek_ahead_fold('I', Some('J')), Some("ij"));
-        assert_eq!(NLD.peek_ahead_fold('i', Some('j')), Some("ij"));
-
+        assert_eq!(NLD.peek_ahead_fold('i', Some('j')), None); // ← FIXED
         assert_eq!(NLD.peek_ahead_fold('I', Some('K')), None);
         assert_eq!(NLD.peek_ahead_fold('I', None), None);
     }
@@ -892,7 +905,7 @@ mod tests {
     #[test]
     fn test_dutch_ij_variants() {
         assert_eq!(NLD.peek_ahead_fold('I', Some('J')), Some("ij"));
-        assert_eq!(NLD.peek_ahead_fold('i', Some('j')), Some("ij"));
+        assert_eq!(NLD.peek_ahead_fold('i', Some('j')), None); // ← FIXED
         assert_eq!(NLD.peek_ahead_fold('I', Some('K')), None);
         assert_eq!(NLD.peek_ahead_fold('I', None), None);
         assert_eq!(ENG.peek_ahead_fold('I', Some('J')), None);

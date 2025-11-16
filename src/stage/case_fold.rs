@@ -21,11 +21,20 @@ impl Stage for CaseFold {
     fn name(&self) -> &'static str {
         "case_fold"
     }
-
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        // Use lang.rs helper for O(k) check
-        Ok(text.chars().any(|c| ctx.lang.needs_case_fold(c)))
+        if text.chars().any(|c| ctx.lang.needs_case_fold(c)) {
+            return Ok(true);
+        }
+        if ctx.lang.requires_peek_ahead() {
+            let mut chars = text.chars().peekable();
+            while let Some(c) = chars.next() {
+                if ctx.lang.peek_ahead_fold(c, chars.peek().copied()).is_some() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
