@@ -599,6 +599,30 @@ pub trait LocaleBehavior {
         text.chars().filter(|&c| self.needs_case_fold(c)).count()
     }
 
+    /// Count foldable characters and *exact* extra bytes needed.
+    /// Returns `(count, extra_bytes)`
+    #[inline]
+    fn count_foldable_bytes(&self, text: &str) -> (usize, usize) {
+        let fold_map = self.fold_map();
+        if fold_map.is_empty() {
+            return (0, 0);
+        }
+
+        let mut count = 0;
+        let mut extra = 0;
+        for c in text.chars() {
+            if let Some(m) = fold_map.iter().find(|m| m.from == c) {
+                count += 1;
+                let from_len = c.len_utf8();
+                let to_len = m.to.len();
+                if to_len > from_len {
+                    extra += to_len - from_len;
+                }
+            }
+        }
+        (count, extra)
+    }
+
     #[inline]
     fn count_diacritics(&self, text: &str) -> usize {
         if !self.has_diacritics() {

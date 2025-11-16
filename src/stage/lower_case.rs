@@ -37,10 +37,6 @@ impl Stage for LowerCase {
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let case_map = ctx.lang.case_map();
-
-        // ═══════════════════════════════════════════════════════════════
-        // Fast path: No language-specific case mapping
-        // ═══════════════════════════════════════════════════════════════
         if case_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
@@ -57,10 +53,7 @@ impl Stage for LowerCase {
                 text.chars().flat_map(|c| c.to_lowercase()).collect(),
             ));
         }
-
-        // ═══════════════════════════════════════════════════════════════
-        // Language-specific case mapping (Turkish only currently)
-        // ═══════════════════════════════════════════════════════════════
+        // Always 1→1 or shrink → reserve input len
         let mut out = String::with_capacity(text.len());
         for c in text.chars() {
             if let Some(map) = case_map.iter().find(|m| m.from == c) {
@@ -85,9 +78,6 @@ impl Stage for LowerCase {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CharMapper implementation (zero-copy path)
-// ═══════════════════════════════════════════════════════════════════════════
 impl CharMapper for LowerCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {

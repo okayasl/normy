@@ -42,18 +42,25 @@ impl Stage for RemoveDiacritics {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // Use helper method
         if !ctx.lang.has_diacritics() {
             return Ok(text);
         }
 
-        // Decompose first – diacritics appear after NFKD
-        let mut out = String::with_capacity(text.len() - ctx.lang.count_diacritics(&text));
-        for c in text.nfkd() {
+        // Decompose once
+        let decomposed: String = text.nfkd().collect();
+        let removals = ctx.lang.count_diacritics(&decomposed);
+
+        if removals == 0 {
+            return Ok(text); // Zero-copy: no combining marks
+        }
+
+        let mut out = String::with_capacity(decomposed.len() - removals);
+        for c in decomposed.chars() {
             if !ctx.lang.is_diacritic(c) {
                 out.push(c);
             }
         }
+
         Ok(Cow::Owned(out))
     }
 
