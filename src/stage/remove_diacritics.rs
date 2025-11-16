@@ -45,22 +45,19 @@ impl Stage for RemoveDiacritics {
         if !ctx.lang.has_diacritics() {
             return Ok(text);
         }
-
-        // Decompose once
-        let decomposed: String = text.nfkd().collect();
-        let removals = ctx.lang.count_diacritics(&decomposed);
-
-        if removals == 0 {
-            return Ok(text); // Zero-copy: no combining marks
-        }
-
-        let mut out = String::with_capacity(decomposed.len() - removals);
-        for c in decomposed.chars() {
-            if !ctx.lang.is_diacritic(c) {
-                out.push(c);
+        let mut has_diac = false;
+        let mut out = String::with_capacity(text.len());
+        for c in text.nfkd() {
+            // Lazy iterator, no collect
+            if ctx.lang.is_diacritic(c) {
+                has_diac = true;
+                continue;
             }
+            out.push(c);
         }
-
+        if !has_diac {
+            return Ok(text); // Zero-copy if no removals
+        }
         Ok(Cow::Owned(out))
     }
 

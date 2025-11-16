@@ -111,18 +111,23 @@ fn apply_with_peek_ahead<'a>(
     ctx: &Context,
 ) -> Result<Cow<'a, str>, StageError> {
     let fold_map = ctx.lang.fold_map();
-    let mut out = String::with_capacity(text.len() * 2);
+    let (foldable_count, extra_bytes) = ctx.lang.count_foldable_bytes(&text); // Reuse helper
+    let mut out = String::with_capacity(
+        text.len()
+            + extra_bytes
+            + if ctx.lang.requires_peek_ahead() {
+                foldable_count
+            } else {
+                0
+            },
+    ); // Rough peek adjustment
     let mut chars = text.chars().peekable();
-
     while let Some(c) = chars.next() {
-        // Check if this starts a two-char fold sequence
         if let Some(target) = ctx.lang.peek_ahead_fold(c, chars.peek().copied()) {
-            chars.next(); // Consume the second character
+            chars.next();
             out.push_str(target);
             continue;
         }
-
-        // Normal single-char fold
         if let Some(m) = fold_map.iter().find(|m| m.from == c) {
             out.push_str(m.to);
         } else {

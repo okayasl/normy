@@ -87,7 +87,6 @@ impl CharMapper for LowerCase {
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         let case_map = ctx.lang.case_map();
-
         if case_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
@@ -95,10 +94,12 @@ impl CharMapper for LowerCase {
                     bytes: text.as_bytes(),
                 });
             }
-            return Box::new(text.chars().flat_map(|c| c.to_lowercase()));
+            // Use map instead of flat_map (since to_lowercase is 1→1 for most)
+            return Box::new(
+                text.chars()
+                    .map(move |c| c.to_lowercase().next().unwrap_or(c)),
+            );
         }
-
-        // ✅ Pass Lang instead of case_map
         Box::new(LowercaseIter {
             chars: text.chars(),
             lang: ctx.lang,
