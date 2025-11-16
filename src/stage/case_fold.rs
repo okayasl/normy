@@ -34,18 +34,14 @@ impl Stage for CaseFold {
         // ═══════════════════════════════════════════════════════════════
         // Fast path: No language-specific rules → Unicode lowercase only
         // ═══════════════════════════════════════════════════════════════
+        // Fast path: no language rules
         if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
-                let mut bytes = text.into_owned().into_bytes();
-                for b in &mut bytes {
-                    if b.is_ascii_uppercase() {
-                        *b = b.to_ascii_lowercase();
-                    }
-                }
-                return Ok(Cow::Owned(unsafe { String::from_utf8_unchecked(bytes) }));
+                let mut owned = text.into_owned();
+                owned.make_ascii_lowercase();
+                return Ok(Cow::Owned(owned));
             }
-
             return Ok(Cow::Owned(
                 text.chars().flat_map(|c| c.to_lowercase()).collect(),
             ));
