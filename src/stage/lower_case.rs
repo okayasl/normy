@@ -49,6 +49,10 @@ impl Stage for Lowercase {
                 owned.make_ascii_lowercase();
                 return Ok(Cow::Owned(owned));
             }
+            // Optional: avoid flat_map if no change
+            if text.chars().all(|c| c.is_lowercase()) {
+                return Ok(text);
+            }
             return Ok(Cow::Owned(
                 text.chars().flat_map(|c| c.to_lowercase()).collect(),
             ));
@@ -88,7 +92,7 @@ impl CharMapper for Lowercase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         // ✅ Use helper method
-        Some(ctx.lang.lowercase_char(c))
+        ctx.lang.lowercase_char(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
@@ -153,7 +157,7 @@ impl<'a> Iterator for LowercaseIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        Some(self.lang.lowercase_char(c)) // ✅ Use helper
+        self.lang.lowercase_char(c) // ✅ Use helper
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

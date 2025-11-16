@@ -124,7 +124,7 @@ impl CharMapper for CaseFold {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         // Use lang.rs helper for 1→1 folding
-        Some(ctx.lang.fold_char(c))
+        ctx.lang.fold_char(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
@@ -193,7 +193,7 @@ impl<'a> Iterator for CaseFoldIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
         // Use lang.rs helper for 1→1 folding
-        Some(self.lang.fold_char(c))
+        self.lang.fold_char(c)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

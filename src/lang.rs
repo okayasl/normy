@@ -445,36 +445,39 @@ pub trait LocaleBehavior {
     }
 
     /// Fold a single character (1→1 only).
-    /// **Panics** in debug mode if the mapping is multi-char.
+    /// Returns None if the mapping is multi-char.
     #[inline(always)]
-    fn fold_char(&self, c: char) -> char {
+    fn fold_char(&self, c: char) -> Option<char> {
         let fold_map = self.fold_map();
 
-        // Fast path: no language-specific rules
         if fold_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if c.is_ascii() {
-                return c.to_ascii_lowercase(); // ✨ Add this
+                return Some(c.to_ascii_lowercase());
             }
-            return c.to_lowercase().next().unwrap_or(c);
+            return c.to_lowercase().next();
         }
 
-        // Language-specific mapping
-        fold_map
-            .iter()
-            .find(|m| m.from == c)
-            .map(|m| {
-                let mut chars = m.to.chars();
-                let first = chars.next().expect("Empty fold target");
-                debug_assert!(
-                    chars.next().is_none(),
-                    "fold_char called on multi-char mapping: {} -> {}",
-                    c,
-                    m.to
-                );
-                first
-            })
-            .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
+        // Check if character has language-specific mapping
+        match fold_map.iter().find(|m| m.from == c) {
+            Some(mapping) => {
+                // Found in fold_map - verify it's 1→1
+                let mut chars = mapping.to.chars();
+                let first = chars.next()?;
+
+                if chars.next().is_some() {
+                    // Multi-char: cannot use in CharMapper
+                    None
+                } else {
+                    // Single char: safe to use
+                    Some(first)
+                }
+            }
+            None => {
+                // Not in fold_map - use Unicode lowercase
+                c.to_lowercase().next()
+            }
+        }
     }
 
     #[inline(always)]
@@ -495,24 +498,26 @@ pub trait LocaleBehavior {
     /// Lowercase a single character (1→1 always, uses case_map).
     /// This is for the Lowercase stage, not CaseFold.
     #[inline(always)]
-    fn lowercase_char(&self, c: char) -> char {
+    fn lowercase_char(&self, c: char) -> Option<char> {
         let case_map = self.case_map();
 
         // Fast path: no language-specific rules
         if case_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if c.is_ascii() {
-                return c.to_ascii_lowercase();
+                return Some(c.to_ascii_lowercase());
             }
-            return c.to_lowercase().next().unwrap_or(c);
+            return c.to_lowercase().next();
         }
 
-        // Language-specific mapping (Turkish: 'İ' → 'i', 'I' → 'ı')
-        case_map
-            .iter()
-            .find(|m| m.from == c)
-            .map(|m| m.to)
-            .unwrap_or_else(|| c.to_lowercase().next().unwrap_or(c))
+        // Check if character has language-specific mapping
+        if let Some(m) = case_map.iter().find(|m| m.from == c) {
+            // Found in case_map (always 1→1 by definition)
+            return Some(m.to);
+        }
+
+        // Not found - use Unicode lowercase
+        c.to_lowercase().next()
     }
 
     /// Can this language use CharMapper (zero-copy path)?
@@ -741,8 +746,8 @@ mod tests {
         assert!(!TUR.requires_peek_ahead());
         assert!(TUR.needs_case_fold('İ'));
         assert!(TUR.needs_case_fold('I'));
-        assert_eq!(TUR.fold_char('İ'), 'i');
-        assert_eq!(TUR.fold_char('I'), 'ı');
+        assert_eq!(TUR.fold_char('İ'), Some('i'));
+        assert_eq!(TUR.fold_char('I'), Some('ı'));
     }
 
     #[test]
@@ -776,7 +781,7 @@ mod tests {
         assert!(entry.has_one_to_one_folds());
         assert!(!ENG.requires_peek_ahead());
         assert!(ENG.needs_case_fold('A'));
-        assert_eq!(ENG.fold_char('A'), 'a');
+        assert_eq!(ENG.fold_char('A'), Some('a'));
     }
 
     #[test]
@@ -954,5 +959,85 @@ mod tests {
             .filter(|&c| TUR.needs_case_fold(c))
             .count();
         assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn test_fold_char_rejects_multi_char() {
+        // German: multi-char folds should return None
+        assert_eq!(DEU.fold_char('ß'), None, "ß→ss is multi-char");
+        assert_eq!(DEU.fold_char('ẞ'), None, "ẞ→ss is multi-char");
+
+        // Dutch: multi-char folds (ligatures) should return None
+        assert_eq!(NLD.fold_char('Ĳ'), None, "Ĳ→ij is multi-char");
+        assert_eq!(NLD.fold_char('ĳ'), None, "ĳ→ij is multi-char");
+
+        // But regular chars work
+        assert_eq!(DEU.fold_char('A'), Some('a'));
+        assert_eq!(NLD.fold_char('A'), Some('a'));
+    }
+
+    #[test]
+    fn test_fold_char_accepts_one_to_one() {
+        // Turkish: 1→1 folds should work
+        assert_eq!(TUR.fold_char('İ'), Some('i'));
+        assert_eq!(TUR.fold_char('I'), Some('ı'));
+
+        // English: Unicode lowercase
+        assert_eq!(ENG.fold_char('A'), Some('a'));
+        assert_eq!(ENG.fold_char('Z'), Some('z'));
+    }
+
+    #[test]
+    fn test_lowercase_char_always_one_to_one() {
+        // German: lowercase is always 1→1 (ẞ→ß, not →"ss")
+        assert_eq!(DEU.lowercase_char('ẞ'), Some('ß'));
+        assert_eq!(DEU.lowercase_char('ß'), Some('ß'));
+
+        // Turkish
+        assert_eq!(TUR.lowercase_char('İ'), Some('i'));
+        assert_eq!(TUR.lowercase_char('I'), Some('ı'));
+
+        // English
+        assert_eq!(ENG.lowercase_char('A'), Some('a'));
+    }
+
+    #[test]
+    fn test_fold_vs_lowercase_difference() {
+        // German ẞ (capital eszett)
+        assert_eq!(DEU.lowercase_char('ẞ'), Some('ß'), "Lowercase: ẞ→ß");
+        assert_eq!(
+            DEU.fold_char('ẞ'),
+            None,
+            "Fold: ẞ→ss (multi-char, rejected)"
+        );
+
+        // German ß (lowercase eszett)
+        assert_eq!(DEU.lowercase_char('ß'), Some('ß'), "Already lowercase");
+        assert_eq!(
+            DEU.fold_char('ß'),
+            None,
+            "Fold: ß→ss (multi-char, rejected)"
+        );
+
+        // This is why German can use CharMapper for Lowercase but not CaseFold
+        assert!(!DEU.has_one_to_one_folds());
+    }
+
+    #[test]
+    fn debug_german_fold_map() {
+        let fold_map = DEU.fold_map();
+        println!("German fold_map has {} entries:", fold_map.len());
+        for m in fold_map {
+            println!("  '{}' (U+{:04X}) => \"{}\"", m.from, m.from as u32, m.to);
+        }
+
+        // Test the specific characters
+        let test_chars = ['ß', 'ẞ'];
+        for &c in &test_chars {
+            println!("\nTesting '{}' (U+{:04X}):", c, c as u32);
+            let found = fold_map.iter().find(|m| m.from == c);
+            println!("  Found in fold_map: {:?}", found.is_some());
+            println!("  fold_char result: {:?}", DEU.fold_char(c));
+        }
     }
 }
