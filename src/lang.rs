@@ -362,8 +362,9 @@ define_languages! {
 
     KOR, "ko", "Korean",
         case: [], fold: [], diac: [],
-        segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment: true, peek_ahead: false, peek_pairs: [],
+        segment_rules: [SegmentRule::HanAfterWest,SegmentRule::WestAfterHan,SegmentRule::NoBreakHan,], 
+        segment_exceptions: [],
 
     THA, "th", "Thai",
         case: [], fold: [], diac: [],

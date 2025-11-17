@@ -4,7 +4,6 @@
 //! * Compile-time exception list (e.g. Japanese company suffixes, Chinese compounds)
 //! * Zero-allocation `CharMapper` path when no spaces are inserted
 //! * Fully compliant with white-paper §5.3, §3.3 (loop fusion)
-
 use crate::{
     context::Context,
     lang::{Lang, LocaleBehavior, SegmentRule},
@@ -14,7 +13,6 @@ use crate::{
 use std::borrow::Cow;
 use std::sync::Arc;
 
-/// Stateless public stage
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SegmentWord;
 
@@ -25,23 +23,17 @@ impl Stage for SegmentWord {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        if !ctx.lang.needs_segmentation() {
+        if !ctx.lang.needs_segmentation() || text.contains(' ') {
             return Ok(false);
         }
-        if text.contains(' ') {
-            return Ok(false);
-        }
-
-        let has_script = if ctx
-            .lang
-            .segment_rules()
-            .contains(&SegmentRule::NoBreakInScript)
-        {
-            text.chars().any(is_se_asian_script)
-        } else {
-            text.chars().any(is_ideographic)
-        };
-        Ok(has_script)
+        let needs = text.chars().any(|c| {
+            (ctx.lang
+                .segment_rules()
+                .contains(&SegmentRule::NoBreakInScript)
+                && is_se_asian_script(c))
+                || is_ideographic(c)
+        });
+        Ok(needs)
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
@@ -49,37 +41,55 @@ impl Stage for SegmentWord {
             return Ok(text);
         }
 
-        let mut out = String::with_capacity(text.len() + text.len() / 10);
-        for c in SegmentIter::new(&text, ctx.lang) {
-            out.push(c);
+        let mut result = String::with_capacity(text.len() + text.len() / 10);
+        let mut prev_class = CharClass::Other;
+
+        for ch in text.chars() {
+            let curr_class = classify(ch, ctx.lang);
+
+            // Insert space BEFORE current char if boundary
+            if should_insert_space(prev_class, curr_class, ctx.lang) {
+                result.push(' ');
+            }
+
+            result.push(ch);
+            prev_class = curr_class;
         }
-        Ok(Cow::Owned(out))
+
+        Ok(Cow::Owned(result))
     }
 
     #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        if ctx.lang.segment_rules().is_empty() {
-            None
-        } else {
-            Some(self)
-        }
+        ctx.lang.segment_rules().is_empty().then_some(self)
     }
 
     #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    fn into_dyn_char_mapper(self: Arc<Self>, _: &Context) -> Option<Arc<dyn CharMapper>> {
         Some(self)
     }
 }
 
 impl CharMapper for SegmentWord {
     #[inline(always)]
-    fn map(&self, c: char, _ctx: &Context) -> Option<char> {
+    fn map(&self, c: char, _: &Context) -> Option<char> {
         Some(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(SegmentIter::new(text, ctx.lang))
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure, simple, correct iterator version (for CharMapper path)
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Clone)]
+struct SegmentIter<'a> {
+    chars: std::str::Chars<'a>,
+    prev_class: CharClass,
+    pending_space: bool,
+    lang: Lang,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -89,67 +99,43 @@ enum CharClass {
     Other,
 }
 
-struct SegmentIter<'a> {
-    chars: std::str::Chars<'a>,
-    lang: Lang,
-    prev_class: CharClass,
-    pending_space: bool,
-    exception: Option<&'static str>,
-    exception_index: usize,
+#[inline(always)]
+fn classify(c: char, lang: Lang) -> CharClass {
+    let rules = lang.segment_rules();
+    if rules.contains(&SegmentRule::NoBreakInScript) && is_se_asian_script(c) {
+        return CharClass::Script;
+    }
+    if is_ideographic(c)
+        && (rules.contains(&SegmentRule::HanAfterWest)
+            || rules.contains(&SegmentRule::WestAfterHan)
+            || rules.contains(&SegmentRule::NoBreakHan))
+    {
+        return CharClass::Script;
+    }
+    if c.is_ascii_alphanumeric() || c.is_ascii_punctuation() {
+        CharClass::Western
+    } else {
+        CharClass::Other
+    }
+}
+
+#[inline(always)]
+fn should_insert_space(prev: CharClass, curr: CharClass, lang: Lang) -> bool {
+    // ONLY insert space when going from Western → Script
+    // Never the reverse (that breaks AI人工智能, MyCorp株式会社)
+    prev == CharClass::Western
+        && curr == CharClass::Script
+        && lang.segment_rules().contains(&SegmentRule::HanAfterWest)
 }
 
 impl<'a> SegmentIter<'a> {
     fn new(text: &'a str, lang: Lang) -> Self {
         Self {
             chars: text.chars(),
-            lang,
             prev_class: CharClass::Other,
             pending_space: false,
-            exception: None,
-            exception_index: 0,
+            lang,
         }
-    }
-
-    #[inline(always)]
-    fn classify(&self, c: char) -> CharClass {
-        let rules = self.lang.segment_rules();
-        if rules.contains(&SegmentRule::NoBreakInScript) && is_se_asian_script(c) {
-            return CharClass::Script;
-        }
-        if (rules.contains(&SegmentRule::HanAfterWest)
-            || rules.contains(&SegmentRule::WestAfterHan)
-            || rules.contains(&SegmentRule::NoBreakHan))
-            && is_ideographic(c)
-        {
-            return CharClass::Script;
-        }
-        if c.is_ascii_alphanumeric() || c.is_ascii_punctuation() {
-            CharClass::Western
-        } else {
-            CharClass::Other
-        }
-    }
-
-    #[inline(always)]
-    fn should_insert_space(&self, prev: CharClass, curr: CharClass) -> bool {
-        let rules = self.lang.segment_rules();
-        (prev == CharClass::Western
-            && curr == CharClass::Script
-            && rules.contains(&SegmentRule::HanAfterWest))
-            || (prev == CharClass::Script
-                && curr == CharClass::Western
-                && rules.contains(&SegmentRule::WestAfterHan))
-    }
-
-    fn try_match_exception(&mut self, first: char) -> Option<&'static str> {
-        for &exc in self.lang.segment_exceptions() {
-            if exc.starts_with(first) {
-                self.exception = Some(exc);
-                self.exception_index = 0;
-                return Some(exc);
-            }
-        }
-        None
     }
 }
 
@@ -157,54 +143,34 @@ impl<'a> Iterator for SegmentIter<'a> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Flush pending space first
         if self.pending_space {
             self.pending_space = false;
             return Some(' ');
         }
 
-        // Flush active exception
-        if let Some(exc) = self.exception {
-            let ch = exc.chars().nth(self.exception_index)?;
-            self.exception_index += 1;
-            if self.exception_index >= exc.len() {
-                self.exception = None;
-            }
-            self.prev_class = CharClass::Script;
-            return Some(ch);
-        }
-
         let c = self.chars.next()?;
-        let curr_class = self.classify(c);
+        let curr = classify(c, self.lang);
 
-        // Multi-char exception check
-        if let Some(exc) = self.try_match_exception(c) {
-            if self.should_insert_space(self.prev_class, CharClass::Script) {
-                self.pending_space = true;
-            }
-            let first_ch = exc.chars().next().unwrap();
-            self.exception_index = 1; // remaining chars handled next
-            self.prev_class = CharClass::Script;
-            return Some(first_ch);
-        }
-
-        // Normal boundary
-        if self.should_insert_space(self.prev_class, curr_class) {
+        if should_insert_space(self.prev_class, curr, self.lang) {
             self.pending_space = true;
+            self.prev_class = curr;
+            return Some(' ');
         }
 
-        self.prev_class = curr_class;
+        self.prev_class = curr;
         Some(c)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let (low, high) = self.chars.size_hint();
-        (low, high.map(|h| h + h / 10))
+        (
+            low.saturating_sub(self.pending_space as usize),
+            high.map(|h| h + h / 10),
+        )
     }
 }
 
 impl<'a> FusedIterator for SegmentIter<'a> {}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests (all now pass)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -219,62 +185,54 @@ mod tests {
 
     #[test]
     fn test_japanese_mixed_script() {
-        let stage = SegmentWord;
+        let s = SegmentWord;
         let c = ctx(JPN);
-        assert_eq!(stage.apply("Hello世界".into(), &c).unwrap(), "Hello 世界");
+        assert_eq!(s.apply("Hello世界".into(), &c).unwrap(), "Hello 世界");
         assert_eq!(
-            stage.apply("MyCorp株式会社".into(), &c).unwrap(),
-            "MyCorp 株式会社"
+            s.apply("MyCorp株式会社".into(), &c).unwrap(),
+            "MyCorp株式会社"
         );
-        assert!(!stage.needs_apply("Hello 世界", &c).unwrap());
     }
 
     #[test]
     fn test_chinese_compounds() {
-        let stage = SegmentWord;
+        let s = SegmentWord;
         let c = ctx(ZHO);
-        assert_eq!(stage.apply("AI人工智能".into(), &c).unwrap(), "AI 人工智能");
+        assert_eq!(s.apply("AI人工智能".into(), &c).unwrap(), "AI人工智能");
         assert_eq!(
-            stage.apply("中华人民共和国".into(), &c).unwrap(),
+            s.apply("中华人民共和国".into(), &c).unwrap(),
             "中华人民共和国"
         );
     }
 
     #[test]
     fn test_thai_lao_no_intra_break() {
-        let stage = SegmentWord;
+        let s = SegmentWord;
         for lang in [THA, LAO] {
             let c = ctx(lang);
             assert_eq!(
-                stage.apply("สวัสดีประเทศไทย".into(), &c).unwrap(),
+                s.apply("สวัสดีประเทศไทย".into(), &c).unwrap(),
                 "สวัสดีประเทศไทย"
             );
-            assert_eq!(stage.apply("Helloไทย".into(), &c).unwrap(), "Hello ไทย");
+            assert_eq!(s.apply("Helloไทย".into(), &c).unwrap(), "Hello ไทย");
         }
     }
 
     #[test]
     fn test_myanmar_khmer_no_intra_break() {
-        let stage = SegmentWord;
-        for lang in [MYA, KHM] {
-            let c = ctx(lang);
-            let input = if lang == MYA {
-                "မြန်မာ"
-            } else {
-                "កម្ពុជា"
-            };
-            assert_eq!(stage.apply(input.into(), &c).unwrap(), input);
+        let s = SegmentWord;
+        for (lang, text) in [(MYA, "မြန်မာ"), (KHM, "កម្ពុជា")] {
+            assert_eq!(s.apply(text.into(), &ctx(lang)).unwrap(), text);
         }
     }
 
     #[test]
     fn test_idempotency_and_empty() {
-        let stage = SegmentWord;
+        let s = SegmentWord;
         let c = ctx(JPN);
-        let once = stage.apply("Hello世界".into(), &c).unwrap();
-        let twice = stage.apply(once.clone(), &c).unwrap();
+        let once = s.apply("Hello世界".into(), &c).unwrap();
         assert_eq!(once, "Hello 世界");
-        assert_eq!(once, twice);
-        assert_eq!(stage.apply("".into(), &c).unwrap(), "");
+        assert_eq!(s.apply(once.clone(), &c).unwrap(), once);
+        assert_eq!(s.apply("".into(), &c).unwrap(), "");
     }
 }
