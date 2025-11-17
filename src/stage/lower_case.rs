@@ -1,8 +1,8 @@
 //! stage/lower_case.rs – **Simple lowercase transformation**
 //!
-//! # Difference from CaseFold
+//! # Difference from FoldCase
 //! - **Lowercase**: Simple case conversion (NFC-preserving where possible)
-//! - **CaseFold**: Case-insensitive comparison (may expand: ß → ss)
+//! - **FoldCase**: Case-insensitive comparison (may expand: ß → ss)
 //!
 //! This stage uses `case_map` (1→1 only) instead of `fold_map`.
 //!

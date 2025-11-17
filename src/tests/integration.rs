@@ -1,13 +1,18 @@
 #[cfg(test)]
 mod integration_tests {
 
-    use crate::{ARA, CaseFold, DEU, LowerCase, NLD, Normy, RemoveDiacritics, TUR, Trim};
+    use crate::{
+        ARA, FoldCase, DEU, LowerCase, NLD, Normy, RemoveDiacritics, TUR, NormalizeWhitespace,
+        stage::normalize_punctuation::NormalizePunctuation,
+        stage::remove_control_chars::RemoveControlChars,
+        stage::replace_fullwidth::ReplaceFullwidth,
+    };
 
     #[test]
     fn production_pipeline_turkish() {
         let normy = Normy::builder()
             .lang(TUR)
-            .add_stage(Trim)
+            .add_stage(NormalizeWhitespace::trim_only())
             .add_stage(LowerCase)
             .build();
 
@@ -20,9 +25,9 @@ mod integration_tests {
     fn production_pipeline_arabic_diacritics() {
         let normy = Normy::builder()
             .lang(ARA)
-            .add_stage(Trim)
+            .add_stage(NormalizeWhitespace::trim_only())
             .add_stage(RemoveDiacritics)
-            .add_stage(CaseFold)
+            .add_stage(FoldCase)
             .build();
 
         let input = "  كتابٌ جميل  ";
@@ -34,8 +39,8 @@ mod integration_tests {
     fn production_pipeline_german() {
         let normy = Normy::builder()
             .lang(DEU)
-            .add_stage(Trim)
-            .add_stage(CaseFold)
+            .add_stage(NormalizeWhitespace::trim_only())
+            .add_stage(FoldCase)
             .build();
 
         let input = "  Weißstraße  ";
@@ -81,10 +86,60 @@ mod integration_tests {
     fn dutch_case_fold_is_canonical() {
         let out = Normy::builder()
             .lang(NLD)
-            .add_stage(CaseFold)
+            .add_stage(FoldCase)
             .build()
             .normalize("IJsselmeer")
             .unwrap();
         assert_eq!(out, "ijsselmeer"); // ← CORRECT
     }
+
+    #[test]
+    fn whitespace_triming_works() {
+        let normy = Normy::builder()
+            .lang(TUR)
+            .add_stage(NormalizeWhitespace::collapse_only())
+            .add_stage(LowerCase)
+            .build();
+
+        let input = " İSTANBUL   aCILAR ";
+        let result = normy.normalize(input).unwrap();
+        assert_eq!(result, " istanbul acılar ");
+    }
+
+    #[test]
+    fn test_replace_fullwidth() {
+        let normy = Normy::builder().add_stage(ReplaceFullwidth).build();
+        let text = "Ｈｅｌｌｏ　Ｗｏｒｌｄ！";
+        let normalized = normy.normalize(text).unwrap();
+        assert_eq!(normalized, "Hello World!");
+    }
+
+    #[test]
+    fn test_normalize_punctuation() {
+        let normy = Normy::builder().add_stage(NormalizePunctuation).build();
+        let text = "“Hello” – said ‘John’…";
+        let normalized = normy.normalize(text).unwrap();
+        assert_eq!(normalized, "\"Hello\" - said 'John'.");
+    }
+
+    #[test]
+    fn test_remove_control_chars() {
+        let text = "Hello\x07\x1Bworld\x7F";
+        let normalized = Normy::builder()
+            .add_stage(RemoveControlChars)
+            .build()
+            .normalize(text)
+            .unwrap();
+        assert_eq!(normalized, "Helloworld");
+    }
+
+    // #[test]
+    // fn test_remove_html() {
+    //     let text = "Hello <b>world</b> <script>alert(1)</script>";
+    //     let normalized = Normy::builder().add_stage(RemoveHtml)
+    //         .build()
+    //         .normalize_with_stage(RemoveHtml, text)
+    //         .unwrap();
+    //     assert_eq!(normalized, "Hello world ");
+    // }
 }

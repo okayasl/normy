@@ -12,10 +12,10 @@ pub use lang::{
     POL, SLK, SRP, SWE, THA, TUR, UKR, VIE, ZHO,
 };
 pub use normy::Normy;
-pub use stage::case_fold::CaseFold;
+pub use stage::fold_case::FoldCase;
 pub use stage::lower_case::LowerCase;
+pub use stage::normalize_whitespace::NormalizeWhitespace;
 pub use stage::remove_diacritics::RemoveDiacritics;
-pub use stage::trim::Trim;
 
 #[cfg(test)]
 mod tests {

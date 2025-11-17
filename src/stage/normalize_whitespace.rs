@@ -1,4 +1,3 @@
-//! src/stage/normalize_whitespace.rs
 //!
 //! Whitespace normalization for text processing pipelines.
 
@@ -176,7 +175,7 @@ fn has_sequential_whitespace(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CaseFold, lang::ENG};
+    use crate::{FoldCase, lang::ENG};
 
     fn ctx() -> Context {
         Context { lang: ENG }
@@ -487,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_after_case_fold() {
-        let case_fold = CaseFold;
+        let case_fold = FoldCase;
         let whitespace = NormalizeWhitespace::default();
         let c = ctx();
 

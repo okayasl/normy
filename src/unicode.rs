@@ -9,7 +9,7 @@
 //! All classification functions are `#[inline(always)]` and resolve to single
 //! CPU instructions in monomorphized pipelines.
 
-use phf::phf_set;
+use phf::{phf_map, phf_set};
 
 /// Format Control Characters (Unicode General Category = Cf) + selected ZW* characters
 ///
@@ -136,6 +136,44 @@ pub fn strip_format_controls(text: &str) -> String {
 #[inline]
 pub fn contains_format_controls(text: &str) -> bool {
     text.chars().any(is_format_control)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Full-width → half-width Latin forms (U+FF01–U+FF5E)
+// This is the only range that matters for search/tokenization
+// ─────────────────────────────────────────────────────────────────────────────
+#[inline(always)]
+pub fn is_fullwidth(c: char) -> bool {
+    let cp = c as u32;
+    (0xFF01..=0xFF5E).contains(&cp) || cp == 0x3000
+}
+
+#[inline(always)]
+pub fn fullwidth_to_halfwidth(c: char) -> char {
+    let cp = c as u32;
+    if (0xFF01..=0xFF5E).contains(&cp) {
+        // FF01–FF5E → 0021–007E
+        char::from_u32(cp - 0xFEE0).unwrap_or(c)
+    } else if cp == 0x3000 {
+        ' '  // Ideographic space → ASCII space
+    } else {
+        c
+    }
+}
+
+static PUNCT_NORM: phf::Map<char, char> = phf_map! {
+    '“' => '"', '”' => '"', '„' => '"', '«' => '"', '»' => '"',
+    '‘' => '\'', '’' => '\'', '‚' => '\'',
+    '–' => '-', '—' => '-', '─' => '-', '―' => '-',
+    '…' => '.', '⋯' => '.', '․' => '.', '‧' => '.',
+    '•' => '*', '·' => '*', '∙' => '*',
+    '‹' => '<', '›' => '>',
+    '′' => '"', '″' => '"',
+};
+
+#[inline(always)]
+pub fn normalize_punctuation_char(c: char) -> char {
+    PUNCT_NORM.get(&c).copied().unwrap_or(c)
 }
 
 #[cfg(test)]

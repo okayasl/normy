@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod unit_tests {
 
-    use crate::{CaseFold, DEU, ENG, FRA, JPN, LowerCase, NLD, Normy, RemoveDiacritics, TUR, Trim};
+    use crate::{
+        DEU, ENG, FRA, FoldCase, JPN, LowerCase, NLD, Normy, RemoveDiacritics, TUR,
+        stage::normalize_whitespace::NormalizeWhitespace,
+    };
     use std::borrow::Cow;
     #[test]
     fn ascii_fast_path() {
@@ -29,14 +32,14 @@ mod unit_tests {
 
     #[test]
     fn german_sharp_s() {
-        let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
+        let normy = Normy::builder().lang(DEU).add_stage(FoldCase).build();
         assert_eq!(normy.normalize("Weißstraße").unwrap(), "weissstrasse");
         assert_eq!(normy.normalize("GROß").unwrap(), "gross");
     }
 
     #[test]
     fn turkish_case_fold() {
-        let normy = Normy::builder().lang(TUR).add_stage(CaseFold).build();
+        let normy = Normy::builder().lang(TUR).add_stage(FoldCase).build();
         assert_eq!(normy.normalize("İ").unwrap(), "i");
         assert_eq!(normy.normalize("I").unwrap(), "ı");
     }
@@ -57,7 +60,7 @@ mod unit_tests {
 
     #[test]
     fn length_expansion() {
-        let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
+        let normy = Normy::builder().lang(DEU).add_stage(FoldCase).build();
         let input = "ß";
         let result = normy.normalize(input).unwrap();
         assert_eq!(result.len(), 2);
@@ -66,7 +69,10 @@ mod unit_tests {
 
     #[test]
     fn zero_copy_no_whitespace() {
-        let normy = Normy::builder().lang(ENG).add_stage(Trim).build();
+        let normy = Normy::builder()
+            .lang(ENG)
+            .add_stage(NormalizeWhitespace::trim_only())
+            .build();
         let input = "hello";
         let result = normy.normalize(input).unwrap();
         assert!(matches!(result, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr()));
@@ -74,7 +80,10 @@ mod unit_tests {
 
     #[test]
     fn trims_all_ascii_whitespace() {
-        let normy = Normy::builder().lang(ENG).add_stage(Trim).build();
+        let normy = Normy::builder()
+            .lang(ENG)
+            .add_stage(NormalizeWhitespace::trim_only())
+            .build();
         assert_eq!(
             normy.normalize(" \t\n hello \r\n pop ").unwrap(),
             "hello \r\n pop"
@@ -83,7 +92,10 @@ mod unit_tests {
 
     #[test]
     fn full_width_spaces_japanese() {
-        let normy = Normy::builder().lang(JPN).add_stage(Trim).build();
+        let normy = Normy::builder()
+            .lang(JPN)
+            .add_stage(NormalizeWhitespace::trim_only())
+            .build();
         assert_eq!(normy.normalize("　こんにちは　").unwrap(), "こんにちは");
     }
 
@@ -105,7 +117,7 @@ mod unit_tests {
 
     #[test]
     fn case_fold_idempotent() {
-        let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
+        let normy = Normy::builder().lang(DEU).add_stage(FoldCase).build();
         let s = "ẞ";
         let once = normy.normalize(s).unwrap().into_owned();
         let twice = normy.normalize(&once).unwrap().into_owned();
@@ -114,7 +126,7 @@ mod unit_tests {
 
     #[test]
     fn dutch_ij_sequence() {
-        let n = Normy::builder().lang(NLD).add_stage(CaseFold).build();
+        let n = Normy::builder().lang(NLD).add_stage(FoldCase).build();
         let cases = ["IJssel", "IJsland", "IJmuiden", "ijsselmeer"];
         for s in cases {
             let once = n.normalize(s).unwrap().into_owned();
@@ -129,10 +141,10 @@ mod unit_tests {
     // ─────────────────────────────────────────────────────────────────────────────
     #[test]
     fn turkish_zero_alloc_when_already_lower() {
-        use crate::{lang::TUR, normy::Normy, stage::case_fold::CaseFold};
+        use crate::{lang::TUR, normy::Normy, stage::fold_case::FoldCase};
 
-        // Build a pipeline that only contains CaseFold (no other stages)
-        let normy = Normy::builder().lang(TUR).add_stage(CaseFold).build();
+        // Build a pipeline that only contains FoldCase (no other stages)
+        let normy = Normy::builder().lang(TUR).add_stage(FoldCase).build();
 
         // Input is already lower-case Turkish text → no change required
         let input = "istanbul";
@@ -166,7 +178,7 @@ mod unit_tests {
 
     #[test]
     fn dutch_ij_sequence_is_idempotent_and_correct() {
-        let normy = Normy::builder().lang(NLD).add_stage(CaseFold).build();
+        let normy = Normy::builder().lang(NLD).add_stage(FoldCase).build();
 
         let cases = ["IJssel", "IJsland", "IJmuiden", "ijsselmeer", "IJzer"];
 

@@ -490,7 +490,7 @@ pub trait LocaleBehavior {
     // Add this after fold_char()
 
     /// Lowercase a single character (1→1 always, uses case_map).
-    /// This is for the Lowercase stage, not CaseFold.
+    /// This is for the Lowercase stage, not FoldCase.
     #[inline(always)]
     fn lowercase_char(&self, c: char) -> char {
         let case_map = self.case_map();
@@ -935,7 +935,7 @@ mod tests {
             "Fold: ß→ss (multi-char, rejected)"
         );
 
-        // This is why German can use CharMapper for Lowercase but not CaseFold
+        // This is why German can use CharMapper for Lowercase but not FoldCase
         assert!(!DEU.has_one_to_one_folds());
     }
 
