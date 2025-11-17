@@ -363,13 +363,13 @@ define_languages! {
     KOR, "ko", "Korean",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::HanAfterWest,SegmentRule::WestAfterHan,SegmentRule::NoBreakHan,], 
+        segment_rules: [SegmentRule::HanAfterWest,SegmentRule::WestAfterHan,SegmentRule::NoBreakHan,],
         segment_exceptions: [],
 
     THA, "th", "Thai",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::NoBreakInScript],
+        segment_rules: [SegmentRule::NoBreakInScript, SegmentRule::HanAfterWest, SegmentRule::WestAfterHan],
         segment_exceptions: ["ประเทศไทย", "กรุงเทพมหานคร", "ภาษาไทย", "ปัญญาประดิษฐ์", "คอมพิวเตอร์"],
 
     MYA, "my", "Myanmar",
@@ -387,7 +387,7 @@ define_languages! {
     LAO, "lo", "Lao",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::NoBreakInScript],
+        segment_rules: [SegmentRule::NoBreakInScript, SegmentRule::HanAfterWest, SegmentRule::WestAfterHan],
         segment_exceptions: ["ລາວ", "ວຽງຈັນ", "ສະຫວັນນະເຂດ"],
 
     // ──────────────────────────────────────────────────────────────────────

@@ -37,19 +37,28 @@ impl Stage for SegmentWord {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !self.needs_apply(&text, ctx)? {
-            return Ok(text);
-        }
-
         let mut result = String::with_capacity(text.len() + text.len() / 10);
         let mut prev_class = CharClass::Other;
+        let text_str = text.as_ref();
+        let char_indices = text_str.char_indices();
 
-        for ch in text.chars() {
+        for (idx, ch) in char_indices {
             let curr_class = classify(ch, ctx.lang);
 
             // Insert space BEFORE current char if boundary
             if should_insert_space(prev_class, curr_class, ctx.lang) {
-                result.push(' ');
+                // Check if current position matches any exception
+                let remaining = &text_str[idx..];
+
+                let is_exception = ctx
+                    .lang
+                    .segment_exceptions()
+                    .iter()
+                    .any(|&e| remaining.starts_with(e));
+
+                if !is_exception {
+                    result.push(' ');
+                }
             }
 
             result.push(ch);
@@ -92,7 +101,7 @@ struct SegmentIter<'a> {
     lang: Lang,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CharClass {
     Western,
     Script,
@@ -152,9 +161,23 @@ impl<'a> Iterator for SegmentIter<'a> {
         let curr = classify(c, self.lang);
 
         if should_insert_space(self.prev_class, curr, self.lang) {
-            self.pending_space = true;
-            self.prev_class = curr;
-            return Some(' ');
+            // Check if current char + remaining text starts with any exception
+            let is_exception = self.lang.segment_exceptions().iter().any(|&e| {
+                // The exception must start with current char
+                if !e.starts_with(c) {
+                    return false;
+                }
+
+                // Check if the rest of the exception matches what follows
+                let suffix = &e[c.len_utf8()..];
+                self.chars.as_str().starts_with(suffix)
+            });
+
+            if !is_exception {
+                self.pending_space = true;
+                self.prev_class = curr;
+                return Some(' ');
+            }
         }
 
         self.prev_class = curr;
@@ -171,9 +194,7 @@ impl<'a> Iterator for SegmentIter<'a> {
 }
 
 impl<'a> FusedIterator for SegmentIter<'a> {}
-// ═══════════════════════════════════════════════════════════════════════════
-// Tests (all now pass)
-// ═══════════════════════════════════════════════════════════════════════════
+
 #[cfg(test)]
 mod tests {
     use super::*;
