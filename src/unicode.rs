@@ -176,6 +176,18 @@ pub fn normalize_punctuation_char(c: char) -> char {
     PUNCT_NORM.get(&c).copied().unwrap_or(c)
 }
 
+/// Southeast Asian scripts that require syllable-level no-break rules
+#[inline(always)]
+pub fn is_se_asian_script(c: char) -> bool {
+    matches!(c as u32,
+        0x0E00..=0x0E7F  // Thai + Lao
+        | 0x1000..=0x109F // Myanmar
+        | 0x1780..=0x17FF // Khmer
+        | 0x19E0..=0x19FF // Khmer Symbols
+        | 0x1A00..=0x1A1F // Tai Tham (partial Lao)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
