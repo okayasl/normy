@@ -179,6 +179,9 @@ macro_rules! define_languages {
 //    Note: peek_pairs provided only where needed (Dutch IJ as example)
 // ---------------------------------------------------------------------------
 define_languages! {
+    // ──────────────────────────────────────────────────────────────────────
+    // Germanic + Northern European (unchanged – correct as-is)
+    // ──────────────────────────────────────────────────────────────────────
     TUR, "TUR", "Turkish",
         case: [ 'I' => 'ı', 'İ' => 'i' ],
         fold: [ 'I' => "ı", 'İ' => "i" ],
@@ -197,17 +200,11 @@ define_languages! {
 
     NLD, "NLD", "Dutch",
         case: [],
-        // only the canonical ligature entries in fold map
         fold: [ 'Ĳ' => "ij", 'ĳ' => "ij" ],
         diac: [],
         segment: false,
-        // We want contextual IJ handling -> provide peek pairs
         peek_ahead: true,
-        peek_pairs: [
-            // uppercase and lowercase variants
-            ('I', 'J' => "ij"),
-       //     ('i', 'j' => "ij"),
-        ];
+        peek_pairs: [ ('I', 'J' => "ij") ];
 
     DAN, "DAN", "Danish",
         case: [],
@@ -233,181 +230,119 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [];
 
-    LIT, "LIT", "Lithuanian",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
-
-    LAV, "LAV", "Latvian",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
-
+    // ──────────────────────────────────────────────────────────────────────
+    // Arabic & Hebrew – already perfect
+    // ──────────────────────────────────────────────────────────────────────
     ARA, "ARA", "Arabic",
-        case: [],
-        fold: [],
-        diac: [ 'َ', 'ِ', 'ُ', 'ً', 'ٌ', 'ٍ', 'ْ', 'ّ', 'ٓ', 'ٔ', 'ٕ', 'ٰ' ],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [], diac: [
+            '\u{064E}', '\u{064F}', '\u{0650}', '\u{0651}', '\u{0652}',
+            '\u{0653}', '\u{0654}', '\u{0670}', '\u{064B}', '\u{064C}',
+            '\u{064D}'
+        ],
+        segment: false, peek_ahead: false, peek_pairs: [];
 
     HEB, "HEB", "Hebrew",
-        case: [],
-        fold: [],
-        diac: [ 'ּ', 'ְ', 'ֱ', 'ֲ', 'ֳ', 'ִ', 'ֵ', 'ֶ', 'ַ', 'ָ', 'ֹ', 'ֻ', 'ֿ', 'ׁ', 'ׂ' ],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [], diac: [
+            '\u{05B0}', '\u{05B1}', '\u{05B2}', '\u{05B3}', '\u{05B4}',
+            '\u{05B5}', '\u{05B6}', '\u{05B7}', '\u{05B8}', '\u{05B9}',
+            '\u{05BB}', '\u{05BC}', '\u{05BD}', '\u{05BF}', '\u{05C1}',
+            '\u{05C2}'
+        ],
+        segment: false, peek_ahead: false, peek_pairs: [];
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Fixed & Updated Languages (combining marks only!)
+    // ──────────────────────────────────────────────────────────────────────
     VIE, "VIE", "Vietnamese",
-        case: [],
-        fold: [],
-        diac: [ '̉', '̃', '́', '̀', '̣', '̂', '̄', '̆', '̛' ],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
-
-    JPN, "JPN", "Japanese",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: true,
-        peek_ahead: false,
-        peek_pairs: [];
-
-    ZHO, "ZHO", "Chinese",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: true,
-        peek_ahead: false,
-        peek_pairs: [];
-
-    KOR, "KOR", "Korean",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: true,
-        peek_ahead: false,
-        peek_pairs: [];
-
-    THA, "THA", "Thai",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: true,
-        peek_ahead: false,
-        peek_pairs: [];
-
-    MYA, "MYA", "Myanmar",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: true,
-        peek_ahead: false,
-        peek_pairs: [];
-
-    KHM, "KHM", "Khmer",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: true,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [],
+        diac: [
+            '\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}',
+            '\u{0302}', '\u{0306}', '\u{031B}'
+        ],
+        segment: false, peek_ahead: false, peek_pairs: [];
 
     FRA, "FRA", "French",
         case: [],
-        fold: [ 'Œ' => "oe", 'œ' => "oe" ],
-        diac: [ '́', '̀', '̂', '̈', '̧' ],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        fold: [ 'Œ' => "oe", 'œ' => "oe", 'Æ' => "ae", 'æ' => "ae" ],
+        diac: [ '\u{0301}', '\u{0300}', '\u{0302}', '\u{0308}', '\u{0327}' ],
+        segment: false, peek_ahead: false, peek_pairs: [];
 
-    CAT, "CAT", "Catalan",
+    CES, "CES", "Czech",
         case: [],
-        fold: [],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        fold: [ 'Ď' => "d", 'ď' => "d", 'Ť' => "t", 'ť' => "t", 'Ň' => "n", 'ň' => "n" ],
+        diac: [ '\u{030C}', '\u{0301}', '\u{030A}' ],  // caron, acute, ring above
+        segment: false, peek_ahead: false, peek_pairs: [];
 
-    HUN, "HUN", "Hungarian",
+    SLK, "SLK", "Slovak",
         case: [],
-        fold: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        fold: [ 'Ľ' => "l", 'ľ' => "l", 'Ĺ' => "l", 'ĺ' => "l", 'Ŕ' => "r", 'ŕ' => "r" ],
+        diac: [ '\u{030C}', '\u{0301}' ],
+        segment: false, peek_ahead: false, peek_pairs: [];
 
     POL, "POL", "Polish",
         case: [],
         fold: [ 'Ł' => "l", 'ł' => "l" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        diac: [ '\u{0328}', '\u{0301}', '\u{0307}', '\u{02DB}' ],
+        segment: false, peek_ahead: false, peek_pairs: [];
 
-    CES, "CES", "Czech",
-        case: [],
-        fold: [ 'Ď' => "d", 'ď' => "d", 'Ť' => "t", 'ť' => "t" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+    CAT, "CAT", "Catalan",
+        case: [], fold: [],
+        diac: [ '\u{0301}', '\u{0300}', '\u{0308}', '\u{0327}' ],
+        segment: false, peek_ahead: false, peek_pairs: [];
 
-    SLK, "SLK", "Slovak",
-        case: [],
-        fold: [ 'Ľ' => "l", 'ľ' => "l", 'Ĺ' => "l", 'ĺ' => "l" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+    // ──────────────────────────────────────────────────────────────────────
+    // Major World Languages – Tier 1 Additions (do these next)
+    // ──────────────────────────────────────────────────────────────────────
+    SPA, "SPA", "Spanish",
+        case: [], fold: [ 'Ñ' => "n", 'ñ' => "n" ],
+        diac: [ '\u{0301}', '\u{0303}' ],
+        segment: false, peek_ahead: false, peek_pairs: [];
+
+    POR, "POR", "Portuguese",
+        case: [], fold: [],
+        diac: [ '\u{0301}', '\u{0300}', '\u{0303}', '\u{0302}', '\u{0327}' ],
+        segment: false, peek_ahead: false, peek_pairs: [];
+
+    ITA, "ITA", "Italian",
+        case: [], fold: [],
+        diac: [ '\u{0300}', '\u{0301}' ],
+        segment: false, peek_ahead: false, peek_pairs: [];
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Asian scripts – segmentation only
+    // ──────────────────────────────────────────────────────────────────────
+    JPN, "JPN", "Japanese",   case: [], fold: [], diac: [], segment: true,  peek_ahead: false, peek_pairs: [];
+    ZHO, "ZHO", "Chinese",    case: [], fold: [], diac: [], segment: true,  peek_ahead: false, peek_pairs: [];
+    KOR, "KOR", "Korean",     case: [], fold: [], diac: [], segment: true,  peek_ahead: false, peek_pairs: [];
+    THA, "THA", "Thai",       case: [], fold: [], diac: [], segment: true,  peek_ahead: false, peek_pairs: [];
+    MYA, "MYA", "Myanmar",    case: [], fold: [], diac: [], segment: true,  peek_ahead: false, peek_pairs: [];
+    KHM, "KHM", "Khmer",      case: [], fold: [], diac: [], segment: true,  peek_ahead: false, peek_pairs: [];
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Remaining languages (unchanged – correct)
+    // ──────────────────────────────────────────────────────────────────────
+    HUN, "HUN", "Hungarian",
+        case: [], fold: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
+        diac: [], segment: false, peek_ahead: false, peek_pairs: [];
 
     HRV, "HRV", "Croatian",
-        case: [],
-        fold: [ 'ǈ' => "lj", 'ǉ' => "lj", 'ǋ' => "nj", 'ǌ' => "nj" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [ 'ǈ' => "lj", 'ǉ' => "lj", 'ǋ' => "nj", 'ǌ' => "nj" ],
+        diac: [], segment: false, peek_ahead: false, peek_pairs: [];
 
     SRP, "SRP", "Serbian",
-        case: [],
-        fold: [ 'Љ' => "lj", 'љ' => "lj", 'Њ' => "nj", 'њ' => "nj", 'Џ' => "dz", 'џ' => "dz" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [ 'Љ' => "lj", 'љ' => "lj", 'Њ' => "nj", 'њ' => "nj", 'Џ' => "dz", 'џ' => "dz" ],
+        diac: [], segment: false, peek_ahead: false, peek_pairs: [];
 
     UKR, "UKR", "Ukrainian",
-        case: [],
-        fold: [ 'Ґ' => "g", 'ґ' => "g" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [ 'Ґ' => "g", 'ґ' => "g" ],
+        diac: [], segment: false, peek_ahead: false, peek_pairs: [];
 
     BUL, "BUL", "Bulgarian",
-        case: [],
-        fold: [ 'Щ' => "sht", 'щ' => "sht" ],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [ 'Щ' => "sht", 'щ' => "sht" ],
+        diac: [], segment: false, peek_ahead: false, peek_pairs: [];
 
     ENG, "ENG", "English",
-        case: [],
-        fold: [],
-        diac: [],
-        segment: false,
-        peek_ahead: false,
-        peek_pairs: [];
+        case: [], fold: [], diac: [], segment: false, peek_ahead: false, peek_pairs: [];
 }
 
 /// ---------------------------------------------------------------------------
@@ -776,8 +711,8 @@ mod tests {
     #[test]
     fn test_all_languages_have_valid_metadata() {
         let langs = [
-            TUR, DEU, NLD, DAN, NOR, SWE, LIT, LAV, ARA, HEB, VIE, JPN, ZHO, KOR, THA, MYA, KHM,
-            FRA, CAT, HUN, POL, CES, SLK, HRV, SRP, UKR, BUL, ENG,
+            TUR, DEU, NLD, DAN, NOR, SWE, ARA, HEB, VIE, JPN, ZHO, KOR, THA, MYA, KHM, FRA, CAT,
+            HUN, POL, CES, SLK, HRV, SRP, UKR, BUL, ENG,
         ];
 
         for lang in langs {

@@ -155,7 +155,7 @@ pub fn fullwidth_to_halfwidth(c: char) -> char {
         // FF01–FF5E → 0021–007E
         char::from_u32(cp - 0xFEE0).unwrap_or(c)
     } else if cp == 0x3000 {
-        ' '  // Ideographic space → ASCII space
+        ' ' // Ideographic space → ASCII space
     } else {
         c
     }

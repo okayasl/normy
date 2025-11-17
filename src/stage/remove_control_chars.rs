@@ -27,7 +27,9 @@ impl Stage for RemoveControlChars {
         if !self.needs_apply(&text, _ctx)? {
             return Ok(text);
         }
-        Ok(Cow::Owned(text.chars().filter(|&c| !is_control(c)).collect()))
+        Ok(Cow::Owned(
+            text.chars().filter(|&c| !is_control(c)).collect(),
+        ))
     }
 
     #[inline]

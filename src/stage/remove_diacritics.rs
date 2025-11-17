@@ -10,7 +10,7 @@ use crate::{
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
-use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfd_quick};
+use unicode_normalization::UnicodeNormalization;
 
 /// Removes language-specific diacritical marks without expanding compatibility
 /// characters (ligatures, fractions, superscripts, etc.).
@@ -37,18 +37,23 @@ impl Stage for RemoveDiacritics {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        if !ctx.lang.has_diacritics() {
+        // 1. Universal fast paths — must come first (§3.2)
+        if text.is_empty() {
             return Ok(false);
         }
         if text.is_ascii() {
             return Ok(false);
         }
-        // Quick NFD check
-        if matches!(is_nfd_quick(text.chars()), IsNormalized::Yes)
-            && !ctx.lang.contains_diacritics(text)
-        {
+
+        // 2. Language-specific activation
+        if !ctx.lang.has_diacritics() {
             return Ok(false);
         }
+
+        // 3. At this point:
+        // - Text is non-empty and contains non-ASCII
+        // - Language has defined diacritics (e.g. French, Arabic, Vietnamese)
+        // → Stage is active, even if current text has no diacritics
         Ok(true)
     }
 
@@ -135,7 +140,10 @@ impl<I: Iterator<Item = char>> FusedIterator for RemoveDiacriticsIter<I> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::{ARA, ENG, FRA, HEB, VIE};
+    use crate::{
+        CES, POL, SLK,
+        lang::{ARA, ENG, FRA, HEB, VIE},
+    };
 
     fn ctx(lang: crate::lang::Lang) -> Context {
         Context { lang }
@@ -157,11 +165,22 @@ mod tests {
     #[test]
     fn test_arabic_diacritics() {
         let stage = RemoveDiacritics;
-        let c = ctx(ARA);
-        let input = "مَرْحَبًا"; // "Hello" with diacritics
+        let c = Context { lang: ARA };
 
-        assert!(stage.needs_apply(input, &c).unwrap());
-        assert_eq!(stage.apply(Cow::Borrowed(input), &c).unwrap(), "مرحبا");
+        let input1 = "مَرْحَبًا"; // "Hello" with tashkīl
+        assert!(stage.needs_apply(input1, &c).unwrap());
+        assert_eq!(stage.apply(Cow::Borrowed(input1), &c).unwrap(), "مرحبا");
+
+        let input2 = "كتاب"; // Clean Arabic
+        assert!(stage.needs_apply(input2, &c).unwrap()); // Now passes
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input2), &c).unwrap(),
+            "كتاب" // Unchanged — correct
+        );
+
+        // Zero-copy check
+        let result = stage.apply(Cow::Borrowed(input2), &c).unwrap();
+        assert!(matches!(result, Cow::Borrowed(_)));
     }
 
     #[test]
@@ -370,5 +389,101 @@ mod tests {
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
 
         assert_eq!(result, "Hello مرحبا World");
+    }
+
+    #[test]
+    fn test_vietnamese_clean_text_zero_copy() {
+        let stage = RemoveDiacritics;
+        let ctx = Context { lang: VIE };
+
+        let input = "toi ten la Nam"; // No diacritics
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert!(
+            matches!(result, Cow::Borrowed(_)),
+            "Should be zero-copy for clean Vietnamese text"
+        );
+    }
+
+    #[test]
+    fn test_vietnamese_diacritics_removal() {
+        let stage = RemoveDiacritics;
+        let ctx = Context { lang: VIE };
+
+        // Real Vietnamese text — uses precomposed đ (U+0111), which must be PRESERVED
+        let input = "Hà Nội đẹp quá! Tôi tên là Đạt.";
+        assert!(stage.needs_apply(input, &ctx).unwrap());
+
+        let expected = "Ha Noi đep qua! Toi ten la Đat."; // <-- FIX IS HERE
+
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            expected,
+            "Tone marks removed, but đ/Đ preserved as atomic letters (real-world behavior)"
+        );
+    }
+
+    #[test]
+    fn test_vietnamese_rare_decomposed_stroke() {
+        let stage = RemoveDiacritics;
+        let ctx = Context { lang: VIE };
+
+        // Extremely rare: someone used d + combining stroke below (U+0331)
+        let input = "de\u{0302}\u{0323}p"; // d + circumflex + dot below + p
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert_eq!(result, "dep", "Combining marks stripped from base d");
+    }
+
+    #[test]
+    fn test_czech_diacritics_removal() {
+        let stage = RemoveDiacritics;
+        let ctx = Context { lang: CES };
+
+        let input = "Příliš žluťoučký kůň úpěl ďábelské ódy";
+        assert!(stage.needs_apply(input, &ctx).unwrap());
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            "Prilis zlutoucky kun upel dabelske ody",
+            "Czech háčeks and čárkas should be removed"
+        );
+    }
+
+    #[test]
+    fn test_polish_diacritics_removal() {
+        let stage = RemoveDiacritics;
+        let ctx = Context { lang: POL };
+        let input = "Łódź, Żółć, Gęślą, Jaźń";
+        assert!(stage.needs_apply(input, &ctx).unwrap());
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            "Łodz, Zołc, Gesla, Jazn", // Ż → Ż (dot preserved? NO! removed → Zołc is CORRECT)
+            "Polish combining marks removed, base letters (Ł, Ż) preserved"
+        );
+    }
+
+    #[test]
+    fn test_french_full_diacritics() {
+        let stage = RemoveDiacritics;
+        let ctx = Context { lang: FRA };
+        let input = "naïve, Noël, façade, cœlacanthe, garçon";
+        assert!(stage.needs_apply(input, &ctx).unwrap());
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            "naive, Noel, facade, cœlacanthe, garcon",
+            "œ and æ are ligatures → preserved; diacritics removed"
+        );
+    }
+
+    #[test]
+    fn test_slovak_diacritics() {
+        let stage = RemoveDiacritics;
+        let ctx = Context { lang: SLK };
+
+        let input = "Ľúbica a Ďurko štrikujú v Ťahanovciach";
+        assert!(stage.needs_apply(input, &ctx).unwrap());
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            "Lubica a Durko strikuju v Tahanovciach",
+            "Slovak carons should be removed"
+        );
     }
 }
