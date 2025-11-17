@@ -1,15 +1,33 @@
 //! src/stage/remove_diacritics.rs
-//! Zero-copy, locale-aware diacritic removal.
+//!
+//! Removes language-specific diacritical marks using NFD (Canonical Decomposition).
 
 use crate::{
     context::Context,
     lang::{Lang, LocaleBehavior},
-    stage::{CharMapper, FusedIterator, Stage, StageError},
+    stage::{CharMapper, Stage, StageError},
 };
 use std::borrow::Cow;
+use std::iter::FusedIterator;
 use std::sync::Arc;
-use unicode_normalization::{UnicodeNormalization, is_nfkd_quick};
+use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfd_quick};
 
+/// Removes language-specific diacritical marks without expanding compatibility
+/// characters (ligatures, fractions, superscripts, etc.).
+///
+/// # Normalization Form
+///
+/// Uses **NFD (Canonical Decomposition)** before filtering:
+/// - Precomposed characters decomposed: `é` → `e` + combining acute
+/// - **Ligatures preserved**: `ﬁ` remains `ﬁ` (not expanded to `fi`)
+/// - **Fractions preserved**: `½` remains `½` (not decomposed to `1⁄2`)
+/// - **Superscripts preserved**: `m²` remains `m²` (not normalized to `m2`)
+///
+/// # When to Use
+///
+/// - Preparing text for phonetic processing
+/// - Removing accents while preserving typography
+/// - Text-to-speech preprocessing
 pub struct RemoveDiacritics;
 
 impl Stage for RemoveDiacritics {
@@ -19,25 +37,18 @@ impl Stage for RemoveDiacritics {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        // Use helper method
         if !ctx.lang.has_diacritics() {
             return Ok(false);
         }
-
-        // Pure ASCII → no diacritics possible
         if text.is_ascii() {
             return Ok(false);
         }
-
-        // Quick NFKD check – if already NFKD and no diacritic chars, skip
-        if matches!(
-            is_nfkd_quick(text.chars()),
-            unicode_normalization::IsNormalized::Yes
-        ) && !ctx.lang.contains_diacritics(text)
+        // Quick NFD check
+        if matches!(is_nfd_quick(text.chars()), IsNormalized::Yes)
+            && !ctx.lang.contains_diacritics(text)
         {
             return Ok(false);
         }
-
         Ok(true)
     }
 
@@ -45,20 +56,23 @@ impl Stage for RemoveDiacritics {
         if !ctx.lang.has_diacritics() {
             return Ok(text);
         }
-        let mut has_diac = false;
+
+        let mut has_diacritic = false;
         let mut out = String::with_capacity(text.len());
-        for c in text.nfkd() {
-            // Lazy iterator, no collect
+
+        for c in text.nfd() {
             if ctx.lang.is_diacritic(c) {
-                has_diac = true;
+                has_diacritic = true;
                 continue;
             }
             out.push(c);
         }
-        if !has_diac {
-            return Ok(text); // Zero-copy if no removals
+
+        if !has_diacritic {
+            Ok(text)
+        } else {
+            Ok(Cow::Owned(out))
         }
-        Ok(Cow::Owned(out))
     }
 
     #[inline]
@@ -75,7 +89,6 @@ impl Stage for RemoveDiacritics {
 impl CharMapper for RemoveDiacritics {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        // Filter out diacritics, keep everything else
         if ctx.lang.is_diacritic(c) {
             None
         } else {
@@ -84,25 +97,16 @@ impl CharMapper for RemoveDiacritics {
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        // ASCII fast-path
-        if text.is_ascii() {
+        if text.is_ascii() || !ctx.lang.has_diacritics() {
             return Box::new(text.chars());
         }
-
-        // Check if language has diacritics
-        if !ctx.lang.has_diacritics() {
-            return Box::new(text.chars());
-        }
-
-        // Use custom iterator with lang helpers
         Box::new(RemoveDiacriticsIter {
-            chars: text.nfkd(),
+            chars: text.nfd(),
             lang: ctx.lang,
         })
     }
 }
 
-// Custom iterator using lang.rs helpers
 struct RemoveDiacriticsIter<I> {
     chars: I,
     lang: Lang,
@@ -118,73 +122,253 @@ impl<I: Iterator<Item = char>> Iterator for RemoveDiacriticsIter<I> {
             if !self.lang.is_diacritic(c) {
                 return Some(c);
             }
-            // Skip diacritics, continue loop
         }
     }
 }
 
 impl<I: Iterator<Item = char>> FusedIterator for RemoveDiacriticsIter<I> {}
 
-// ---------------------------------------------------------------------
-// Tests (add to the file)
-// ---------------------------------------------------------------------
+// ============================================================================
+// Tests
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::{ARA, ENG, FRA, VIE};
+    use crate::lang::{ARA, ENG, FRA, HEB, VIE};
 
     fn ctx(lang: crate::lang::Lang) -> Context {
         Context { lang }
     }
 
+    // ------------------------------------------------------------------------
+    // Basic Functionality
+    // ------------------------------------------------------------------------
+
     #[test]
-    fn ascii_no_op() {
+    fn test_ascii_no_op() {
         let stage = RemoveDiacritics;
         let c = ctx(ENG);
+
         assert!(!stage.needs_apply("hello world", &c).unwrap());
         assert_eq!(stage.apply(Cow::Borrowed("hello"), &c).unwrap(), "hello");
     }
 
     #[test]
-    fn arabic_diacritics() {
+    fn test_arabic_diacritics() {
         let stage = RemoveDiacritics;
         let c = ctx(ARA);
-        let input = "مَرْحَبًا";
+        let input = "مَرْحَبًا"; // "Hello" with diacritics
+
         assert!(stage.needs_apply(input, &c).unwrap());
         assert_eq!(stage.apply(Cow::Borrowed(input), &c).unwrap(), "مرحبا");
     }
 
     #[test]
-    fn french_accents() {
+    fn test_french_accents() {
         let stage = RemoveDiacritics;
         let c = ctx(FRA);
-        assert_eq!(
-            stage.apply(Cow::Borrowed("café naïve"), &c).unwrap(),
-            "cafe naive"
-        );
+
+        assert_eq!(stage.apply(Cow::Borrowed("café"), &c).unwrap(), "cafe");
+        assert_eq!(stage.apply(Cow::Borrowed("naïve"), &c).unwrap(), "naive");
+        assert_eq!(stage.apply(Cow::Borrowed("résumé"), &c).unwrap(), "resume");
     }
 
     #[test]
-    fn vietnamese() {
+    fn test_vietnamese() {
         let stage = RemoveDiacritics;
         let c = ctx(VIE);
+
         assert_eq!(stage.apply(Cow::Borrowed("Hà Nội"), &c).unwrap(), "Ha Noi");
     }
 
     #[test]
-    fn char_mapper_eligibility() {
+    fn test_hebrew() {
         let stage = RemoveDiacritics;
-        assert!(stage.as_char_mapper(&ctx(ARA)).is_some());
-        assert!(stage.as_char_mapper(&ctx(ENG)).is_none());
+        let c = ctx(HEB);
+
+        // Hebrew with nikud (vowel points)
+        let input = "שָׁלוֹם"; // "Shalom" with diacritics
+        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
+        assert_eq!(result, "שלום");
+    }
+
+    // ------------------------------------------------------------------------
+    // NFD vs NFKD: Verify No Side Effects
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_preserves_ligatures() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        // Latin ligatures should be preserved
+        assert_eq!(stage.apply(Cow::Borrowed("ﬁle"), &c).unwrap(), "ﬁle");
+        assert_eq!(stage.apply(Cow::Borrowed("ﬂoor"), &c).unwrap(), "ﬂoor");
+        assert_eq!(stage.apply(Cow::Borrowed("oﬀer"), &c).unwrap(), "oﬀer");
     }
 
     #[test]
-    fn idempotency() {
+    fn test_preserves_fractions() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        assert_eq!(
+            stage.apply(Cow::Borrowed("½ tasse"), &c).unwrap(),
+            "½ tasse"
+        );
+        assert_eq!(stage.apply(Cow::Borrowed("¾"), &c).unwrap(), "¾");
+    }
+
+    #[test]
+    fn test_preserves_superscripts() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        assert_eq!(stage.apply(Cow::Borrowed("m²"), &c).unwrap(), "m²");
+        assert_eq!(stage.apply(Cow::Borrowed("x³"), &c).unwrap(), "x³");
+    }
+
+    #[test]
+    fn test_combined_diacritics_and_ligatures() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        // Should remove diacritics but preserve ligatures
+        let input = "café ﬁle";
+        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
+
+        assert_eq!(result, "cafe ﬁle");
+        assert!(result.contains("ﬁ"), "Ligature should be preserved");
+        assert!(!result.contains("é"), "Diacritic should be removed");
+    }
+
+    // ------------------------------------------------------------------------
+    // Language-Specific Behavior
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_english_no_diacritics_early_return() {
+        let stage = RemoveDiacritics;
+        let c = ctx(ENG);
+
+        // English has no diacritics, should return early
+        let input = "file ﬁle ½";
+        assert!(!stage.needs_apply(input, &c).unwrap());
+
+        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
+        assert!(matches!(result, Cow::Borrowed(_))); // Zero-copy
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_language_without_diacritics_defined() {
+        let stage = RemoveDiacritics;
+
+        // Languages with empty diacritic lists
+        for lang in [ENG, crate::lang::DEU, crate::lang::NLD] {
+            let c = ctx(lang);
+            assert!(!stage.needs_apply("test", &c).unwrap());
+            assert!(stage.as_char_mapper(&c).is_none());
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // CharMapper Eligibility
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_char_mapper_eligibility() {
+        let stage = RemoveDiacritics;
+
+        // Languages with diacritics: eligible
+        assert!(stage.as_char_mapper(&ctx(ARA)).is_some());
+        assert!(stage.as_char_mapper(&ctx(FRA)).is_some());
+        assert!(stage.as_char_mapper(&ctx(HEB)).is_some());
+        assert!(stage.as_char_mapper(&ctx(VIE)).is_some());
+
+        // Languages without diacritics: not eligible
+        assert!(stage.as_char_mapper(&ctx(ENG)).is_none());
+    }
+
+    // ------------------------------------------------------------------------
+    // Edge Cases
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_idempotency() {
         let stage = RemoveDiacritics;
         let c = ctx(ARA);
+
         let once = stage.apply(Cow::Borrowed("مَرْحَبًا"), &c).unwrap();
         let twice = stage.apply(Cow::Borrowed(&once), &c).unwrap();
+
         assert_eq!(once, "مرحبا");
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_empty_string() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        assert!(!stage.needs_apply("", &c).unwrap());
+        assert_eq!(stage.apply(Cow::Borrowed(""), &c).unwrap(), "");
+    }
+
+    #[test]
+    fn test_no_diacritics_zero_copy() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        let input = "hello world";
+        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
+
+        assert!(matches!(result, Cow::Borrowed(_))); // Zero-copy
+        assert_eq!(result, input);
+    }
+
+    #[test]
+    fn test_all_diacritics_removed() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        // String of only diacritics (combining marks after NFD)
+        let input = "e\u{0301}\u{0300}"; // e with acute and grave
+        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
+
+        assert_eq!(result, "e");
+    }
+
+    // ------------------------------------------------------------------------
+    // Real-World Examples
+    // ------------------------------------------------------------------------
+
+    #[test]
+    fn test_french_sentences() {
+        let stage = RemoveDiacritics;
+        let c = ctx(FRA);
+
+        let examples = vec![
+            ("Crème brûlée", "Creme brulee"),
+            ("École française", "Ecole francaise"),
+            ("Où est la bibliothèque?", "Ou est la bibliotheque?"),
+        ];
+
+        for (input, expected) in examples {
+            assert_eq!(stage.apply(Cow::Borrowed(input), &c).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_mixed_scripts() {
+        let stage = RemoveDiacritics;
+        let c = ctx(ARA);
+
+        // Arabic with English
+        let input = "Hello مَرْحَبًا World";
+        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
+
+        assert_eq!(result, "Hello مرحبا World");
     }
 }

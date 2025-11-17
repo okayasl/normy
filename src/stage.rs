@@ -23,6 +23,8 @@
 
 pub mod case_fold;
 pub mod lower_case;
+pub mod normalization;
+pub mod normalize_whitespace;
 pub mod remove_diacritics;
 pub mod remove_format_controls;
 pub mod trim;
