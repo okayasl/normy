@@ -47,18 +47,28 @@ impl Stage for SegmentWord {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        println!("\n[APPLY] Input: \"{}\" lang={:?}", text, ctx.lang);
+
         let mut result = String::with_capacity(text.len() + text.len() / 10);
         let mut prev_class = CharClass::Other;
         let text_str = text.as_ref();
-        let char_indices = text_str.char_indices();
 
-        for (idx, ch) in char_indices {
+        for (idx, ch) in text_str.char_indices() {
             let curr_class = classify(ch, ctx.lang);
 
-            if should_insert_space(prev_class, curr_class, ctx.lang) {
-                let remaining = &text_str[idx..];
+            let need_space = should_insert_space(prev_class, curr_class, ctx.lang);
 
-                if !ctx.lang.is_segment_exception(remaining) {
+            if need_space {
+                let remaining = &text_str[idx..];
+                let is_exc = ctx.lang.is_segment_exception(remaining);
+
+                println!(
+                    "[APPLY] idx={} char='{}' need_space={} remaining=\"{}\" exc={}",
+                    idx, ch, need_space, remaining, is_exc
+                );
+
+                if !is_exc {
+                    println!("[APPLY]   → INSERT SPACE before '{}'", ch);
                     result.push(' ');
                 }
             }
@@ -66,6 +76,12 @@ impl Stage for SegmentWord {
             result.push(ch);
             prev_class = curr_class;
         }
+
+        println!(
+            "[APPLY] Output: \"{}\" (alloc={})\n",
+            result,
+            result.as_str() != text.as_ref()
+        );
 
         if result.as_str() == text.as_ref() {
             Ok(text)
@@ -145,17 +161,24 @@ fn is_script_char(c: char, lang: Lang) -> bool {
 fn should_insert_space(prev: CharClass, curr: CharClass, lang: Lang) -> bool {
     let rules = lang.segment_rules();
 
-    // Western → Script boundary
     let west_to_script = prev == CharClass::Western
         && curr == CharClass::Script
         && rules.contains(&SegmentRule::HanAfterWest);
 
-    // Script → Western boundary
     let script_to_west = prev == CharClass::Script
         && curr == CharClass::Western
         && rules.contains(&SegmentRule::WestAfterHan);
 
-    west_to_script || script_to_west
+    let result = west_to_script || script_to_west;
+
+    if result {
+        println!(
+            "[SHOULD_INSERT] prev={:?} curr={:?} | W→S={} S→W={} | rules={:?}",
+            prev, curr, west_to_script, script_to_west, rules
+        );
+    }
+
+    result
 }
 
 #[derive(Clone)]
@@ -182,70 +205,66 @@ impl<'a> Iterator for SegmentIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         println!(
-            "[ITER STATE] pending_space = {} | prev_class = {:?} | remaining_len ≈ {}",
-            self.pending_space,
-            self.prev_class,
-            self.chars.as_str().len()
+            "[ITER] Entry: pending={}, prev={:?}",
+            self.pending_space, self.prev_class
         );
-        // Step 1: If we have a pending space, emit it first
+
+        // Step 1: Emit pending space
         if self.pending_space {
-            println!(
-                "[STATE] ---> EMIT PENDING SPACE | prev_class = {:?}",
-                self.prev_class
-            );
+            println!("[ITER] ✓ Emitting pending space NOW");
             self.pending_space = false;
             return Some(' ');
         }
 
-        // Step 2: Read next character
+        // Step 2: Get next char
         let c = self.chars.next()?;
         let curr = classify(c, self.lang);
 
         println!(
-            "[CHAR]  '{}' (U+{:04X}) | prev = {:?} → curr = {:?}",
-            c, c as u32, self.prev_class, curr
+            "[ITER] Read char='{}' curr={:?} | remaining=\"{}\"",
+            c,
+            curr,
+            self.chars.as_str()
         );
 
-        // Step 3: Check if we need to insert space BEFORE emitting current char
+        // Step 3: Check if space needed BEFORE this char
         let need_space = should_insert_space(self.prev_class, curr, self.lang);
-        println!("[DECISION] need_space = {} (rules check)", need_space);
+
+        println!(
+            "[ITER] need_space={} (prev={:?} → curr={:?})",
+            need_space, self.prev_class, curr
+        );
 
         if need_space {
-            let remaining = {
-                let mut s = String::with_capacity(64);
-                s.push(c);
-                s.push_str(self.chars.as_str());
-                s
-            };
-            println!("[EXCEPTION CHECK] remaining starts with: \"{}\"", remaining);
-            let is_exception = self.lang.segment_exceptions().iter().any(|&e| {
-                let ok = remaining.starts_with(e);
-                println!("[DEBUG]     exc '{}' → match={}", e, ok);
-                ok
+            // Build remaining text INCLUDING current char
+            let mut remaining = String::new();
+            remaining.push(c);
+            remaining.push_str(self.chars.as_str());
+
+            println!("[ITER] 🔍 Exception check: remaining=\"{}\"", remaining);
+
+            let is_exception = self.lang.segment_exceptions().iter().any(|&exc| {
+                let matches = remaining.starts_with(exc);
+                println!("[ITER]   - \"{}\" → {}", exc, matches);
+                matches
             });
 
-            println!("[EXCEPTION RESULT] is_exception = {}", is_exception);
+            println!("[ITER] Exception result: {}", is_exception);
 
             if !is_exception {
                 println!(
-                    "[ACTION] → INSERT SPACE BEFORE '{}' | setting pending_space = true",
-                    c
+                    "[ITER] 🚀 SETTING pending_space=true, will emit char now and space on NEXT call"
                 );
-                self.pending_space = true; // ← NOW we set it!
-            // return Some(' ');
-            } else {
-                // Exception matched — fall through and emit char normally
-                println!("[ACTION] → EXCEPTION MATCHED → SUPPRESS SPACE, emit char immediately");
-                println!("[WARNING] ★★★ prev_class NOT UPDATED YET (will be updated below) ★★★");
+                self.pending_space = true;
                 self.prev_class = curr;
-                return Some(c);
+                return Some(c); // ← CRITICAL: return char NOW, space will come next
+            } else {
+                println!("[ITER] ⊗ Exception matched, suppressing space");
             }
-        } else {
-            println!("[ACTION] No space needed → emit char normally");
         }
 
-        // Step 4: No space needed — emit char and update state
-        println!("[DEBUG]   EMIT char '{}'", c);
+        // Step 4: No space needed or exception matched
+        println!("[ITER] → Emit char '{}' normally", c);
         self.prev_class = curr;
         Some(c)
     }
