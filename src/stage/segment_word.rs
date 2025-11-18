@@ -163,7 +163,6 @@ struct SegmentIter<'a> {
     chars: std::str::Chars<'a>,
     prev_class: CharClass,
     pending_space: bool,
-    pending_char: Option<char>,
     lang: Lang,
 }
 
@@ -173,7 +172,6 @@ impl<'a> SegmentIter<'a> {
             chars: text.chars(),
             prev_class: CharClass::Other,
             pending_space: false,
-            pending_char: None,
             lang,
         }
     }
@@ -183,9 +181,18 @@ impl<'a> Iterator for SegmentIter<'a> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
+        println!(
+            "[ITER STATE] pending_space = {} | prev_class = {:?} | remaining_len ≈ {}",
+            self.pending_space,
+            self.prev_class,
+            self.chars.as_str().len()
+        );
         // Step 1: If we have a pending space, emit it first
         if self.pending_space {
-            println!("[EMIT] ---> SPACE (pending)");
+            println!(
+                "[STATE] ---> EMIT PENDING SPACE | prev_class = {:?}",
+                self.prev_class
+            );
             self.pending_space = false;
             return Some(' ');
         }
@@ -195,13 +202,13 @@ impl<'a> Iterator for SegmentIter<'a> {
         let curr = classify(c, self.lang);
 
         println!(
-            "[DEBUG] CHAR '{}' (U+{:04X}) | prev={:?} → curr={:?}",
+            "[CHAR]  '{}' (U+{:04X}) | prev = {:?} → curr = {:?}",
             c, c as u32, self.prev_class, curr
         );
 
         // Step 3: Check if we need to insert space BEFORE emitting current char
         let need_space = should_insert_space(self.prev_class, curr, self.lang);
-        println!("[DEBUG]   should_insert_space = {}", need_space);
+        println!("[DECISION] need_space = {} (rules check)", need_space);
 
         if need_space {
             let remaining = {
@@ -210,20 +217,31 @@ impl<'a> Iterator for SegmentIter<'a> {
                 s.push_str(self.chars.as_str());
                 s
             };
+            println!("[EXCEPTION CHECK] remaining starts with: \"{}\"", remaining);
             let is_exception = self.lang.segment_exceptions().iter().any(|&e| {
                 let ok = remaining.starts_with(e);
                 println!("[DEBUG]     exc '{}' → match={}", e, ok);
                 ok
             });
 
-            println!("[DEBUG]   is_exception = {}", is_exception);
+            println!("[EXCEPTION RESULT] is_exception = {}", is_exception);
 
             if !is_exception {
-                println!("[DEBUG]   → INSERT SPACE before '{}'", c);
+                println!(
+                    "[ACTION] → INSERT SPACE BEFORE '{}' | setting pending_space = true",
+                    c
+                );
                 self.pending_space = true; // ← NOW we set it!
+            // return Some(' ');
+            } else {
+                // Exception matched — fall through and emit char normally
+                println!("[ACTION] → EXCEPTION MATCHED → SUPPRESS SPACE, emit char immediately");
+                println!("[WARNING] ★★★ prev_class NOT UPDATED YET (will be updated below) ★★★");
                 self.prev_class = curr;
-                return Some(' ');
+                return Some(c);
             }
+        } else {
+            println!("[ACTION] No space needed → emit char normally");
         }
 
         // Step 4: No space needed — emit char and update state
