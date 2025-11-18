@@ -56,7 +56,7 @@ impl Stage for SegmentWord {
         for (idx, ch) in text_str.char_indices() {
             let curr_class = classify(ch, ctx.lang);
 
-            let need_space = should_insert_space(prev_class, curr_class, ctx.lang);
+            let need_space = should_insert_space(prev_class, curr_class, ch, ctx.lang);
 
             if need_space {
                 let remaining = &text_str[idx..];
@@ -158,13 +158,24 @@ fn is_script_char(c: char, lang: Lang) -> bool {
 }
 
 #[inline(always)]
-fn should_insert_space(prev: CharClass, curr: CharClass, lang: Lang) -> bool {
+fn should_insert_space(prev: CharClass, curr: CharClass, curr_ch: char, lang: Lang) -> bool {
     let rules = lang.segment_rules();
 
+    // SCRIPT -> WESTERN suppression (CJK letters/digits)
+    if prev == CharClass::Script && curr == CharClass::Western
+        && (lang.code() == "ja" || lang.code() == "zh") {
+            // Only suppress if Western run starts with letter OR digit
+            if curr_ch.is_ascii_alphanumeric() {
+                return false;
+            }
+        }
+
+    // WESTERN -> SCRIPT
     let west_to_script = prev == CharClass::Western
         && curr == CharClass::Script
         && rules.contains(&SegmentRule::HanAfterWest);
 
+    // SCRIPT -> WESTERN (normal rule)
     let script_to_west = prev == CharClass::Script
         && curr == CharClass::Western
         && rules.contains(&SegmentRule::WestAfterHan);
@@ -186,6 +197,7 @@ struct SegmentIter<'a> {
     chars: std::str::Chars<'a>,
     prev_class: CharClass,
     pending_space: bool,
+    pending_char: Option<char>,
     lang: Lang,
 }
 
@@ -195,6 +207,7 @@ impl<'a> SegmentIter<'a> {
             chars: text.chars(),
             prev_class: CharClass::Other,
             pending_space: false,
+            pending_char: None,
             lang,
         }
     }
@@ -228,7 +241,7 @@ impl<'a> Iterator for SegmentIter<'a> {
         );
 
         // Step 3: Check if space needed BEFORE this char
-        let need_space = should_insert_space(self.prev_class, curr, self.lang);
+        let need_space = should_insert_space(self.prev_class, curr, c, self.lang);
 
         println!(
             "[ITER] need_space={} (prev={:?} → curr={:?})",
@@ -257,7 +270,7 @@ impl<'a> Iterator for SegmentIter<'a> {
                 );
                 self.pending_space = true;
                 self.prev_class = curr;
-                return Some(c); // ← CRITICAL: return char NOW, space will come next
+                return Some(c); // char first, space next
             } else {
                 println!("[ITER] ⊗ Exception matched, suppressing space");
             }
@@ -271,8 +284,9 @@ impl<'a> Iterator for SegmentIter<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let (low, high) = self.chars.size_hint();
-        let lower = low.saturating_sub(self.pending_space as usize);
-        let upper = high.map(|h| h + h / 10);
+        // pending_char, if present, means at most +1 more item
+        let lower = low + (self.pending_char.is_some() as usize);
+        let upper = high.map(|h| h + h / 10 + (self.pending_char.is_some() as usize));
         (lower, upper)
     }
 }
