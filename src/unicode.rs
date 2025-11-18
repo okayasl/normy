@@ -176,16 +176,156 @@ pub fn normalize_punctuation_char(c: char) -> char {
     PUNCT_NORM.get(&c).copied().unwrap_or(c)
 }
 
-/// Southeast Asian scripts that require syllable-level no-break rules
+/// Hangul ranges (syllables + jamo + compatibility + extended A/B)
+#[inline(always)]
+pub fn is_hangul(c: char) -> bool {
+    matches!(c as u32,
+        0xAC00..=0xD7AF  | // Hangul Syllables
+        0x1100..=0x11FF  | // Hangul Jamo
+        0x3130..=0x318F  | // Hangul Compatibility Jamo
+        0xA960..=0xA97F  | // Hangul Jamo Extended-A
+        0xD7B0..=0xD7FF    // Hangul Jamo Extended-B
+    )
+}
+
+/// Hiragana block
+#[inline(always)]
+pub fn is_hiragana(c: char) -> bool {
+    matches!(c as u32, 0x3040..=0x309F)
+}
+
+/// Katakana block + small Katakana extensions
+#[inline(always)]
+pub fn is_katakana(c: char) -> bool {
+    matches!(c as u32,
+        0x30A0..=0x30FF  | // Katakana
+        0x31F0..=0x31FF    // Katakana Phonetic Extensions
+        // Optional: Kana Supplement/Extended ranges are omitted here for compactness
+    )
+}
+
+/// Kana supplement / extended ranges (optional; include if you want full coverage)
+#[inline(always)]
+pub fn is_kana_supplement(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x1B000..=0x1B16F // Small Kana Extension (partial)
+    )
+}
+
+/// CJK Unified Ideographs + Extensions + Compatibility (Han core ranges)
+#[inline(always)]
+pub fn is_cjk_unified_ideograph(c: char) -> bool {
+    matches!(c as u32,
+        0x4E00..=0x9FFF   | // Unified Ideographs
+        0x3400..=0x4DBF   | // Extension A
+        0x20000..=0x2A6DF | // Extension B
+        0x2A700..=0x2B73F | // Extension C
+        0x2B740..=0x2B81F | // Extension D
+        0x2B820..=0x2CEAF | // Extension E
+        0x2CEB0..=0x2EBEF | // Extension F
+        0x30000..=0x3134F | // Extension G
+        0xF900..=0xFAFF     // Compatibility Ideographs
+    )
+}
+
+/// Combined CJK Han or Kana (CJK cluster excluding Hangul)
+#[inline(always)]
+pub fn is_cjk_han_or_kana(c: char) -> bool {
+    is_cjk_unified_ideograph(c) || is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
+}
+
+/// Convenience: Japanese Kana (hiragana or katakana)
+#[inline(always)]
+pub fn is_japanese_kana(c: char) -> bool {
+    is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
+}
+
+/// Southeast Asian scripts requiring syllable-level no-break rules.
+/// Includes Thai, Lao, Myanmar (and extensions), Khmer, Tai Tham.
 #[inline(always)]
 pub fn is_se_asian_script(c: char) -> bool {
     matches!(c as u32,
-        0x0E00..=0x0E7F  // Thai + Lao
-        | 0x1000..=0x109F // Myanmar
-        | 0x1780..=0x17FF // Khmer
-        | 0x19E0..=0x19FF // Khmer Symbols
-        | 0x1A00..=0x1A1F // Tai Tham (partial Lao)
+        0x0E00..=0x0E7F  | // Thai (primary)
+        0x0E80..=0x0EFF  | // Lao
+        0x1000..=0x109F  | // Myanmar
+        0xAA60..=0xAA7F  | // Myanmar Extended-A (optional)
+        0xA9E0..=0xA9FF  | // Myanmar Extended-B (optional)
+        0x1780..=0x17FF  | // Khmer
+        0x19E0..=0x19FF  | // Khmer Symbols
+        0x1A00..=0x1AAF    // Tai Tham (full block)
     )
+}
+
+/// Western ASCII letters (A-Z, a-z)
+#[inline(always)]
+pub fn is_ascii_letter(c: char) -> bool {
+    matches!(c as u32,
+        0x0041..=0x005A | // A-Z
+        0x0061..=0x007A   // a-z
+    )
+}
+
+/// ASCII digits 0-9
+#[inline(always)]
+pub fn is_ascii_digit(c: char) -> bool {
+    matches!(c as u32, 0x0030..=0x0039)
+}
+
+/// ASCII punctuation (common ranges). Treat as Western for segmentation purposes.
+#[inline(always)]
+pub fn is_ascii_punct(c: char) -> bool {
+    matches!(c as u32,
+        0x0020..=0x002F | // space + punctuation !"#$%&'()*+,-./
+        0x003A..=0x0040 | // : ; < = > ? @
+        0x005B..=0x0060 | // [ \ ] ^ _ `
+        0x007B..=0x007E   // { | } ~
+    )
+}
+
+/// Western classification: letters, digits, punctuation (ASCII-only fast path)
+#[inline(always)]
+pub fn is_western_ascii(c: char) -> bool {
+    is_ascii_letter(c) || is_ascii_digit(c) || is_ascii_punct(c)
+}
+
+/// Digits or punctuation regarded as Western for boundary rules.
+#[inline(always)]
+pub fn is_ascii_digit_or_punct(c: char) -> bool {
+    is_ascii_digit(c) || is_ascii_punct(c)
+}
+
+/// Determine whether two chars belong to the same script cluster (no-break).
+/// Clusters: Western ASCII, CJK Han/Kana, Hangul, SE Asian
+#[inline(always)]
+pub fn is_same_script_cluster(a: char, b: char) -> bool {
+    // Western cluster (ASCII letters/digits/punct)
+    if is_western_ascii(a) && is_western_ascii(b) {
+        return true;
+    }
+
+    // CJK Han/Kana cluster (exclude Hangul)
+    if is_cjk_han_or_kana(a) && is_cjk_han_or_kana(b) {
+        return true;
+    }
+
+    // Hangul cluster
+    if is_hangul(a) && is_hangul(b) {
+        return true;
+    }
+
+    // SE Asian cluster
+    if is_se_asian_script(a) && is_se_asian_script(b) {
+        return true;
+    }
+
+    false
+}
+
+/// Small helper: is char considered "Script" for segmentation (Han/Kana/Hangul/SE-Asian)
+#[inline(always)]
+pub fn is_script_char(c: char) -> bool {
+    is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
 }
 
 #[cfg(test)]

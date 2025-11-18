@@ -8,7 +8,7 @@
 
 use crate::{
     context::Context,
-    lang::{Lang, LocaleBehavior, SegmentRule},
+    lang::{JPN, Lang, LocaleBehavior, SegmentRule, ZHO},
     stage::{CharMapper, FusedIterator, Stage, StageError},
     unicode::{is_ideographic, is_se_asian_script},
 };
@@ -162,13 +162,12 @@ fn should_insert_space(prev: CharClass, curr: CharClass, curr_ch: char, lang: La
     let rules = lang.segment_rules();
 
     // SCRIPT -> WESTERN suppression (CJK letters/digits)
-    if prev == CharClass::Script && curr == CharClass::Western
-        && (lang.code() == "ja" || lang.code() == "zh") {
-            // Only suppress if Western run starts with letter OR digit
-            if curr_ch.is_ascii_alphanumeric() {
-                return false;
-            }
+    if prev == CharClass::Script && curr == CharClass::Western && (lang == JPN || lang == ZHO) {
+        // Only suppress if Western run starts with letter OR digit
+        if curr_ch.is_ascii_alphanumeric() {
+            return false;
         }
+    }
 
     // WESTERN -> SCRIPT
     let west_to_script = prev == CharClass::Western

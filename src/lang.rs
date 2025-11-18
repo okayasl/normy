@@ -346,45 +346,45 @@ define_languages! {
         segment_rules: [], segment_exceptions: [],
 
     // ──────────────────────────────────────────────────────────────────────
-    // Asian scripts – segmentation only (fully correct now)
+    // Asian scripts – segmentation only
     // ──────────────────────────────────────────────────────────────────────
-    JPN, "ja", "Japanese",
+    JPN, "JPN", "Japanese",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [SegmentRule::HanAfterWest, SegmentRule::WestAfterHan, SegmentRule::NoBreakHan],
         segment_exceptions: ["株式会社", "大学", "東京", "日本", "大学校", "研究所"],
 
-    ZHO, "zh", "Chinese (Simplified)",
+    ZHO, "ZHO", "Chinese (Simplified)",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [SegmentRule::HanAfterWest, SegmentRule::WestAfterHan, SegmentRule::NoBreakHan],
         segment_exceptions: ["中华人民共和国", "人工智能", "北京市", "计算机", "自然语言处理", "互联网"],
 
-    KOR, "ko", "Korean",
+    KOR, "KOR", "Korean",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [SegmentRule::HanAfterWest,SegmentRule::WestAfterHan,SegmentRule::NoBreakHan,],
         segment_exceptions: [],
 
-    THA, "th", "Thai",
+    THA, "THA", "Thai",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [SegmentRule::NoBreakInScript, SegmentRule::HanAfterWest, SegmentRule::WestAfterHan],
         segment_exceptions: ["ประเทศไทย", "กรุงเทพมหานคร", "ภาษาไทย", "ปัญญาประดิษฐ์", "คอมพิวเตอร์"],
 
-    MYA, "my", "Myanmar",
+    MYA, "MYA", "Myanmar",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [SegmentRule::NoBreakInScript],
         segment_exceptions: ["မြန်မာ", "ရန်ကုန်", "နေပြည်တော်", "ဘာသာစကား"],
 
-    KHM, "km", "Khmer",
+    KHM, "KHM", "Khmer",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [SegmentRule::NoBreakInScript],
         segment_exceptions: ["កម្ពុជា", "ភ្នំពេញ", "ភាសាខ្មែរ", "កុំព្យូទ័រ"],
 
-    LAO, "lo", "Lao",
+    LAO, "LAO", "Lao",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [SegmentRule::NoBreakInScript, SegmentRule::HanAfterWest, SegmentRule::WestAfterHan],
