@@ -684,6 +684,13 @@ pub trait LocaleBehavior {
     fn needs_word_segmentation(&self) -> bool {
         self.needs_segmentation() && !self.segment_rules().is_empty()
     }
+
+    #[inline]
+    fn is_segment_exception(&self, text: &str) -> bool {
+        self.segment_exceptions()
+            .iter()
+            .any(|&exc| text.starts_with(exc))
+    }
 }
 
 impl LocaleBehavior for Lang {
