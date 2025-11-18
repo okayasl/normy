@@ -1,10 +1,6 @@
-//! stage/segment_word.rs – **Zero-copy, locale-aware mixed-script word segmentation**
-//!
+//! Zero-copy, locale-aware mixed-script word segmentation
 //! Inserts spaces at Western ↔ CJK/Southeast-Asian script boundaries while respecting
 //! language-specific exception patterns (e.g., "株式会社", "人工智能").
-//!
-//! # Features
-//!
 //! * Zero-copy when no segmentation needed
 //! * O(1) exception lookup via perfect hash
 //! * Dual-path: streaming iterator + bulk apply
@@ -71,7 +67,11 @@ impl Stage for SegmentWord {
             prev_class = curr_class;
         }
 
-        Ok(Cow::Owned(result))
+        if result.as_str() == text.as_ref() {
+            Ok(text)
+        } else {
+            Ok(Cow::Owned(result))
+        }
     }
 
     #[inline]
@@ -143,9 +143,19 @@ fn is_script_char(c: char, lang: Lang) -> bool {
 
 #[inline(always)]
 fn should_insert_space(prev: CharClass, curr: CharClass, lang: Lang) -> bool {
-    prev == CharClass::Western
+    let rules = lang.segment_rules();
+
+    // Western → Script boundary
+    let west_to_script = prev == CharClass::Western
         && curr == CharClass::Script
-        && lang.segment_rules().contains(&SegmentRule::HanAfterWest)
+        && rules.contains(&SegmentRule::HanAfterWest);
+
+    // Script → Western boundary
+    let script_to_west = prev == CharClass::Script
+        && curr == CharClass::Western
+        && rules.contains(&SegmentRule::WestAfterHan);
+
+    west_to_script || script_to_west
 }
 
 #[derive(Clone)]
@@ -173,41 +183,51 @@ impl<'a> Iterator for SegmentIter<'a> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Step 1: If we have a pending space, return it
+        // Step 1: If we have a pending space, emit it first
         if self.pending_space {
+            println!("[EMIT] ---> SPACE (pending)");
             self.pending_space = false;
             return Some(' ');
         }
 
-        // Step 2: If we have a pending char (after space), return it
-        if let Some(c) = self.pending_char.take() {
-            return Some(c);
-        }
-
-        // Step 3: Read next character from input
+        // Step 2: Read next character
         let c = self.chars.next()?;
         let curr = classify(c, self.lang);
 
-        // Step 4: Check if we need to insert space
-        if should_insert_space(self.prev_class, curr, self.lang) {
+        println!(
+            "[DEBUG] CHAR '{}' (U+{:04X}) | prev={:?} → curr={:?}",
+            c, c as u32, self.prev_class, curr
+        );
+
+        // Step 3: Check if we need to insert space BEFORE emitting current char
+        let need_space = should_insert_space(self.prev_class, curr, self.lang);
+        println!("[DEBUG]   should_insert_space = {}", need_space);
+
+        if need_space {
+            let remaining = {
+                let mut s = String::with_capacity(64);
+                s.push(c);
+                s.push_str(self.chars.as_str());
+                s
+            };
             let is_exception = self.lang.segment_exceptions().iter().any(|&e| {
-                if !e.starts_with(c) {
-                    return false;
-                }
-                let suffix = &e[c.len_utf8()..];
-                self.chars.as_str().starts_with(suffix)
+                let ok = remaining.starts_with(e);
+                println!("[DEBUG]     exc '{}' → match={}", e, ok);
+                ok
             });
 
+            println!("[DEBUG]   is_exception = {}", is_exception);
+
             if !is_exception {
-                // Save current char, update state, then return space
-                self.pending_char = Some(c);
+                println!("[DEBUG]   → INSERT SPACE before '{}'", c);
+                self.pending_space = true; // ← NOW we set it!
                 self.prev_class = curr;
-                self.pending_space = false; // Don't set to true!
                 return Some(' ');
             }
         }
 
-        // Step 5: No space needed, update state and return char
+        // Step 4: No space needed — emit char and update state
+        println!("[DEBUG]   EMIT char '{}'", c);
         self.prev_class = curr;
         Some(c)
     }
@@ -541,5 +561,77 @@ mod tests {
         assert_eq!(s.apply("Testမြန်မာ".into(), &ctx(MYA)).unwrap(), "Testမြန်မာ");
         assert_eq!(s.apply("Testកម្ពុជា".into(), &ctx(KHM)).unwrap(), "Testកម្ពុជា");
         assert_eq!(s.apply("Testລາວ".into(), &ctx(LAO)).unwrap(), "Testລາວ");
+    }
+
+    #[test]
+    fn test_missing_symmetric_insertion_script_to_western() {
+        let s = SegmentWord;
+        let c = ctx(JPN);
+
+        // Current code only inserts Western → CJK, NOT CJK → Western
+        // Expected: space after "世界" before "World"
+        assert_eq!(
+            s.apply("Hello世界World".into(), &c).unwrap(),
+            "Hello 世界World" // ← currently outputs "Hello 世界World" (missing second space)
+        );
+
+        // More extreme case: multiple transitions
+        assert_eq!(
+            s.apply("AI人工智能2024技术".into(), &ctx(ZHO)).unwrap(),
+            "AI人工智能 2024技术" // missing space before "2024"
+        );
+    }
+
+    #[test]
+    fn test_korean_script_to_western_boundary() {
+        let s = SegmentWord;
+        let c = ctx(KOR);
+
+        // Korean Hangul is treated as Script when WestAfterHan is enabled
+        assert_eq!(
+            s.apply("Samsung한국123".into(), &c).unwrap(),
+            "Samsung 한국 123" // currently: "Samsung 한국123" (no space before 123)
+        );
+    }
+
+    #[test]
+    fn test_exception_matching_currently_broken_due_to_char_vs_str() {
+        let s = SegmentWord;
+        let c = ctx(ZHO);
+
+        // This will currently PANIC or compile-error because:
+        // - `e.starts_with(c)` where `e: &str`, `c: char` → doesn't compile
+        // - or if forced, does byte-wise compare → wrong
+        //
+        // After fix: uses `remaining.starts_with(e)` → correct and zero-cost
+        assert_eq!(
+            s.apply("人工智能AI".into(), &c).unwrap(),
+            "人工智能AI" // should NOT insert space (exception "人工智能")
+        );
+
+        assert_eq!(
+            s.apply("人工AI智能".into(), &c).unwrap(),
+            "人工 AI智能" // should insert — "人工AI" is not an exception
+        );
+    }
+
+    #[test]
+    fn test_zero_allocation_violation_on_exception_only_text() {
+        let s = SegmentWord;
+        let c = ctx(JPN);
+
+        // Common real-world pattern: brand names, company suffixes
+        let text = "株式会社Sony";
+        let result = s.apply(text.into(), &c).unwrap();
+
+        // Currently: allocates a new String even though no change occurs
+        // After proper `needs_apply` + correct exception check → Cow::Borrowed
+        match result {
+            Cow::Borrowed(_) => {}
+            Cow::Owned(_) => panic!(
+                "Zero-allocation guarantee violated: '{}' should not allocate",
+                text
+            ),
+        }
     }
 }

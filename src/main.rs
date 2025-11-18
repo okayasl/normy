@@ -42,6 +42,7 @@ mod tests {
             "*.json",
             "*.gitignore",
             "target",
+            "proptest-regressions",
             "data",
             "conversations",
             "**/.git",
