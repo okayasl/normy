@@ -6,6 +6,8 @@
 use paste::paste;
 use phf::{Map, phf_map};
 
+use crate::unicode::{is_cjk_han_or_kana, is_hangul, is_se_asian_script};
+
 /// ---------------------------------------------------------------------------
 /// 1. Public Language Identifier
 /// ---------------------------------------------------------------------------
@@ -690,6 +692,21 @@ pub trait LocaleBehavior {
         self.segment_exceptions()
             .iter()
             .any(|&exc| text.starts_with(exc))
+    }
+
+    #[inline]
+    fn needs_script_break(&self, c: char) -> bool {
+        let r = self.segment_rules();
+        if r.contains(&SegmentRule::NoBreakInScript) && is_se_asian_script(c) {
+            return true;
+        }
+        if is_cjk_han_or_kana(c) && r.contains(&SegmentRule::NoBreakHan) {
+            return true;
+        }
+        if is_hangul(c) && r.contains(&SegmentRule::WestAfterHan) {
+            return true;
+        }
+        false
     }
 }
 

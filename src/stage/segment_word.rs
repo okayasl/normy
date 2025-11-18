@@ -1,20 +1,14 @@
-//! Zero-copy, locale-aware mixed-script word segmentation
-//! Inserts spaces at Western ↔ CJK/Southeast-Asian script boundaries while respecting
-//! language-specific exception patterns (e.g., "株式会社", "人工智能").
-//! * Zero-copy when no segmentation needed
-//! * O(1) exception lookup via perfect hash
-//! * Dual-path: streaming iterator + bulk apply
-//! * Language-agnostic: all rules configured via `Lang`
-
 use crate::{
     context::Context,
     lang::{JPN, Lang, LocaleBehavior, SegmentRule, ZHO},
     stage::{CharMapper, FusedIterator, Stage, StageError},
-    unicode::{is_ideographic, is_se_asian_script},
+    unicode::{is_ascii_digit, is_ascii_punct, is_latin_letter, is_script_char},
 };
 use std::borrow::Cow;
+use std::iter::Peekable;
 use std::sync::Arc;
-#[derive(Debug, Clone, Copy, Default)]
+
+#[derive(Debug, Default, Clone, Copy)]
 pub struct SegmentWord;
 
 impl Stage for SegmentWord {
@@ -22,88 +16,58 @@ impl Stage for SegmentWord {
         "segment_word"
     }
 
-    #[inline]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        if text.is_empty() || !ctx.lang.needs_segmentation() {
+        let lang = ctx.lang;
+        if text.is_empty() || !lang.needs_segmentation() {
             return Ok(false);
         }
 
-        let mut has_western = false;
-        let mut has_script = false;
+        let mut prev = CharClass::Other;
+        let mut offset = 0usize;
 
         for c in text.chars() {
-            if is_western_char(c) {
-                has_western = true;
-            } else if is_script_char(c, ctx.lang) {
-                has_script = true;
+            let curr = classify(c);
+            if should_insert_space(prev, curr, c, lang) {
+                let remaining = &text[offset..];
+                if !lang.is_segment_exception(remaining) {
+                    return Ok(true);
+                }
             }
-
-            if has_western && has_script {
-                return Ok(true);
-            }
+            prev = curr;
+            offset += c.len_utf8();
         }
-
         Ok(false)
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        println!("\n[APPLY] Input: \"{}\" lang={:?}", text, ctx.lang);
-
-        let mut result = String::with_capacity(text.len() + text.len() / 10);
-        let mut prev_class = CharClass::Other;
-        let text_str = text.as_ref();
-
-        for (idx, ch) in text_str.char_indices() {
-            let curr_class = classify(ch, ctx.lang);
-
-            let need_space = should_insert_space(prev_class, curr_class, ch, ctx.lang);
-
-            if need_space {
-                let remaining = &text_str[idx..];
-                let is_exc = ctx.lang.is_segment_exception(remaining);
-
-                println!(
-                    "[APPLY] idx={} char='{}' need_space={} remaining=\"{}\" exc={}",
-                    idx, ch, need_space, remaining, is_exc
-                );
-
-                if !is_exc {
-                    println!("[APPLY]   → INSERT SPACE before '{}'", ch);
-                    result.push(' ');
-                }
-            }
-
-            result.push(ch);
-            prev_class = curr_class;
+        if !self.needs_apply(&text, ctx)? {
+            return Ok(text);
         }
-
-        println!(
-            "[APPLY] Output: \"{}\" (alloc={})\n",
-            result,
-            result.as_str() != text.as_ref()
-        );
-
-        if result.as_str() == text.as_ref() {
-            Ok(text)
-        } else {
-            Ok(Cow::Owned(result))
-        }
+        Ok(Cow::Owned(
+            SegmentIter::new(text.as_ref(), ctx.lang).collect(),
+        ))
     }
 
-    #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        ctx.lang.segment_rules().is_empty().then_some(self)
+        if ctx.lang.segment_rules().is_empty() {
+            Some(self)
+        } else {
+            None
+        }
     }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
+    fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+        if ctx.lang.segment_rules().is_empty() {
+            Some(self)
+        } else {
+            None
+        }
     }
 }
 
 impl CharMapper for SegmentWord {
     #[inline(always)]
-    fn map(&self, c: char, _: &Context) -> Option<char> {
+    fn map(&self, c: char, _ctx: &Context) -> Option<char> {
         Some(c)
     }
 
@@ -112,185 +76,103 @@ impl CharMapper for SegmentWord {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 enum CharClass {
+    #[default]
+    Other,
     Western,
     Script,
-    Other,
 }
 
 #[inline(always)]
-fn classify(c: char, lang: Lang) -> CharClass {
-    let rules = lang.segment_rules();
-
-    if rules.contains(&SegmentRule::NoBreakInScript) && is_se_asian_script(c) {
-        return CharClass::Script;
-    }
-
-    if is_ideographic(c)
-        && (rules.contains(&SegmentRule::HanAfterWest)
-            || rules.contains(&SegmentRule::WestAfterHan)
-            || rules.contains(&SegmentRule::NoBreakHan))
-    {
-        return CharClass::Script;
-    }
-
-    if is_western_char(c) {
+fn classify(c: char) -> CharClass {
+    if is_latin_letter(c) || is_ascii_digit(c) || is_ascii_punct(c) {
         CharClass::Western
+    } else if is_script_char(c) {
+        CharClass::Script
     } else {
         CharClass::Other
     }
 }
 
 #[inline(always)]
-fn is_western_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c.is_ascii_punctuation()
-}
-
-#[inline(always)]
-fn is_script_char(c: char, lang: Lang) -> bool {
-    let rules = lang.segment_rules();
-    (rules.contains(&SegmentRule::NoBreakInScript) && is_se_asian_script(c))
-        || (is_ideographic(c)
-            && (rules.contains(&SegmentRule::HanAfterWest)
-                || rules.contains(&SegmentRule::WestAfterHan)
-                || rules.contains(&SegmentRule::NoBreakHan)))
-}
-
-#[inline(always)]
-fn should_insert_space(prev: CharClass, curr: CharClass, curr_ch: char, lang: Lang) -> bool {
-    let rules = lang.segment_rules();
-
-    // SCRIPT -> WESTERN suppression (CJK letters/digits)
-    if prev == CharClass::Script && curr == CharClass::Western && (lang == JPN || lang == ZHO) {
-        // Only suppress if Western run starts with letter OR digit
-        if curr_ch.is_ascii_alphanumeric() {
-            return false;
+fn should_insert_space(prev: CharClass, curr: CharClass, c: char, lang: Lang) -> bool {
+    match (prev, curr) {
+        (CharClass::Western, CharClass::Script) => {
+            lang.segment_rules().contains(&SegmentRule::HanAfterWest)
         }
+        (CharClass::Script, CharClass::Western) => {
+            if matches!(lang, JPN | ZHO) && c.is_ascii_alphabetic() {
+                false
+            } else {
+                lang.segment_rules().contains(&SegmentRule::WestAfterHan)
+            }
+        }
+        _ => false,
     }
-
-    // WESTERN -> SCRIPT
-    let west_to_script = prev == CharClass::Western
-        && curr == CharClass::Script
-        && rules.contains(&SegmentRule::HanAfterWest);
-
-    // SCRIPT -> WESTERN (normal rule)
-    let script_to_west = prev == CharClass::Script
-        && curr == CharClass::Western
-        && rules.contains(&SegmentRule::WestAfterHan);
-
-    let result = west_to_script || script_to_west;
-
-    if result {
-        println!(
-            "[SHOULD_INSERT] prev={:?} curr={:?} | W→S={} S→W={} | rules={:?}",
-            prev, curr, west_to_script, script_to_west, rules
-        );
-    }
-
-    result
 }
 
-#[derive(Clone)]
 struct SegmentIter<'a> {
-    chars: std::str::Chars<'a>,
-    prev_class: CharClass,
-    pending_space: bool,
-    pending_char: Option<char>,
+    text: &'a str,
+    chars: Peekable<std::str::Chars<'a>>,
     lang: Lang,
+    prev: CharClass,
+    pending_char: Option<char>,
+    byte_offset: usize,
 }
 
 impl<'a> SegmentIter<'a> {
     fn new(text: &'a str, lang: Lang) -> Self {
         Self {
-            chars: text.chars(),
-            prev_class: CharClass::Other,
-            pending_space: false,
-            pending_char: None,
+            text,
+            chars: text.chars().peekable(),
             lang,
+            prev: CharClass::Other,
+            pending_char: None,
+            byte_offset: 0,
         }
     }
 }
 
-impl<'a> Iterator for SegmentIter<'a> {
+impl Iterator for SegmentIter<'_> {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
-        println!(
-            "[ITER] Entry: pending={}, prev={:?}",
-            self.pending_space, self.prev_class
-        );
-
-        // Step 1: Emit pending space
-        if self.pending_space {
-            println!("[ITER] ✓ Emitting pending space NOW");
-            self.pending_space = false;
-            return Some(' ');
+        if let Some(c) = self.pending_char.take() {
+            return Some(c);
         }
 
-        // Step 2: Get next char
-        let c = self.chars.next()?;
-        let curr = classify(c, self.lang);
+        let &c = self.chars.peek()?;
+        let curr = classify(c);
 
-        println!(
-            "[ITER] Read char='{}' curr={:?} | remaining=\"{}\"",
-            c,
-            curr,
-            self.chars.as_str()
-        );
-
-        // Step 3: Check if space needed BEFORE this char
-        let need_space = should_insert_space(self.prev_class, curr, c, self.lang);
-
-        println!(
-            "[ITER] need_space={} (prev={:?} → curr={:?})",
-            need_space, self.prev_class, curr
-        );
-
-        if need_space {
-            // Build remaining text INCLUDING current char
-            let mut remaining = String::new();
-            remaining.push(c);
-            remaining.push_str(self.chars.as_str());
-
-            println!("[ITER] 🔍 Exception check: remaining=\"{}\"", remaining);
-
-            let is_exception = self.lang.segment_exceptions().iter().any(|&exc| {
-                let matches = remaining.starts_with(exc);
-                println!("[ITER]   - \"{}\" → {}", exc, matches);
-                matches
-            });
-
-            println!("[ITER] Exception result: {}", is_exception);
-
-            if !is_exception {
-                println!(
-                    "[ITER] 🚀 SETTING pending_space=true, will emit char now and space on NEXT call"
-                );
-                self.pending_space = true;
-                self.prev_class = curr;
-                return Some(c); // char first, space next
-            } else {
-                println!("[ITER] ⊗ Exception matched, suppressing space");
+        if self.prev != CharClass::Other
+            && self.prev != curr
+            && should_insert_space(self.prev, curr, c, self.lang)
+        {
+            let remaining = &self.text[self.byte_offset..];
+            if !self.lang.is_segment_exception(remaining) {
+                self.pending_char = Some(c);
+                self.chars.next();
+                self.byte_offset += c.len_utf8();
+                self.prev = curr;
+                return Some(' ');
             }
         }
 
-        // Step 4: No space needed or exception matched
-        println!("[ITER] → Emit char '{}' normally", c);
-        self.prev_class = curr;
+        self.chars.next();
+        self.byte_offset += c.len_utf8();
+        self.prev = curr;
         Some(c)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (low, high) = self.chars.size_hint();
-        // pending_char, if present, means at most +1 more item
-        let lower = low + (self.pending_char.is_some() as usize);
-        let upper = high.map(|h| h + h / 10 + (self.pending_char.is_some() as usize));
-        (lower, upper)
+        let (l, h) = self.chars.size_hint();
+        let add = self.pending_char.is_some() as usize;
+        (l + add, h.map(|h| h + add + 8)) // conservative upper bound
     }
 }
 
-impl<'a> FusedIterator for SegmentIter<'a> {}
+impl FusedIterator for SegmentIter<'_> {}
 
 #[cfg(test)]
 mod tests {
