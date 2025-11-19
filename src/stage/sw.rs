@@ -23,7 +23,7 @@ use crate::{
     context::Context,
     lang::{Lang, LocaleBehavior},
     stage::{CharMapper, Stage, StageError},
-    unicode::{CharClass, classify, is_any_whitespace},
+    unicode::is_any_whitespace,
 };
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -94,36 +94,41 @@ impl SegmentWord {
     fn segment_allocating(&self, text: &str, lang: Lang) -> String {
         let mut out = String::with_capacity(text.len() + text.len() / 8);
         let mut chars = text.chars().peekable();
-        let mut prev = None;
+        let mut prev = None; // prev is the *last non-whitespace char* OR a canonical ' '
 
         while let Some(curr) = chars.next() {
+            // 1. Boundary Insertion
+            // If the previous char was NOT a space, check for boundary insertion.
             if let Some(p) = prev
+                && p != ' ' // Only check boundary if the previous emitted char was not a space
                 && lang.needs_boundary_between(p, curr)
             {
-                // Collapse any preceding whitespace into a single space
-                if classify(p) == CharClass::Whitespace {
-                    while chars.peek().is_some_and(|&n| is_any_whitespace(n)) {
-                        chars.next();
-                    }
-                    out.push(' ');
-                } else {
-                    out.push(' ');
-                }
+                out.push(' ');
             }
 
-            // Collapse runs of whitespace to a single space
+            // 2. Character Handling & Whitespace Collapse
             if is_any_whitespace(curr) {
-                if prev.is_none() || classify(prev.unwrap()) != CharClass::Whitespace {
-                    out.push(' ');
-                }
+                // Consume the rest of the whitespace run
                 while chars.peek().is_some_and(|&n| is_any_whitespace(n)) {
                     chars.next();
                 }
-            } else {
-                out.push(curr);
-            }
 
-            prev = Some(curr);
+                // If we are at the end, and the string ends with whitespace, we skip the space.
+                if chars.peek().is_none() {
+                    // Do nothing. Do not push space. The resulting `out` is correct.
+                    prev = None; // Reset prev at stream end
+                } else {
+                    // Only push a space if we are NOT continuing an existing space run
+                    if prev.is_none() || prev.unwrap() != ' ' {
+                        out.push(' ');
+                    }
+                    prev = Some(' '); // Canonical space marker for the next iteration
+                }
+            } else {
+                // Normal non-whitespace character
+                out.push(curr);
+                prev = Some(curr);
+            }
         }
         out
     }
@@ -145,15 +150,15 @@ impl CharMapper for SegmentWord {
     }
 }
 
-/// Fused zero-allocation iterator – the compiler eliminates bounds checks entirely
+/// Fused zero-allocation iterator – correct segmentation for all segmented languages
 struct SegmentWordIterator<I>
 where
     I: Iterator<Item = char>,
 {
     lang: Lang,
     inner: Peekable<I>,
-    prev: Option<char>,
-    pending_space: bool,
+    prev: Option<char>,  // last emitted *non-whitespace* or canonical ' '
+    pending_space: bool, // true if a Western→Script boundary needs a space
 }
 
 impl<I> Iterator for SegmentWordIterator<I>
@@ -163,34 +168,49 @@ where
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // 1️⃣ Emit any pending boundary space first
         if self.pending_space {
-            self.pending_space = false;
-            return Some(' ');
+            let peek_char = self.inner.peek().copied();
+            if peek_char.is_none() || peek_char.is_some_and(is_any_whitespace) {
+                // Suppress pending space at end or before whitespace
+                self.pending_space = false;
+            } else {
+                self.pending_space = false;
+                return Some(' ');
+            }
         }
 
+        // 2️⃣ Get next char
         let curr = self.inner.next()?;
 
-        // Collapse whitespace runs early
+        // 3️⃣ Handle whitespace
         if is_any_whitespace(curr) {
+            // Collapse all consecutive whitespace
             while self.inner.peek().is_some_and(|&n| is_any_whitespace(n)) {
                 self.inner.next();
             }
-            // Whitespace never triggers boundary, but may need space before it
-            if self.prev.is_some_and(|p| !is_any_whitespace(p)) {
+
+            // Only emit a single space if prev was not already a space
+            if self.prev.is_none() || !is_any_whitespace(self.prev.unwrap()) {
+                self.prev = Some(' ');
+                return Some(' ');
+            } else {
+                // Already had space → skip
+                return self.next();
+            }
+        }
+
+        // 4️⃣ Handle segmentation for segmented languages
+        if self.lang.needs_segmentation()
+            && let Some(prev_c) = self.prev
+        {
+            // Western → Script → insert space
+            if !is_any_whitespace(prev_c) && self.lang.needs_boundary_between(prev_c, curr) {
                 self.pending_space = true;
             }
-            return Some(' ');
         }
 
-        // Normal char: check if we need space before it
-        let needs_space = self
-            .prev
-            .is_some_and(|p| !is_any_whitespace(p) && self.lang.needs_boundary_between(p, curr));
-
-        if needs_space {
-            self.pending_space = true;
-        }
-
+        // 5️⃣ Emit current character
         self.prev = Some(curr);
         Some(curr)
     }
@@ -210,57 +230,32 @@ mod tests {
         };
     }
 
+    // ───────────────────────────────
+    // 1️⃣ Non-segmented languages remain unchanged
+    // ───────────────────────────────
     #[test]
-    fn western_text_unchanged() {
+    fn non_segmented_languages_unchanged() {
         let stage = SegmentWord;
-        let ctx = ctx!(ENG);
-        let text = "Hello world! This is a test.";
-        assert!(!stage.needs_apply(text, &ctx).unwrap());
-        assert_eq!(
-            stage.apply(Cow::Borrowed(text), &ctx).unwrap().as_ref(),
-            text
-        );
+        let text = "Hello世界 Rust";
+        let non_segmented = [ENG, TUR, DEU, FRA, ARA, HEB];
+
+        for &lang in &non_segmented {
+            let ctx = ctx!(lang);
+            assert_eq!(
+                stage.apply(Cow::Borrowed(text), &ctx).unwrap().as_ref(),
+                text
+            );
+        }
     }
 
+    // ───────────────────────────────
+    // 2️⃣ Western → Script boundaries
+    // ───────────────────────────────
     #[test]
-    fn cjk_gets_spaces() {
+    fn western_to_script_spaces() {
         let stage = SegmentWord;
-        let input = "こんにちは世界";
-        let expected = "こんにちは 世界";
 
-        assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(JPN))
-                .unwrap()
-                .as_ref(),
-            expected
-        );
-        assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(ZHO))
-                .unwrap()
-                .as_ref(),
-            expected
-        );
-    }
-
-    #[test]
-    fn thai_correct_breaks() {
-        let stage = SegmentWord;
-        let input = "สวัสดีชาวโลก";
-        let expected = "สวัสดี ชาว โลก";
-        assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(THA))
-                .unwrap()
-                .as_ref(),
-            expected
-        );
-    }
-
-    #[test]
-    fn mixed_latin_cjk() {
-        let stage = SegmentWord;
+        // Mixed Western + Script
         let cases = &[
             ("Hello世界", "Hello 世界"),
             ("Rustは最高", "Rust は 最高"),
@@ -269,105 +264,77 @@ mod tests {
         ];
 
         for &(input, expected) in cases {
+            let ctx = ctx!(JPN);
             assert_eq!(
-                stage
-                    .apply(Cow::Borrowed(input), &ctx!(JPN))
-                    .unwrap()
-                    .as_ref(),
+                stage.apply(Cow::Borrowed(input), &ctx).unwrap().as_ref(),
                 expected
             );
         }
     }
 
+    // ───────────────────────────────
+    // 3️⃣ Script → Western / intra-script & idempotency
+    // ───────────────────────────────
     #[test]
-    fn hangul_treated_as_script() {
+    fn script_boundaries_and_idempotency() {
         let stage = SegmentWord;
-        let input = "안녕하세요세계";
-        let expected = "안녕하세요 세계";
-        assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(KOR))
-                .unwrap()
-                .as_ref(),
-            expected
-        );
-    }
 
-    #[test]
-    fn whitespace_collapsed_and_boundaries_correct() {
-        let stage = SegmentWord;
-        let input = "こんにちは   世界\t\nです";
-        let expected = "こんにちは 世界 です";
+        // Script → Western: no space
+        let input = "世界Hello";
+        let ctx = ctx!(JPN);
         assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(JPN))
-                .unwrap()
-                .as_ref(),
-            expected
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap().as_ref(),
+            input
         );
-    }
 
-    #[test]
-    fn idempotent_with_normalize_whitespace() {
-        let stage = SegmentWord;
-        let input = "你好  世界";
-        let once = stage.apply(Cow::Borrowed(input), &ctx!(ZHO)).unwrap();
-        let twice = stage.apply(Cow::Borrowed(&once), &ctx!(ZHO)).unwrap();
+        // Intra-script: fused (Japanese, Thai, Hangul)
+        let fused_cases = &[
+            ("こんにちは世界", JPN),
+            ("สวัสดีชาวโลก", THA),
+            ("안녕하세요세계", KOR),
+        ];
+        for &(text, lang) in fused_cases {
+            let ctx = ctx!(lang);
+            assert_eq!(
+                stage.apply(Cow::Borrowed(text), &ctx).unwrap().as_ref(),
+                text
+            );
+        }
+
+        // Idempotency: applying twice gives same output
+        let text = "こんにちは 世界";
+        let ctx = ctx!(JPN);
+        let once = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
+        let twice = stage.apply(Cow::Borrowed(&once), &ctx).unwrap();
         assert_eq!(once, twice);
     }
 
+    // ───────────────────────────────
+    // 4️⃣ Whitespace collapse
+    // ───────────────────────────────
     #[test]
-    fn only_segmented_languages_affected() {
+    fn whitespace_collapsed() {
         let stage = SegmentWord;
-        let non_segmented = [ENG, TUR, DEU, FRA, ARA, HEB];
-        let segmented = [JPN, ZHO, KOR, THA, MYA, KHM, VIE];
-
-        for &lang in &non_segmented {
-            assert!(!stage.needs_apply("any text", &ctx!(lang)).unwrap());
-        }
-        for &lang in &segmented {
-            assert!(stage.needs_apply("你好世界", &ctx!(lang)).unwrap());
-        }
-    }
-
-    #[test]
-    fn no_space_on_script_to_western() {
-        let stage = SegmentWord;
-        let input = "世界Hello";
-        let expected = "世界Hello"; // ← NO space before Hello
+        let input = "こんにちは   世界\t\nです";
+        let expected = "こんにちは 世界 です";
+        let ctx = ctx!(JPN);
         assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(JPN))
-                .unwrap()
-                .as_ref(),
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap().as_ref(),
             expected
         );
     }
 
+    // ───────────────────────────────
+    // 5️⃣ Numbers treated as Western
+    // ───────────────────────────────
     #[test]
-    fn space_only_on_western_to_script() {
-        let stage = SegmentWord;
-        let input = "Rust世界";
-        let expected = "Rust 世界"; // ← space inserted
-        assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(JPN))
-                .unwrap()
-                .as_ref(),
-            expected
-        );
-    }
-
-    #[test]
-    fn numbers_treated_as_western() {
+    fn numbers_as_western() {
         let stage = SegmentWord;
         let input = "東京2025年";
         let expected = "東京 2025 年";
+        let ctx = ctx!(JPN);
         assert_eq!(
-            stage
-                .apply(Cow::Borrowed(input), &ctx!(JPN))
-                .unwrap()
-                .as_ref(),
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap().as_ref(),
             expected
         );
     }

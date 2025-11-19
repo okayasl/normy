@@ -229,10 +229,20 @@ pub fn is_cjk_unified_ideograph(c: char) -> bool {
     )
 }
 
+/// Kangxi Radicals block (U+2F00..U+2FDF)
+#[inline(always)]
+pub fn is_kangxi_radical(c: char) -> bool {
+    matches!(c as u32, 0x2F00..=0x2FDF)
+}
+
 /// Combined CJK Han or Kana (CJK cluster excluding Hangul)
 #[inline(always)]
 pub fn is_cjk_han_or_kana(c: char) -> bool {
-    is_cjk_unified_ideograph(c) || is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
+    is_cjk_unified_ideograph(c)
+        || is_hiragana(c)
+        || is_katakana(c)
+        || is_kana_supplement(c)
+        || is_kangxi_radical(c)
 }
 
 /// Convenience: Japanese Kana (hiragana or katakana)
@@ -299,77 +309,90 @@ pub fn is_ascii_digit_or_punct(c: char) -> bool {
 /// Clusters: Western ASCII, CJK Han/Kana, Hangul, SE Asian
 #[inline(always)]
 pub fn is_same_script_cluster(a: char, b: char) -> bool {
-    // Western cluster (ASCII letters/digits/punct)
-    if is_western_ascii(a) && is_western_ascii(b) {
-        return true;
+    match (classify(a), classify(b)) {
+        (CharClass::Western, CharClass::Western) => true,
+        (CharClass::CJK, CharClass::CJK) => true, // CJK cluster
+        (CharClass::Hangul, CharClass::Hangul) => true, // Hangul cluster
+        (CharClass::SEAsian, CharClass::SEAsian) => true, // SE-Asian cluster
+        _ => false,                               // everything else treated as cross-script
     }
-
-    // CJK Han/Kana cluster (exclude Hangul)
-    if is_cjk_han_or_kana(a) && is_cjk_han_or_kana(b) {
-        return true;
-    }
-
-    // Hangul cluster
-    if is_hangul(a) && is_hangul(b) {
-        return true;
-    }
-
-    // SE Asian cluster
-    if is_se_asian_script(a) && is_se_asian_script(b) {
-        return true;
-    }
-
-    false
 }
 
 /// Small helper: is char considered "Script" for segmentation (Han/Kana/Hangul/SE-Asian)
 #[inline(always)]
-pub fn is_script_char(c: char) -> bool {
+pub fn is_segmentation_script_char(c: char) -> bool {
     is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum CharClass {
-    #[default]
-    Other,
-    Whitespace, // Explicit (useful for normalization stages)
-    Western,
-    Script,
+    Other,        // Symbols, emojis, non-script, etc.
+    Whitespace,   // ASCII + Unicode spaces
+    Western,      // ASCII letters/digits/punct
+    CJK,          // Han ideographs + Kana + Kangxi radicals
+    Hangul,       // Hangul syllables & Jamo
+    SEAsian,      // Thai, Lao, Myanmar, Khmer, Tai Tham
+    NonCJKScript, // Greek, Cyrillic, Arabic, Hebrew, etc.
 }
+
+// Key fix in unicode.rs - classify() function
 
 #[inline(always)]
 pub fn classify(c: char) -> CharClass {
-    // Fast path: ASCII (covers 95%+ of Western text)
+    // 1. Fast ASCII
     if c.is_ascii() {
-        return if c.is_ascii_whitespace() {
-            CharClass::Whitespace
-        } else {
-            CharClass::Western // ASCII letters, digits, punctuation
-        };
+        if c.is_ascii_whitespace() {
+            return CharClass::Whitespace;
+        }
+        // CRITICAL FIX: Include ASCII punctuation in Western class
+        // This is essential for proper segmentation boundaries
+        // Industry standard (ICU, UAX #29): digits and punctuation
+        // should trigger boundaries when adjacent to script characters
+        if c.is_ascii_alphanumeric() || c.is_ascii_punctuation() {
+            return CharClass::Western;
+        }
+        // Other ASCII symbols → Other
+        return CharClass::Other;
     }
 
-    // Non-ASCII whitespace (NBSP, ideographic space, etc.)
+    // 2. Unicode whitespace
     if is_unicode_whitespace(c) {
         return CharClass::Whitespace;
     }
 
-    // Script clusters (CJK/Hangul/SE-Asian) - no word breaks
-    if is_script_char(c) {
-        return CharClass::Script;
+    // 3. CJK cluster
+    if is_cjk_han_or_kana(c) {
+        return CharClass::CJK;
     }
 
-    // Extended Latin (accented letters: é, ñ, ü, etc.)
-    if is_latin_letter(c) {
+    // 4. Hangul
+    if is_hangul(c) {
+        return CharClass::Hangul;
+    }
+
+    // 5. Southeast Asian scripts
+    if is_se_asian_script(c) {
+        return CharClass::SEAsian;
+    }
+
+    // 6. Western extended letters (Latin-1 / Extended-A/B)
+    if ('\u{00C0}'..='\u{02AF}').contains(&c) || is_ascii_letter(c) {
         return CharClass::Western;
     }
 
-    // Everything else: format controls, symbols, other scripts
+    // 7. Everything else that is a script character (Cyrillic, Greek, Arabic, etc.)
+    if c.is_alphabetic() {
+        return CharClass::NonCJKScript;
+    }
+
+    // 8. Fallback
     CharClass::Other
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     #[test]
@@ -416,18 +439,39 @@ mod tests {
 
     #[test]
     fn char_classification() {
-        assert_eq!(classify('h'), CharClass::Western);
-        assert_eq!(classify('5'), CharClass::Western);
-        assert_eq!(classify('!'), CharClass::Western);
-        assert_eq!(classify(' '), CharClass::Whitespace);
-        assert_eq!(classify('\t'), CharClass::Whitespace);
-        assert_eq!(classify('\u{00A0}'), CharClass::Whitespace); // NBSP
-        assert_eq!(classify('\u{3000}'), CharClass::Whitespace); // Ideographic space
-        assert_eq!(classify('é'), CharClass::Western);
-        assert_eq!(classify('日'), CharClass::Script);
-        assert_eq!(classify('가'), CharClass::Script);
-        assert_eq!(classify('ก'), CharClass::Script); // Thai
-        assert_eq!(classify('\u{200B}'), CharClass::Other); // ZWSP
-        assert_eq!(classify('🎉'), CharClass::Other); // Emoji
+        // --- Western ASCII
+        for c in &['h', '5', '!', 'é'] {
+            assert_eq!(classify(*c), CharClass::Western, "Failed for {}", c);
+        }
+
+        // --- Whitespace
+        for c in &[' ', '\t', '\u{00A0}', '\u{3000}'] {
+            assert_eq!(classify(*c), CharClass::Whitespace, "Failed for {:?}", c);
+        }
+
+        // --- CJK
+        for c in &['日', 'ア', '漢'] {
+            assert_eq!(classify(*c), CharClass::CJK, "Failed for {}", c);
+        }
+
+        // --- Hangul
+        for c in &['가', '각', '똠'] {
+            assert_eq!(classify(*c), CharClass::Hangul, "Failed for {}", c);
+        }
+
+        // --- Southeast Asian scripts
+        for c in &['ก', 'ข', 'ກ', 'ຂ', 'က', 'ခ'] {
+            assert_eq!(classify(*c), CharClass::SEAsian, "Failed for {}", c);
+        }
+
+        // --- Non-CJK scripts (Greek, Cyrillic, Arabic, etc.)
+        for c in &['Я', 'α', 'م'] {
+            assert_eq!(classify(*c), CharClass::NonCJKScript, "Failed for {}", c);
+        }
+
+        // --- Other (symbols, ZWSP, emojis)
+        for c in &['\u{200B}', '🎉', '©', '™'] {
+            assert_eq!(classify(*c), CharClass::Other, "Failed for {:?}", c);
+        }
     }
 }
