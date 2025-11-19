@@ -276,7 +276,7 @@ pub fn is_ascii_digit(c: char) -> bool {
 #[inline(always)]
 pub fn is_ascii_punct(c: char) -> bool {
     matches!(c as u32,
-        0x0020..=0x002F | // space + punctuation !"#$%&'()*+,-./
+        0x0021..=0x002F | // !"#$%&'()*+,-./
         0x003A..=0x0040 | // : ; < = > ? @
         0x005B..=0x0060 | // [ \ ] ^ _ `
         0x007B..=0x007E   // { | } ~
@@ -328,6 +328,46 @@ pub fn is_script_char(c: char) -> bool {
     is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[repr(u8)]
+pub enum CharClass {
+    #[default]
+    Other,
+    Whitespace, // Explicit (useful for normalization stages)
+    Western,
+    Script,
+}
+
+#[inline(always)]
+pub fn classify(c: char) -> CharClass {
+    // Fast path: ASCII (covers 95%+ of Western text)
+    if c.is_ascii() {
+        return if c.is_ascii_whitespace() {
+            CharClass::Whitespace
+        } else {
+            CharClass::Western // ASCII letters, digits, punctuation
+        };
+    }
+
+    // Non-ASCII whitespace (NBSP, ideographic space, etc.)
+    if is_unicode_whitespace(c) {
+        return CharClass::Whitespace;
+    }
+
+    // Script clusters (CJK/Hangul/SE-Asian) - no word breaks
+    if is_script_char(c) {
+        return CharClass::Script;
+    }
+
+    // Extended Latin (accented letters: é, ñ, ü, etc.)
+    if is_latin_letter(c) {
+        return CharClass::Western;
+    }
+
+    // Everything else: format controls, symbols, other scripts
+    CharClass::Other
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +412,22 @@ mod tests {
         assert!(is_control('\u{001F}'));
         assert!(is_control('\u{007F}'));
         assert!(!is_control(' '));
+    }
+
+    #[test]
+    fn char_classification() {
+        assert_eq!(classify('h'), CharClass::Western);
+        assert_eq!(classify('5'), CharClass::Western);
+        assert_eq!(classify('!'), CharClass::Western);
+        assert_eq!(classify(' '), CharClass::Whitespace);
+        assert_eq!(classify('\t'), CharClass::Whitespace);
+        assert_eq!(classify('\u{00A0}'), CharClass::Whitespace); // NBSP
+        assert_eq!(classify('\u{3000}'), CharClass::Whitespace); // Ideographic space
+        assert_eq!(classify('é'), CharClass::Western);
+        assert_eq!(classify('日'), CharClass::Script);
+        assert_eq!(classify('가'), CharClass::Script);
+        assert_eq!(classify('ก'), CharClass::Script); // Thai
+        assert_eq!(classify('\u{200B}'), CharClass::Other); // ZWSP
+        assert_eq!(classify('🎉'), CharClass::Other); // Emoji
     }
 }

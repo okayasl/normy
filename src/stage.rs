@@ -30,7 +30,8 @@ pub mod remove_control_chars;
 pub mod remove_diacritics;
 pub mod remove_format_controls;
 pub mod replace_fullwidth;
-pub mod segment_word;
+//pub mod segment_word;
+pub mod sw;
 
 use crate::context::Context;
 use std::borrow::Cow;

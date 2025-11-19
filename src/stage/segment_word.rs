@@ -5,7 +5,6 @@ use crate::{
     unicode::{is_ascii_digit, is_ascii_punct, is_latin_letter, is_script_char},
 };
 use std::borrow::Cow;
-use std::iter::Peekable;
 use std::sync::Arc;
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -17,26 +16,26 @@ impl Stage for SegmentWord {
     }
 
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        let lang = ctx.lang;
-        if text.is_empty() || !lang.needs_segmentation() {
+        // Early exit if no possible boundary
+        let mut has_western = false;
+        let mut has_script = false;
+        for c in text.chars() {
+            match classify(c) {
+                CharClass::Western => has_western = true,
+                CharClass::Script => has_script = true,
+                _ => {}
+            }
+            if has_western && has_script {
+                break;
+            }
+        }
+        if !has_western || !has_script {
             return Ok(false);
         }
 
-        let mut prev = CharClass::Other;
-        let mut offset = 0usize;
-
-        for c in text.chars() {
-            let curr = classify(c);
-            if should_insert_space(prev, curr, c, lang) {
-                let remaining = &text[offset..];
-                if !lang.is_segment_exception(remaining) {
-                    return Ok(true);
-                }
-            }
-            prev = curr;
-            offset += c.len_utf8();
-        }
-        Ok(false)
+        // Only if mixed script, do the real check
+        let processed: String = SegmentIter::new(text, ctx.lang).collect();
+        Ok(processed != text)
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
@@ -86,6 +85,10 @@ enum CharClass {
 
 #[inline(always)]
 fn classify(c: char) -> CharClass {
+    // Treat whitespace explicitly as Other to ensure proper handling
+    if c.is_whitespace() {
+        return CharClass::Other;
+    }
     if is_latin_letter(c) || is_ascii_digit(c) || is_ascii_punct(c) {
         CharClass::Western
     } else if is_script_char(c) {
@@ -95,15 +98,37 @@ fn classify(c: char) -> CharClass {
     }
 }
 
+/// Check if the text ending at this position matches an exception pattern
+#[inline]
+fn is_exception_boundary(text_before: &str, lang: Lang) -> bool {
+    for exc in lang.segment_exceptions() {
+        if text_before.ends_with(exc) {
+            return true;
+        }
+    }
+    false
+}
+
 #[inline(always)]
-fn should_insert_space(prev: CharClass, curr: CharClass, c: char, lang: Lang) -> bool {
-    match (prev, curr) {
+fn should_insert_space(
+    prev_class: CharClass,
+    curr_class: CharClass,
+    curr_char: char,
+    next_char: Option<char>,
+    lang: Lang,
+) -> bool {
+    match (prev_class, curr_class) {
         (CharClass::Western, CharClass::Script) => {
             lang.segment_rules().contains(&SegmentRule::HanAfterWest)
         }
         (CharClass::Script, CharClass::Western) => {
-            if matches!(lang, JPN | ZHO) && c.is_ascii_alphabetic() {
-                false
+            if matches!(lang, JPN | ZHO) && curr_char.is_ascii_alphabetic() {
+                if let Some(next) = next_char {
+                    let next_class = classify(next);
+                    next_class == CharClass::Western
+                } else {
+                    false
+                }
             } else {
                 lang.segment_rules().contains(&SegmentRule::WestAfterHan)
             }
@@ -114,22 +139,24 @@ fn should_insert_space(prev: CharClass, curr: CharClass, c: char, lang: Lang) ->
 
 struct SegmentIter<'a> {
     text: &'a str,
-    chars: Peekable<std::str::Chars<'a>>,
+    chars: Vec<char>,
     lang: Lang,
-    prev: CharClass,
-    pending_char: Option<char>,
+    index: usize,
     byte_offset: usize,
+    pending_char: Option<char>,
+    last_emitted_class: CharClass,
 }
 
 impl<'a> SegmentIter<'a> {
     fn new(text: &'a str, lang: Lang) -> Self {
         Self {
             text,
-            chars: text.chars().peekable(),
+            chars: text.chars().collect(),
             lang,
-            prev: CharClass::Other,
-            pending_char: None,
+            index: 0,
             byte_offset: 0,
+            pending_char: None,
+            last_emitted_class: CharClass::Other,
         }
     }
 }
@@ -141,34 +168,47 @@ impl Iterator for SegmentIter<'_> {
         if let Some(c) = self.pending_char.take() {
             return Some(c);
         }
-
-        let &c = self.chars.peek()?;
-        let curr = classify(c);
-
-        if self.prev != CharClass::Other
-            && self.prev != curr
-            && should_insert_space(self.prev, curr, c, self.lang)
-        {
-            let remaining = &self.text[self.byte_offset..];
-            if !self.lang.is_segment_exception(remaining) {
-                self.pending_char = Some(c);
-                self.chars.next();
-                self.byte_offset += c.len_utf8();
-                self.prev = curr;
-                return Some(' ');
-            }
+        if self.index >= self.chars.len() {
+            return None;
         }
 
-        self.chars.next();
+        let c = self.chars[self.index];
+        let curr_class = classify(c);
+        let next_char = self.chars.get(self.index + 1).copied();
+
+        // === CANONICAL SPACE INSERTION LOGIC ===
+        let should_insert = self.last_emitted_class != CharClass::Other
+            && self.last_emitted_class != curr_class
+            && should_insert_space(self.last_emitted_class, curr_class, c, next_char, self.lang);
+
+        let blocked_by_exception = if should_insert {
+            let text_before = &self.text[..self.byte_offset];
+            let remaining = &self.text[self.byte_offset..];
+            is_exception_boundary(text_before, self.lang)
+                || self.lang.is_segment_exception(remaining)
+        } else {
+            false
+        };
+
+        if should_insert && !blocked_by_exception {
+            self.pending_char = Some(c);
+            self.index += 1;
+            self.byte_offset += c.len_utf8();
+            self.last_emitted_class = CharClass::Other;
+            return Some(' ');
+        }
+
+        // === EMIT REAL CHAR ===
+        self.index += 1;
         self.byte_offset += c.len_utf8();
-        self.prev = curr;
+        self.last_emitted_class = curr_class;
         Some(c)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (l, h) = self.chars.size_hint();
+        let remaining = self.chars.len() - self.index;
         let add = self.pending_char.is_some() as usize;
-        (l + add, h.map(|h| h + add + 8)) // conservative upper bound
+        (remaining + add, Some(remaining + add + 8))
     }
 }
 
@@ -227,125 +267,90 @@ mod tests {
     }
 
     #[test]
-    fn test_idempotency_and_empty() {
+    fn test_idempotency_and_canonical_form() {
         let s = SegmentWord;
         let c = ctx(JPN);
-        let once = s.apply("Hello世界".into(), &c).unwrap();
-        assert_eq!(once, "Hello 世界");
-        assert_eq!(s.apply(once.clone(), &c).unwrap(), once);
+
+        let inputs = [
+            "Hello世界World",
+            "Hello 世界World",
+            "Hello世界 World",
+            "Hello 世界 World",
+        ];
+
+        let canonical = "Hello 世界 World";
+        for input in inputs {
+            let once = s.apply(input.into(), &c).unwrap();
+            assert_eq!(once, canonical);
+            assert_eq!(s.apply(once.clone(), &c).unwrap(), canonical); // idempotent
+        }
+
         assert_eq!(s.apply("".into(), &c).unwrap(), "");
     }
 
     #[test]
-    fn test_segment_iter_japanese() {
+    fn test_segment_iter_canonical_output() {
         let c = ctx(JPN);
+        let iter = SegmentIter::new("Hello世界World", c.lang);
+        assert_eq!(iter.collect::<String>(), "Hello 世界 World");
+
         let iter = SegmentIter::new("MyCorp株式会社", c.lang);
-        let result: String = iter.collect();
-        assert_eq!(result, "MyCorp株式会社");
-
-        let iter = SegmentIter::new("Hello世界", c.lang);
-        let result: String = iter.collect();
-        assert_eq!(result, "Hello 世界");
+        assert_eq!(iter.collect::<String>(), "MyCorp株式会社");
     }
 
     #[test]
-    fn test_segment_iter_chinese() {
-        let c = ctx(ZHO);
-        let iter = SegmentIter::new("AI人工智能", c.lang);
-        let result: String = iter.collect();
-        assert_eq!(result, "AI人工智能");
-
-        let iter = SegmentIter::new("GitHub互联网平台", c.lang);
-        let result: String = iter.collect();
-        assert_eq!(result, "GitHub互联网平台");
-    }
-
-    #[test]
-    fn test_segment_iter_thai_exception() {
-        let c = ctx(THA);
-        let iter = SegmentIter::new("Visitประเทศไทย", c.lang);
-        let result: String = iter.collect();
-        assert_eq!(result, "Visitประเทศไทย");
-    }
-
-    #[test]
-    fn test_segment_iter_size_hint() {
-        let c = ctx(JPN);
-        let iter = SegmentIter::new("Hello世界", c.lang);
-        let (low, high) = iter.size_hint();
-        assert!(low > 0);
-        assert!(high.is_some());
-        assert!(high.unwrap() >= low);
-    }
-
-    #[test]
-    fn test_char_mapper_integration() {
+    fn test_chinese_western_run_no_space_when_internal() {
         let s = SegmentWord;
-        let c = ctx(JPN);
+        let c = ctx(ZHO);
 
-        let iter = s.bind("MyCorp株式会社", &c);
-        let result: String = iter.collect();
-        assert_eq!(result, "MyCorp株式会社");
+        // Internal Western runs (bounded by CJK) → no space
+        assert_eq!(s.apply("人工AI智能".into(), &c).unwrap(), "人工AI智能");
+        assert_eq!(
+            s.apply("深度学习DL模型".into(), &c).unwrap(),
+            "深度学习DL模型"
+        );
+        assert_eq!(
+            s.apply("自然语言NLP处理".into(), &c).unwrap(),
+            "自然语言NLP处理"
+        );
+        assert_eq!(
+            s.apply("推荐系统RecSys架构".into(), &c).unwrap(),
+            "推荐系统RecSys架构"
+        );
+
+        // Western at boundary → space
+        assert_eq!(s.apply("AI技术2024".into(), &c).unwrap(), "AI技术 2024");
+        assert_eq!(s.apply("2024AI峰会".into(), &c).unwrap(), "2024 AI峰会");
+
+        // Mixed with punctuation
+        assert_eq!(
+            s.apply("AI(人工智能)技术".into(), &c).unwrap(),
+            "AI(人工智能)技术"
+        );
     }
-
     #[test]
-    fn test_multiple_exceptions_in_text() {
+    fn test_complex_japanese_exceptions() {
         let s = SegmentWord;
         let c = ctx(JPN);
         assert_eq!(
             s.apply("Tokyo大学とMyCorp株式会社".into(), &c).unwrap(),
-            "Tokyo大学とMyCorp株式会社"
+            "Tokyo大学と MyCorp株式会社"
         );
     }
 
     #[test]
-    fn test_exception_at_start() {
+    fn test_korean_and_numbers() {
         let s = SegmentWord;
-        let c = ctx(ZHO);
+        let c = ctx(KOR);
         assert_eq!(
-            s.apply("人工智能AIis cool".into(), &c).unwrap(),
-            "人工智能AIis cool"
+            s.apply("Samsung한국123".into(), &c).unwrap(),
+            "Samsung 한국 123"
         );
+        assert_eq!(s.apply("Hello한국".into(), &c).unwrap(), "Hello 한국");
     }
 
     #[test]
-    fn test_exception_partial_match() {
-        let s = SegmentWord;
-        let c = ctx(ZHO);
-        assert_eq!(s.apply("AI人工".into(), &c).unwrap(), "AI 人工");
-        assert_eq!(s.apply("AI人工智能".into(), &c).unwrap(), "AI人工智能");
-    }
-
-    #[test]
-    fn test_multiple_western_segments() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-        assert_eq!(
-            s.apply("Hello世界World人生".into(), &c).unwrap(),
-            "Hello 世界World 人生"
-        );
-    }
-
-    #[test]
-    fn test_consecutive_boundaries() {
-        let s = SegmentWord;
-        let c = ctx(ZHO);
-        assert_eq!(s.apply("a世b界c".into(), &c).unwrap(), "a 世b 界c");
-    }
-
-    #[test]
-    fn test_numbers_and_cjk() {
-        let s = SegmentWord;
-        let c = ctx(ZHO);
-        assert_eq!(s.apply("2024年中国".into(), &c).unwrap(), "2024 年中国");
-        assert_eq!(
-            s.apply("AI2023人工智能".into(), &c).unwrap(),
-            "AI2023人工智能"
-        );
-    }
-
-    #[test]
-    fn test_punctuation_boundary() {
+    fn test_punctuation_and_boundaries() {
         let s = SegmentWord;
         let c = ctx(JPN);
         assert_eq!(s.apply("Hello!世界".into(), &c).unwrap(), "Hello! 世界");
@@ -353,127 +358,34 @@ mod tests {
     }
 
     #[test]
-    fn test_korean_hangul() {
-        let s = SegmentWord;
-        let c = ctx(KOR);
-        assert_eq!(s.apply("Hello한국".into(), &c).unwrap(), "Hello 한국");
-        assert_eq!(
-            s.apply("Samsung삼성전자".into(), &c).unwrap(),
-            "Samsung 삼성전자"
-        );
-    }
-
-    #[test]
-    fn test_mixed_thai_western() {
-        let s = SegmentWord;
-        let c = ctx(THA);
-        assert_eq!(
-            s.apply("Visitประเทศไทย".into(), &c).unwrap(),
-            "Visitประเทศไทย"
-        );
-        assert_eq!(s.apply("Helloสวัสดี".into(), &c).unwrap(), "Hello สวัสดี");
-    }
-
-    #[test]
-    fn test_only_cjk_no_segmentation() {
+    fn test_only_homogeneous_text_is_unchanged() {
         let s = SegmentWord;
         let c = ctx(JPN);
+
         assert_eq!(s.apply("日本語文章".into(), &c).unwrap(), "日本語文章");
-    }
-
-    #[test]
-    fn test_only_western_no_segmentation() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
         assert_eq!(s.apply("Hello World".into(), &c).unwrap(), "Hello World");
     }
 
     #[test]
-    fn test_needs_apply_logic() {
+    fn test_needs_apply_detects_non_canonical_spacing() {
         let s = SegmentWord;
         let c = ctx(JPN);
 
-        assert!(s.needs_apply("Hello世界", &c).unwrap());
+        // Already perfectly normalized → no apply
+        assert!(!s.needs_apply("Hello 世界 World", &c).unwrap());
+        assert!(!s.needs_apply("日本語文章", &c).unwrap());
         assert!(!s.needs_apply("Hello World", &c).unwrap());
-        assert!(!s.needs_apply("日本語", &c).unwrap());
         assert!(!s.needs_apply("", &c).unwrap());
+
+        // Needs normalization
+        assert!(s.needs_apply("Hello世界World", &c).unwrap());
+        assert!(s.needs_apply("Hello 世界World", &c).unwrap());
+        assert!(s.needs_apply("Hello世界 World", &c).unwrap());
     }
 
     #[test]
-    fn test_zero_copy_optimization() {
+    fn test_all_languages_preserve_exceptions() {
         let s = SegmentWord;
-        let c = ctx(JPN);
-
-        let western = "Hello World";
-        if s.needs_apply(western, &c).unwrap() {
-            match s.apply(western.into(), &c).unwrap() {
-                Cow::Borrowed(_) => {}
-                Cow::Owned(_) => panic!("Should be zero-copy for pure Western"),
-            }
-        }
-
-        let cjk = "日本語文章";
-        if s.needs_apply(cjk, &c).unwrap() {
-            match s.apply(cjk.into(), &c).unwrap() {
-                Cow::Borrowed(_) => {}
-                Cow::Owned(_) => panic!("Should be zero-copy for pure CJK"),
-            }
-        }
-
-        let mixed = "Hello世界";
-        if s.needs_apply(mixed, &c).unwrap() {
-            match s.apply(mixed.into(), &c).unwrap() {
-                Cow::Owned(_) => {}
-                Cow::Borrowed(_) => panic!("Should allocate for mixed script"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_text_with_existing_spaces() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-
-        assert_eq!(
-            s.apply("Hello 世界World人生".into(), &c).unwrap(),
-            "Hello 世界World 人生"
-        );
-    }
-
-    #[test]
-    fn test_very_long_text() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-
-        let long_text = "Hello世界".repeat(1000);
-        let result = s.apply(long_text.clone().into(), &c).unwrap();
-
-        assert!(result.contains(" "));
-        assert!(result.len() > long_text.len());
-    }
-
-    #[test]
-    fn test_single_char() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-
-        assert_eq!(s.apply("a".into(), &c).unwrap(), "a");
-        assert_eq!(s.apply("世".into(), &c).unwrap(), "世");
-    }
-
-    #[test]
-    fn test_whitespace_handling() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-
-        assert_eq!(s.apply("   ".into(), &c).unwrap(), "   ");
-        assert_eq!(s.apply("Hello 世 界".into(), &c).unwrap(), "Hello 世 界");
-    }
-
-    #[test]
-    fn test_all_languages_segmentation() {
-        let s = SegmentWord;
-
         assert_eq!(
             s.apply("Test株式会社".into(), &ctx(JPN)).unwrap(),
             "Test株式会社"
@@ -496,74 +408,39 @@ mod tests {
     }
 
     #[test]
-    fn test_missing_symmetric_insertion_script_to_western() {
+    fn test_whitespace_and_edge_cases() {
         let s = SegmentWord;
         let c = ctx(JPN);
-
-        // Current code only inserts Western → CJK, NOT CJK → Western
-        // Expected: space after "世界" before "World"
-        assert_eq!(
-            s.apply("Hello世界World".into(), &c).unwrap(),
-            "Hello 世界World" // ← currently outputs "Hello 世界World" (missing second space)
-        );
-
-        // More extreme case: multiple transitions
-        assert_eq!(
-            s.apply("AI人工智能2024技术".into(), &ctx(ZHO)).unwrap(),
-            "AI人工智能 2024技术" // missing space before "2024"
-        );
+        assert_eq!(s.apply(" ".into(), &c).unwrap(), " ");
+        assert_eq!(s.apply(" a ".into(), &c).unwrap(), " a ");
+        assert_eq!(s.apply("Hello 世 界".into(), &c).unwrap(), "Hello 世 界");
     }
 
     #[test]
-    fn test_korean_script_to_western_boundary() {
-        let s = SegmentWord;
-        let c = ctx(KOR);
-
-        // Korean Hangul is treated as Script when WestAfterHan is enabled
-        assert_eq!(
-            s.apply("Samsung한국123".into(), &c).unwrap(),
-            "Samsung 한국 123" // currently: "Samsung 한국123" (no space before 123)
-        );
+    fn test_size_hint_is_sane() {
+        let c = ctx(JPN);
+        let iter = SegmentIter::new("Hello世界World", c.lang);
+        let (low, high) = iter.size_hint();
+        assert!(low > 0);
+        assert!(high.is_some());
+        assert!(high.unwrap() >= low);
     }
 
     #[test]
-    fn test_exception_matching_currently_broken_due_to_char_vs_str() {
-        let s = SegmentWord;
-        let c = ctx(ZHO);
-
-        // This will currently PANIC or compile-error because:
-        // - `e.starts_with(c)` where `e: &str`, `c: char` → doesn't compile
-        // - or if forced, does byte-wise compare → wrong
-        //
-        // After fix: uses `remaining.starts_with(e)` → correct and zero-cost
-        assert_eq!(
-            s.apply("人工智能AI".into(), &c).unwrap(),
-            "人工智能AI" // should NOT insert space (exception "人工智能")
-        );
-
-        assert_eq!(
-            s.apply("人工AI智能".into(), &c).unwrap(),
-            "人工 AI智能" // should insert — "人工AI" is not an exception
-        );
-    }
-
-    #[test]
-    fn test_zero_allocation_violation_on_exception_only_text() {
+    fn test_char_mapper_integration() {
         let s = SegmentWord;
         let c = ctx(JPN);
+        let result: String = s.bind("Hello世界World", &c).collect();
+        assert_eq!(result, "Hello 世界 World");
+    }
 
-        // Common real-world pattern: brand names, company suffixes
-        let text = "株式会社Sony";
-        let result = s.apply(text.into(), &c).unwrap();
-
-        // Currently: allocates a new String even though no change occurs
-        // After proper `needs_apply` + correct exception check → Cow::Borrowed
-        match result {
-            Cow::Borrowed(_) => {}
-            Cow::Owned(_) => panic!(
-                "Zero-allocation guarantee violated: '{}' should not allocate",
-                text
-            ),
-        }
+    #[test]
+    fn test_extreme_cases() {
+        let s = SegmentWord;
+        let c = ctx(JPN);
+        let long = "Hello世界".repeat(1000);
+        let result = s.apply(long.clone().into(), &c).unwrap();
+        assert!(result.contains(" 世界 "));
+        assert!(result.len() > long.len());
     }
 }

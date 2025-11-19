@@ -6,8 +6,6 @@
 use paste::paste;
 use phf::{Map, phf_map};
 
-use crate::unicode::{is_cjk_han_or_kana, is_hangul, is_se_asian_script};
-
 /// ---------------------------------------------------------------------------
 /// 1. Public Language Identifier
 /// ---------------------------------------------------------------------------
@@ -62,10 +60,12 @@ pub struct PeekPair {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentRule {
-    HanAfterWest,
-    WestAfterHan,
-    NoBreakHan,
-    NoBreakInScript,
+    /// Break on transition from Western (Latn, Grek, Cyrl…) → any other script
+    WesternToScript,
+    /// Break on transition from any other script → Western
+    ScriptToWestern,
+    /// Force unigram segmentation for consecutive CJK Unified Ideographs
+    CJKIdeographUnigram,
 }
 
 /// ---------------------------------------------------------------------------
@@ -82,7 +82,6 @@ pub struct LangEntry {
     pub diacritic_slice: Option<&'static [char]>,
     pub peek_pairs: &'static [PeekPair],
     pub segment_rules: &'static [SegmentRule],
-    pub segment_exceptions: &'static [&'static str],
 }
 
 impl LangEntry {
@@ -109,8 +108,7 @@ macro_rules! define_languages {
         segment: $segment:expr,
         peek_ahead: $peek:expr,
         peek_pairs: [ $( ($pa:expr, $pb:expr => $pto:expr) ),* $(,)? ],
-        segment_rules: [ $($sr:expr),* $(,)? ],
-        segment_exceptions: [ $($se:literal),* $(,)? ]
+        segment_rules: [ $($sr:expr),* $(,)? ]
     ),* $(,)?) => {
         // 4.1 Public `Lang` constants
         $(
@@ -145,7 +143,6 @@ macro_rules! define_languages {
                     ];
 
                     pub static SEGMENT_RULES: &[SegmentRule] = &[$($sr),*];
-                    pub static SEGMENT_EXCEPTIONS: &[&'static str] = &[$($se),*];
                 }
             }
         )*
@@ -172,7 +169,6 @@ macro_rules! define_languages {
                         },
                         peek_pairs: [<$code:lower _data>]::PEEK_PAIRS,
                         segment_rules: [<$code:lower _data>]::SEGMENT_RULES,
-                        segment_exceptions: [<$code:lower _data>]::SEGMENT_EXCEPTIONS,
                     }
                 ),*
             };
@@ -206,11 +202,10 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
-        segment_exceptions: [],
+
     // ──────────────────────────────────────────────────────────────────────
     // Germanic + Northern European (unchanged – correct as-is)
     // ──────────────────────────────────────────────────────────────────────
-
     DEU, "DEU", "German",
         case: [],
         fold: [ 'ß' => "ss", 'ẞ' => "ss" ],
@@ -219,7 +214,6 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
-        segment_exceptions: [],
 
     NLD, "NLD", "Dutch",
         case: [],
@@ -229,7 +223,6 @@ define_languages! {
         peek_ahead: true,
         peek_pairs: [ ('I', 'J' => "ij") ],
         segment_rules: [],
-        segment_exceptions: [],
 
     DAN, "DAN", "Danish",
         case: [],
@@ -239,7 +232,6 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
-        segment_exceptions: [],
 
     NOR, "NOR", "Norwegian",
         case: [],
@@ -249,7 +241,6 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
-        segment_exceptions: [],
 
     SWE, "SWE", "Swedish",
         case: [],
@@ -259,7 +250,6 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
-        segment_exceptions: [],
 
     // ──────────────────────────────────────────────────────────────────────
     // Arabic & Hebrew – already perfect
@@ -271,7 +261,7 @@ define_languages! {
             '\u{064D}'
         ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     HEB, "HEB", "Hebrew",
         case: [], fold: [], diac: [
@@ -281,7 +271,7 @@ define_languages! {
             '\u{05C2}'
         ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     // ──────────────────────────────────────────────────────────────────────
     // Fixed & Updated Languages
@@ -293,59 +283,59 @@ define_languages! {
             '\u{0302}', '\u{0306}', '\u{031B}'
         ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     FRA, "FRA", "French",
         case: [],
         fold: [ 'Œ' => "oe", 'œ' => "oe", 'Æ' => "ae", 'æ' => "ae" ],
         diac: [ '\u{0301}', '\u{0300}', '\u{0302}', '\u{0308}', '\u{0327}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     CES, "CES", "Czech",
         case: [],
         fold: [ 'Ď' => "d", 'ď' => "d", 'Ť' => "t", 'ť' => "t", 'Ň' => "n", 'ň' => "n" ],
         diac: [ '\u{030C}', '\u{0301}', '\u{030A}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     SLK, "SLK", "Slovak",
         case: [],
         fold: [ 'Ľ' => "l", 'ľ' => "l", 'Ĺ' => "l", 'ĺ' => "l", 'Ŕ' => "r", 'ŕ' => "r" ],
         diac: [ '\u{030C}', '\u{0301}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     POL, "POL", "Polish",
         case: [],
         fold: [ 'Ł' => "l", 'ł' => "l" ],
         diac: [ '\u{0328}', '\u{0301}', '\u{0307}', '\u{02DB}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     CAT, "CAT", "Catalan",
         case: [], fold: [],
         diac: [ '\u{0301}', '\u{0300}', '\u{0308}', '\u{0327}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     SPA, "SPA", "Spanish",
         case: [], fold: [ 'Ñ' => "n", 'ñ' => "n" ],
         diac: [ '\u{0301}', '\u{0303}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     POR, "POR", "Portuguese",
         case: [], fold: [],
         diac: [ '\u{0301}', '\u{0300}', '\u{0303}', '\u{0302}', '\u{0327}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     ITA, "ITA", "Italian",
         case: [], fold: [],
         diac: [ '\u{0300}', '\u{0301}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     // ──────────────────────────────────────────────────────────────────────
     // Asian scripts – segmentation only
@@ -353,44 +343,63 @@ define_languages! {
     JPN, "JPN", "Japanese",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::HanAfterWest, SegmentRule::WestAfterHan, SegmentRule::NoBreakHan],
-        segment_exceptions: ["株式会社", "大学", "東京", "日本", "大学校", "研究所"],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+            SegmentRule::CJKIdeographUnigram,
+        ],
 
     ZHO, "ZHO", "Chinese (Simplified)",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::HanAfterWest, SegmentRule::WestAfterHan, SegmentRule::NoBreakHan],
-        segment_exceptions: ["中华人民共和国", "人工智能", "北京市", "计算机", "自然语言处理", "互联网"],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+            SegmentRule::CJKIdeographUnigram,
+        ],
 
     KOR, "KOR", "Korean",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::HanAfterWest,SegmentRule::WestAfterHan,SegmentRule::NoBreakHan,],
-        segment_exceptions: [],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+        ],
 
+    // ──────────────────────────────────────────────────────────────────────
+    // Southeast Asian Scripts (no unigram breaking, same cluster stays fused)
+    // ──────────────────────────────────────────────────────────────────────
     THA, "THA", "Thai",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::NoBreakInScript, SegmentRule::HanAfterWest, SegmentRule::WestAfterHan],
-        segment_exceptions: ["ประเทศไทย", "กรุงเทพมหานคร", "ภาษาไทย", "ปัญญาประดิษฐ์", "คอมพิวเตอร์"],
-
-    MYA, "MYA", "Myanmar",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::NoBreakInScript],
-        segment_exceptions: ["မြန်မာ", "ရန်ကုန်", "နေပြည်တော်", "ဘာသာစကား"],
-
-    KHM, "KHM", "Khmer",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::NoBreakInScript],
-        segment_exceptions: ["កម្ពុជា", "ភ្នំពេញ", "ភាសាខ្មែរ", "កុំព្យូទ័រ"],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+        ],
 
     LAO, "LAO", "Lao",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
-        segment_rules: [SegmentRule::NoBreakInScript, SegmentRule::HanAfterWest, SegmentRule::WestAfterHan],
-        segment_exceptions: ["ລາວ", "ວຽງຈັນ", "ສະຫວັນນະເຂດ"],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+        ],
+
+    MYA, "MYA", "Myanmar",
+        case: [], fold: [], diac: [],
+        segment: true, peek_ahead: false, peek_pairs: [],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+        ],
+
+    KHM, "KHM", "Khmer",
+        case: [], fold: [], diac: [],
+        segment: true, peek_ahead: false, peek_pairs: [],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+        ],
 
     // ──────────────────────────────────────────────────────────────────────
     // Remaining languages (unchanged – correct)
@@ -398,32 +407,32 @@ define_languages! {
     HUN, "HUN", "Hungarian",
         case: [], fold: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     HRV, "HRV", "Croatian",
         case: [], fold: [ 'ǈ' => "lj", 'ǉ' => "lj", 'ǋ' => "nj", 'ǌ' => "nj" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     SRP, "SRP", "Serbian",
         case: [], fold: [ 'Љ' => "lj", 'љ' => "lj", 'Њ' => "nj", 'њ' => "nj", 'Џ' => "dz", 'џ' => "dz" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     UKR, "UKR", "Ukrainian",
         case: [], fold: [ 'Ґ' => "g", 'ґ' => "g" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     BUL, "BUL", "Bulgarian",
         case: [], fold: [ 'Щ' => "sht", 'щ' => "sht" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: [],
 
     ENG, "ENG", "English",
         case: [], fold: [], diac: [],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: [], segment_exceptions: [],
+        segment_rules: []
 }
 
 /// ---------------------------------------------------------------------------
@@ -671,42 +680,39 @@ pub trait LocaleBehavior {
             .unwrap_or(&[])
     }
 
-    /// Returns known multi-word exceptions that must not be split.
-    /// Used for high-precision recall on common compounds.
-    #[inline(always)]
-    fn segment_exceptions(&self) -> &'static [&'static str] {
-        LANG_TABLE
-            .get(self.id().code())
-            .map(|e| e.segment_exceptions)
-            .unwrap_or(&[])
-    }
-
     /// Convenience: does this language need word segmentation at all?
     #[inline(always)]
     fn needs_word_segmentation(&self) -> bool {
         self.needs_segmentation() && !self.segment_rules().is_empty()
     }
 
-    #[inline]
-    fn is_segment_exception(&self, text: &str) -> bool {
-        self.segment_exceptions()
-            .iter()
-            .any(|&exc| text.starts_with(exc))
-    }
+    #[inline(always)]
+    fn needs_boundary_between(&self, prev: char, curr: char) -> bool {
+        use crate::unicode::{is_cjk_unified_ideograph, is_same_script_cluster};
 
-    #[inline]
-    fn needs_script_break(&self, c: char) -> bool {
-        let r = self.segment_rules();
-        if r.contains(&SegmentRule::NoBreakInScript) && is_se_asian_script(c) {
-            return true;
+        // Whitespace boundaries are handled by NormalizeWhitespace stage
+        if prev.is_whitespace() || curr.is_whitespace() {
+            return false;
         }
-        if is_cjk_han_or_kana(c) && r.contains(&SegmentRule::NoBreakHan) {
-            return true;
+
+        let same_cluster = is_same_script_cluster(prev, curr);
+
+        if same_cluster {
+            // Only CJK languages with the explicit unigram rule break Han–Han
+            if self
+                .segment_rules()
+                .contains(&SegmentRule::CJKIdeographUnigram)
+                && is_cjk_unified_ideograph(prev)
+                && is_cjk_unified_ideograph(curr)
+            {
+                return true; // insert boundary (unigram segmentation)
+            }
+            return false; // keep fused
         }
-        if is_hangul(c) && r.contains(&SegmentRule::WestAfterHan) {
-            return true;
-        }
-        false
+
+        // Different script clusters → always break
+        // (except the two Western↔Script rules can be filtered here if you want even tighter branching)
+        true
     }
 }
 
@@ -744,14 +750,6 @@ impl LocaleBehavior for Lang {
         LANG_TABLE
             .get(self.code)
             .map(|e| e.segment_rules)
-            .unwrap_or(&[])
-    }
-
-    #[inline(always)]
-    fn segment_exceptions(&self) -> &'static [&'static str] {
-        LANG_TABLE
-            .get(self.code)
-            .map(|e| e.segment_exceptions)
             .unwrap_or(&[])
     }
 
