@@ -6,6 +6,8 @@
 use paste::paste;
 use phf::{Map, phf_map};
 
+use crate::unicode::is_any_whitespace;
+
 /// ---------------------------------------------------------------------------
 /// 1. Public Language Identifier
 /// ---------------------------------------------------------------------------
@@ -688,7 +690,7 @@ pub trait LocaleBehavior {
         };
 
         // --- 0. Whitespace never produces boundaries
-        if prev.is_whitespace() || curr.is_whitespace() {
+        if is_any_whitespace(prev) || is_any_whitespace(curr) {
             return false;
         }
 
