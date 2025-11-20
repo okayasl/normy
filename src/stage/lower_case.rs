@@ -15,7 +15,7 @@
 use crate::{
     Lang,
     context::Context,
-    lang::LocaleBehavior,
+    lang::behaviour::LocaleBehavior,
     stage::{CharMapper, Stage, StageError},
 };
 use std::borrow::Cow;
@@ -164,16 +164,12 @@ impl<'a> FusedIterator for LowercaseIter<'a> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::{DEU, ENG, NLD, TUR};
-
-    fn make_context(lang: crate::lang::Lang) -> Context {
-        Context { lang }
-    }
+    use crate::lang::data::{DEU, ENG, NLD, TUR};
 
     #[test]
     fn test_english_basic() {
         let stage = LowerCase;
-        let ctx = make_context(ENG);
+        let ctx = Context::new(ENG);
 
         assert!(stage.needs_apply("HELLO", &ctx).unwrap());
         assert!(!stage.needs_apply("hello", &ctx).unwrap());
@@ -185,7 +181,7 @@ mod tests {
     #[test]
     fn test_turkish_dotted_i() {
         let stage = LowerCase;
-        let ctx = make_context(TUR);
+        let ctx = Context::new(TUR);
 
         // Turkish İ → i
         let result = stage.apply(Cow::Borrowed("İSTANBUL"), &ctx).unwrap();
@@ -199,7 +195,7 @@ mod tests {
     #[test]
     fn test_german_eszett_not_expanded() {
         let stage = LowerCase;
-        let ctx = make_context(DEU);
+        let ctx = Context::new(DEU);
 
         // Lowercase does NOT expand ß → ss (that's case_fold's job)
         let result = stage.apply(Cow::Borrowed("STRAẞE"), &ctx).unwrap();
@@ -209,7 +205,7 @@ mod tests {
     #[test]
     fn test_dutch_ij_no_digraph_handling() {
         let stage = LowerCase;
-        let ctx = make_context(NLD);
+        let ctx = Context::new(NLD);
 
         // Lowercase does NOT treat IJ as digraph (that's case_fold's job)
         // Just lowercase each character independently
@@ -226,16 +222,16 @@ mod tests {
         let stage = LowerCase;
 
         // Lowercase is always 1→1, so always eligible for CharMapper
-        assert!(stage.as_char_mapper(&make_context(ENG)).is_some());
-        assert!(stage.as_char_mapper(&make_context(TUR)).is_some());
-        assert!(stage.as_char_mapper(&make_context(DEU)).is_some());
-        assert!(stage.as_char_mapper(&make_context(NLD)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(ENG)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(TUR)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(DEU)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(NLD)).is_some());
     }
 
     #[test]
     fn test_idempotency() {
         let stage = LowerCase;
-        let ctx = make_context(TUR);
+        let ctx = Context::new(TUR);
 
         let text = "İSTANBUL";
         let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
@@ -249,7 +245,7 @@ mod tests {
     #[cfg(feature = "ascii-fast")]
     fn test_ascii_fast_path() {
         let stage = LowerCase;
-        let ctx = make_context(ENG);
+        let ctx = Context::new(ENG);
 
         let result = stage.apply(Cow::Borrowed("HELLO123"), &ctx).unwrap();
         assert_eq!(result, "hello123");
@@ -261,13 +257,13 @@ mod tests {
 
         // 1. German ß: lowercase preserves it, case_fold expands it
         let lowercase = LowerCase;
-        let ctx = make_context(DEU);
+        let ctx = Context::new(DEU);
 
         let result = lowercase.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap();
         assert_eq!(result, "groß"); // NOT "gross"
 
         // 2. Dutch IJ: lowercase treats separately, case_fold treats as digraph
-        let ctx = make_context(NLD);
+        let ctx = Context::new(NLD);
         let result = lowercase.apply(Cow::Borrowed("IJssel"), &ctx).unwrap();
         assert_eq!(result, "ijssel"); // Just I→i, J→j (no digraph handling)
     }

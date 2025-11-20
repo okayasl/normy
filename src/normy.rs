@@ -49,15 +49,18 @@ impl<P: Process> Normy<P> {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Builder – monomorphised path
+// ─────────────────────────────────────────────────────────────────────────────
 pub struct NormyBuilder<P: Process> {
-    lang: Lang,
+    ctx: Context,
     current: P,
 }
 
 impl Default for NormyBuilder<EmptyProcess> {
     fn default() -> Self {
         Self {
-            lang: DEFAULT_LANG,
+            ctx: Context::new(DEFAULT_LANG),
             current: EmptyProcess,
         }
     }
@@ -65,13 +68,19 @@ impl Default for NormyBuilder<EmptyProcess> {
 
 impl<P: Process> NormyBuilder<P> {
     pub fn lang(mut self, lang: Lang) -> Self {
-        self.lang = lang;
+        self.ctx = Context::new(lang);
+        self
+    }
+
+    /// Override any language property at build time – zero runtime cost
+    pub fn modify_lang(mut self, f: impl FnOnce(&mut crate::lang::LangEntry)) -> Self {
+        self.ctx = Context::with_modified(self.ctx.lang, f);
         self
     }
 
     pub fn add_stage<S: Stage + 'static>(self, stage: S) -> NormyBuilder<ChainedProcess<S, P>> {
         NormyBuilder {
-            lang: self.lang,
+            ctx: self.ctx,
             current: ChainedProcess {
                 stage,
                 previous: self.current,
@@ -80,9 +89,8 @@ impl<P: Process> NormyBuilder<P> {
     }
 
     pub fn build(self) -> Normy<P> {
-        let ctx = Context { lang: self.lang };
         Normy {
-            ctx,
+            ctx: self.ctx,
             pipeline: self.current,
         }
     }
@@ -94,26 +102,35 @@ impl Normy<EmptyProcess> {
     }
 }
 
-impl Normy<DynProcess> {
-    pub fn plugin_builder() -> DynNormyBuilder {
-        DynNormyBuilder::new()
-    }
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Dynamic plugin path – unchanged except ctx construction
+// ─────────────────────────────────────────────────────────────────────────────
 pub struct DynNormyBuilder {
-    lang: Lang,
+    ctx: Context,
     pipeline: DynProcess,
 }
 
+impl Default for DynNormyBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DynNormyBuilder {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            lang: DEFAULT_LANG,
+            ctx: Context::new(DEFAULT_LANG),
             pipeline: DynProcess::new(),
         }
     }
 
     pub fn lang(mut self, lang: Lang) -> Self {
-        self.lang = lang;
+        self.ctx = Context::new(lang);
+        self
+    }
+
+    pub fn modify_lang(mut self, f: impl FnOnce(&mut crate::lang::LangEntry)) -> Self {
+        self.ctx = Context::with_modified(self.ctx.lang, f);
         self
     }
 
@@ -125,10 +142,15 @@ impl DynNormyBuilder {
     }
 
     pub fn build(self) -> Normy<DynProcess> {
-        let ctx = Context { lang: self.lang };
         Normy {
-            ctx,
+            ctx: self.ctx,
             pipeline: self.pipeline,
         }
+    }
+}
+
+impl Normy<DynProcess> {
+    pub fn plugin_builder() -> DynNormyBuilder {
+        DynNormyBuilder::new()
     }
 }

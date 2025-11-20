@@ -62,29 +62,33 @@ impl CharMapper for NormalizePunctuation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::ENG;
-
-    fn make_context() -> Context {
-        Context { lang: ENG }
-    }
+    use crate::lang::data::ENG;
 
     #[test]
     fn test_needs_apply_detects_fancy_quotes() {
         let stage = NormalizePunctuation;
-        assert!(stage.needs_apply("hello “world”", &make_context()).unwrap());
+        assert!(
+            stage
+                .needs_apply("hello “world”", &Context::new(ENG))
+                .unwrap()
+        );
     }
 
     #[test]
     fn test_needs_apply_false_for_ascii() {
         let stage = NormalizePunctuation;
-        assert!(!stage.needs_apply("hello world", &make_context()).unwrap());
+        assert!(
+            !stage
+                .needs_apply("hello world", &Context::new(ENG))
+                .unwrap()
+        );
     }
 
     #[test]
     fn test_apply_quotes() {
         let stage = NormalizePunctuation;
         let result = stage
-            .apply(Cow::Borrowed("“Hello” ‘world’"), &make_context())
+            .apply(Cow::Borrowed("“Hello” ‘world’"), &Context::new(ENG))
             .unwrap();
         assert_eq!(result, "\"Hello\" 'world'");
     }
@@ -93,7 +97,7 @@ mod tests {
     fn test_apply_dashes() {
         let stage = NormalizePunctuation;
         let result = stage
-            .apply(Cow::Borrowed("foo – bar — baz"), &make_context())
+            .apply(Cow::Borrowed("foo – bar — baz"), &Context::new(ENG))
             .unwrap();
         assert_eq!(result, "foo - bar - baz");
     }
@@ -102,7 +106,7 @@ mod tests {
     fn test_apply_ellipsis() {
         let stage = NormalizePunctuation;
         let result = stage
-            .apply(Cow::Borrowed("Wait… really?"), &make_context())
+            .apply(Cow::Borrowed("Wait… really?"), &Context::new(ENG))
             .unwrap();
         assert_eq!(result, "Wait. really?");
     }
@@ -112,10 +116,10 @@ mod tests {
         let stage = NormalizePunctuation;
         let mapper: &dyn CharMapper = &stage;
 
-        assert_eq!(mapper.map('“', &make_context()), Some('"'));
-        assert_eq!(mapper.map('’', &make_context()), Some('\''));
-        assert_eq!(mapper.map('—', &make_context()), Some('-'));
-        assert_eq!(mapper.map('x', &make_context()), Some('x')); // unchanged ASCII
+        assert_eq!(mapper.map('“', &Context::new(ENG)), Some('"'));
+        assert_eq!(mapper.map('’', &Context::new(ENG)), Some('\''));
+        assert_eq!(mapper.map('—', &Context::new(ENG)), Some('-'));
+        assert_eq!(mapper.map('x', &Context::new(ENG)), Some('x')); // unchanged ASCII
     }
 
     #[test]
@@ -123,7 +127,7 @@ mod tests {
         let stage = NormalizePunctuation;
         let mapper: &dyn CharMapper = &stage;
 
-        let iter = mapper.bind("A “quote” and… dash—", &make_context());
+        let iter = mapper.bind("A “quote” and… dash—", &Context::new(ENG));
         let collected: String = iter.collect();
 
         assert_eq!(collected, "A \"quote\" and. dash-");
@@ -133,7 +137,7 @@ mod tests {
     fn test_apply_when_no_changes_returns_borrowed() {
         let stage = NormalizePunctuation;
         let text = Cow::Borrowed("all ascii here");
-        let result = stage.apply(text.clone(), &make_context()).unwrap();
+        let result = stage.apply(text.clone(), &Context::new(ENG)).unwrap();
 
         // ensures zero-copy when no normalization is needed
         match result {
@@ -146,7 +150,7 @@ mod tests {
     fn test_normalize_punctuation() {
         let stage = NormalizePunctuation;
         let text = Cow::Borrowed("“Hello” – said ‘John’…");
-        let result = stage.apply(text.clone(), &make_context()).unwrap();
+        let result = stage.apply(text.clone(), &Context::new(ENG)).unwrap();
         assert_eq!(result, "\"Hello\" - said 'John'.");
     }
 }

@@ -64,30 +64,26 @@ impl CharMapper for ReplaceFullwidth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::ENG;
+    use crate::lang::data::ENG;
     use std::borrow::Cow;
-
-    fn make_context() -> Context {
-        Context { lang: ENG }
-    }
 
     #[test]
     fn test_needs_apply_detects_fullwidth() {
         let stage = ReplaceFullwidth;
-        assert!(stage.needs_apply("ＡＢＣ", &make_context()).unwrap());
+        assert!(stage.needs_apply("ＡＢＣ", &Context::new(ENG)).unwrap());
     }
 
     #[test]
     fn test_needs_apply_false_for_ascii() {
         let stage = ReplaceFullwidth;
-        assert!(!stage.needs_apply("ABC 123 !?", &make_context()).unwrap());
+        assert!(!stage.needs_apply("ABC 123 !?", &Context::new(ENG)).unwrap());
     }
 
     #[test]
     fn test_apply_fullwidth_latin() {
         let stage = ReplaceFullwidth;
         let result = stage
-            .apply(Cow::Borrowed("Ｈｅｌｌｏ Ｗｏｒｌｄ"), &make_context())
+            .apply(Cow::Borrowed("Ｈｅｌｌｏ Ｗｏｒｌｄ"), &Context::new(ENG))
             .unwrap();
         assert_eq!(result, "Hello World");
     }
@@ -96,7 +92,7 @@ mod tests {
     fn test_apply_fullwidth_digits_punctuation() {
         let stage = ReplaceFullwidth;
         let result = stage
-            .apply(Cow::Borrowed("１２３４５！＠＃"), &make_context())
+            .apply(Cow::Borrowed("１２３４５！＠＃"), &Context::new(ENG))
             .unwrap();
         assert_eq!(result, "12345!@#");
     }
@@ -105,7 +101,7 @@ mod tests {
     fn test_apply_when_no_changes_returns_borrowed() {
         let stage = ReplaceFullwidth;
         let text = Cow::Borrowed("Plain ASCII text");
-        let result = stage.apply(text.clone(), &make_context()).unwrap();
+        let result = stage.apply(text.clone(), &Context::new(ENG)).unwrap();
 
         match result {
             Cow::Borrowed(_) => {} // OK: zero-copy
@@ -118,12 +114,12 @@ mod tests {
         let stage = ReplaceFullwidth;
         let mapper: &dyn CharMapper = &stage;
 
-        assert_eq!(mapper.map('Ａ', &make_context()), Some('A'));
-        assert_eq!(mapper.map('９', &make_context()), Some('9'));
-        assert_eq!(mapper.map('！', &make_context()), Some('!'));
+        assert_eq!(mapper.map('Ａ', &Context::new(ENG)), Some('A'));
+        assert_eq!(mapper.map('９', &Context::new(ENG)), Some('9'));
+        assert_eq!(mapper.map('！', &Context::new(ENG)), Some('!'));
 
         // unchanged ASCII remains ASCII
-        assert_eq!(mapper.map('x', &make_context()), Some('x'));
+        assert_eq!(mapper.map('x', &Context::new(ENG)), Some('x'));
     }
 
     #[test]
@@ -131,7 +127,7 @@ mod tests {
         let stage = ReplaceFullwidth;
         let mapper: &dyn CharMapper = &stage;
 
-        let iter = mapper.bind("ＡＢＣ １２３！", &make_context());
+        let iter = mapper.bind("ＡＢＣ １２３！", &Context::new(ENG));
         let collected: String = iter.collect();
 
         assert_eq!(collected, "ABC 123!");
@@ -141,7 +137,7 @@ mod tests {
     fn test_fullwidth_replace_sanity() {
         let stage = ReplaceFullwidth;
         let text = Cow::Borrowed("Ｔｅｘｔ： １００％ full-width");
-        let result = stage.apply(text, &make_context()).unwrap();
+        let result = stage.apply(text, &Context::new(ENG)).unwrap();
 
         assert_eq!(result, "Text: 100% full-width");
     }
@@ -150,7 +146,7 @@ mod tests {
     fn test_replace_fullwidth() {
         let stage = ReplaceFullwidth;
         let text = Cow::Borrowed("Ｈｅｌｌｏ　Ｗｏｒｌｄ！");
-        let result = stage.apply(text, &make_context()).unwrap();
+        let result = stage.apply(text, &Context::new(ENG)).unwrap();
         assert_eq!(result, "Hello World!");
     }
 

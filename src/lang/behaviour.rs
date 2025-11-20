@@ -1,7 +1,7 @@
 use crate::{
     lang::{
         data::LANG_TABLE,
-        entry::{CaseMap, DiacriticSet, FoldMap, Lang, LangEntry, SegmentRule},
+        {CaseMap, DiacriticSet, FoldMap, Lang, LangEntry, SegmentRule},
     },
     unicode::{CharClass, classify, is_any_whitespace, is_same_script_cluster},
 };
@@ -11,122 +11,31 @@ use crate::{
 /// ---------------------------------------------------------------------------
 pub trait LocaleBehavior {
     fn entry(&self) -> &'static LangEntry;
-    // Core accessors
-    fn id(&self) -> Lang;
-    fn case_map(&self) -> &'static [CaseMap];
-    fn fold_map(&self) -> &'static [FoldMap];
-    fn diacritics(&self) -> Option<DiacriticSet>;
-    fn needs_segmentation(&self) -> bool;
-
-    // -------------------------------------------------------------------------
-    // Case folding helpers
-    // -------------------------------------------------------------------------
-
-    /// Does this character need case folding in this language?
-    /// O(k) check on a tiny slice then fallback to Unicode lowercasing.
+    // === Core accessors (all inlined to static field loads) ===
     #[inline(always)]
-    fn needs_case_fold(&self, c: char) -> bool {
-        if let Some(e) = LANG_TABLE.get(self.id().code())
-            && e.fold_char_slice.contains(&c)
-        {
-            return true;
-        }
-        // Unicode-level change (this checks if lowercase differs)
-        c.to_lowercase().next() != Some(c)
-    }
-
-    /// Fold a single character (1→1 only).
-    /// Returns None if the mapping is multi-char.
-    #[inline(always)]
-    fn fold_char(&self, c: char) -> Option<char> {
-        let fold_map = self.fold_map();
-
-        if fold_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if c.is_ascii() {
-                return Some(c.to_ascii_lowercase());
-            }
-            return c.to_lowercase().next();
-        }
-
-        // Check if character has language-specific mapping
-        match fold_map.iter().find(|m| m.from == c) {
-            Some(mapping) => {
-                // Found in fold_map - verify it's 1→1
-                let mut chars = mapping.to.chars();
-                let first = chars.next()?;
-
-                if chars.next().is_some() {
-                    // Multi-char: cannot use in CharMapper
-                    None
-                } else {
-                    // Single char: safe to use
-                    Some(first)
-                }
-            }
-            None => {
-                // Not in fold_map - use Unicode lowercase
-                c.to_lowercase().next()
-            }
-        }
+    fn case_map(&self) -> &'static [CaseMap] {
+        self.entry().case_map
     }
 
     #[inline(always)]
-    fn needs_lowercase(&self, c: char) -> bool {
-        let case_map = self.case_map();
-
-        // Check language-specific case_map first (O(k) where k is tiny, ~2 for Turkish)
-        if case_map.iter().any(|m| m.from == c) {
-            return true;
-        }
-
-        // Fallback to Unicode lowercase check
-        c.to_lowercase().next() != Some(c)
+    fn fold_map(&self) -> &'static [FoldMap] {
+        self.entry().fold_map
     }
 
-    // Add this after fold_char()
-
-    /// Lowercase a single character (1→1 always, uses case_map).
-    /// This is for the Lowercase stage, not FoldCase.
     #[inline(always)]
-    fn lowercase_char(&self, c: char) -> char {
-        let case_map = self.case_map();
-
-        // Language-specific 1→1 (Turkish, etc.)
-        if let Some(m) = case_map.iter().find(|m| m.from == c) {
-            return m.to;
-        }
-
-        #[cfg(feature = "ascii-fast")]
-        if c.is_ascii() {
-            return c.to_ascii_lowercase();
-        }
-
-        // Unicode guarantees at least one char
-        c.to_lowercase().next().unwrap_or(c)
+    fn diacritics(&self) -> Option<DiacriticSet> {
+        self.entry().diacritics
     }
 
-    /// Can this language use CharMapper (zero-copy path)?
     #[inline(always)]
-    fn has_one_to_one_folds(&self) -> bool {
-        LANG_TABLE
-            .get(self.id().code())
-            .map(|e| e.has_one_to_one_folds())
-            .unwrap_or(true)
+    fn needs_segmentation(&self) -> bool {
+        self.entry().needs_segmentation
     }
 
-    /// Does this language need context-sensitive folding (peek-ahead)?
     #[inline(always)]
     fn requires_peek_ahead(&self) -> bool {
-        LANG_TABLE
-            .get(self.id().code())
-            .map(|e| e.requires_peek_ahead)
-            .unwrap_or(false)
+        self.entry().requires_peek_ahead
     }
-
-    // -------------------------------------------------------------------------
-    // Context-sensitive folding helpers
-    // -------------------------------------------------------------------------
 
     /// Check if a two-character sequence needs special handling.
     /// Returns the target string if this is a context-sensitive fold.
@@ -142,12 +51,9 @@ pub trait LocaleBehavior {
         // --------------------------------------------------------------------
         // 2. Explicit peek-pairs (language-defined)
         // --------------------------------------------------------------------
-        if let Some(entry) = LANG_TABLE.get(self.id().code()) {
-            for p in entry.peek_pairs {
-                // *** CASE-SENSITIVE MATCH ***
-                if p.a == current && p.b == next_char {
-                    return Some(p.to);
-                }
+        for p in self.entry().peek_pairs {
+            if p.a == current && p.b == next_char {
+                return Some(p.to);
             }
         }
 
@@ -172,42 +78,81 @@ pub trait LocaleBehavior {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Diacritic helpers
-    // -------------------------------------------------------------------------
     #[inline(always)]
-    fn has_diacritics(&self) -> bool {
-        self.diacritics().is_some()
+    fn has_one_to_one_folds(&self) -> bool {
+        self.entry().has_one_to_one_folds()
+    }
+
+    // === Case folding helpers ===
+    #[inline(always)]
+    fn needs_case_fold(&self, c: char) -> bool {
+        let entry = self.entry();
+        entry.fold_char_slice.contains(&c)
+            || entry.case_map.iter().any(|m| m.from == c)
+            || c.to_lowercase().next() != Some(c)
+    }
+
+    #[inline(always)]
+    fn needs_lowercase(&self, c: char) -> bool {
+        let case_map = self.case_map();
+
+        // Check language-specific case_map first (O(k) where k is tiny, ~2 for Turkish)
+        if case_map.iter().any(|m| m.from == c) {
+            return true;
+        }
+
+        // Fallback to Unicode lowercase check
+        c.to_lowercase().next() != Some(c)
+    }
+
+    #[inline(always)]
+    fn fold_char(&self, c: char) -> Option<char> {
+        let entry = self.entry();
+        if let Some(m) = entry.fold_map.iter().find(|m| m.from == c) {
+            let mut chars = m.to.chars();
+            let first = chars.next()?;
+            if chars.next().is_none() {
+                Some(first)
+            } else {
+                None
+            }
+        } else {
+            c.to_lowercase().next()
+        }
+    }
+
+    #[inline(always)]
+    fn lowercase_char(&self, c: char) -> char {
+        if let Some(m) = self.case_map().iter().find(|m| m.from == c) {
+            m.to
+        } else {
+            #[cfg(feature = "ascii-fast")]
+            if c.is_ascii() {
+                return c.to_ascii_lowercase();
+            }
+            c.to_lowercase().next().unwrap_or(c)
+        }
     }
 
     #[inline(always)]
     fn is_diacritic(&self, c: char) -> bool {
-        LANG_TABLE
-            .get(self.id().code())
-            .and_then(|e| e.diacritic_slice)
+        self.entry()
+            .diacritic_slice
             .map(|slice| slice.contains(&c))
             .unwrap_or(false)
     }
 
-    #[inline]
-    fn contains_diacritics(&self, text: &str) -> bool {
-        if !self.has_diacritics() {
-            return false;
-        }
-        text.chars().any(|c| self.is_diacritic(c))
-    }
+    // #[inline(always)]
+    // fn is_diacritic(&self, c: char) -> bool {
+    //     self.entry()
+    //         .diacritic_slice
+    //         .and_then(|s| s.binary_search(&c).ok())
+    //         .is_some()
+    // }
 
-    // -------------------------------------------------------------------------
-    // General helpers
-    // -------------------------------------------------------------------------
-    #[inline]
-    fn needs_trim(&self, text: &str) -> bool {
-        text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace)
-    }
-
-    #[inline]
-    fn count_foldable_chars(&self, text: &str) -> usize {
-        text.chars().filter(|&c| self.needs_case_fold(c)).count()
+    #[inline(always)]
+    fn has_diacritics(&self) -> bool {
+        self.diacritics().is_some()
     }
 
     /// Count foldable characters and *exact* extra bytes needed.
@@ -234,37 +179,50 @@ pub trait LocaleBehavior {
         (count, extra)
     }
 
-    #[inline]
-    fn count_diacritics(&self, text: &str) -> usize {
-        if !self.has_diacritics() {
-            return 0;
-        }
-        text.chars().filter(|&c| self.is_diacritic(c)).count()
-    }
-
     #[inline(always)]
     fn needs_unigram_cjk(&self) -> bool {
-        LANG_TABLE
-            .get(self.id().code)
-            .map(|e| e.unigram_cjk)
-            .unwrap_or(false)
+        self.entry().unigram_cjk
     }
 
-    /// Returns the compile-time segmentation rules for this language.
-    /// Empty slice = no special rules (fast path).
     #[inline(always)]
     fn segment_rules(&self) -> &'static [SegmentRule] {
-        LANG_TABLE
-            .get(self.id().code())
-            .map(|e| e.segment_rules)
-            .unwrap_or(&[])
+        self.entry().segment_rules
     }
 
-    /// Convenience: does this language need word segmentation at all?
-    #[inline(always)]
-    fn needs_word_segmentation(&self) -> bool {
-        self.needs_segmentation() && !self.segment_rules().is_empty()
-    }
+    // -------------------------------------------------------------------------
+    // General helpers
+    // -------------------------------------------------------------------------
+    // #[inline]
+    // fn needs_trim(&self, text: &str) -> bool {
+    //     text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace)
+    // }
+
+    // #[inline]
+    // fn count_foldable_chars(&self, text: &str) -> usize {
+    //     text.chars().filter(|&c| self.needs_case_fold(c)).count()
+    // }
+
+    // /// Convenience: does this language need word segmentation at all?
+    // #[inline(always)]
+    // fn needs_word_segmentation(&self) -> bool {
+    //     self.needs_segmentation() && !self.segment_rules().is_empty()
+    // }
+
+    // #[inline]
+    // fn count_diacritics(&self, text: &str) -> usize {
+    //     if !self.has_diacritics() {
+    //         return 0;
+    //     }
+    //     text.chars().filter(|&c| self.is_diacritic(c)).count()
+    // }
+
+    // #[inline]
+    // fn contains_diacritics(&self, text: &str) -> bool {
+    //     if !self.has_diacritics() {
+    //         return false;
+    //     }
+    //     text.chars().any(|c| self.is_diacritic(c))
+    // }
 
     /// Determine whether a boundary (space) should be inserted between two characters.
     /// Returns `true` if a segmentation boundary is required, `false` otherwise.
@@ -313,7 +271,6 @@ pub trait LocaleBehavior {
     }
 }
 
-
 impl LocaleBehavior for Lang {
     #[inline(always)]
     fn entry(&self) -> &'static LangEntry {
@@ -323,53 +280,138 @@ impl LocaleBehavior for Lang {
     }
 }
 
-// impl LocaleBehavior for Lang {
-//     #[inline(always)]
-//     fn id(&self) -> Lang {
-//         *self
-//     }
+#[cfg(test)]
+mod tests {
+    use crate::{
+        Lang,
+        lang::{
+            behaviour::LocaleBehavior,
+            data::{JPN, KOR, THA, ZHO},
+        },
+    };
 
-//     #[inline(always)]
-//     fn case_map(&self) -> &'static [CaseMap] {
-//         LANG_TABLE.get(self.code).map(|e| e.case_map).unwrap_or(&[])
-//     }
+    // Small helper for iterating character pairs
+    fn assert_boundaries(lang: &Lang, pairs: &[(&str, &str)], expected: bool) {
+        for &(a, b) in pairs {
+            let chars: Vec<char> = a.chars().collect();
+            let chars2: Vec<char> = b.chars().collect();
+            assert_eq!(
+                lang.needs_boundary_between(chars[0], chars2[0]),
+                expected,
+                "Failed: {} -> {} for {}",
+                a,
+                b,
+                std::any::type_name::<Lang>()
+            );
+        }
+    }
 
-//     #[inline(always)]
-//     fn fold_map(&self) -> &'static [FoldMap] {
-//         LANG_TABLE.get(self.code).map(|e| e.fold_map).unwrap_or(&[])
-//     }
+    #[test]
+    fn test_whitespace_no_boundary() {
+        let whitespace_pairs = &[(" ", "あ"), ("あ", " "), ("\n", "A"), ("A", "\t")];
+        assert_boundaries(&JPN, whitespace_pairs, false);
+    }
 
-//     #[inline(always)]
-//     fn diacritics(&self) -> Option<DiacriticSet> {
-//         LANG_TABLE.get(self.code).and_then(|e| e.diacritics)
-//     }
+    #[test]
+    fn test_western_script_breaks() {
+        let pairs = &[
+            ("A", "あ"),
+            ("あ", "A"),
+            ("A", "中"),
+            ("文", "A"),
+            ("A", "\u{AC00}"), // Hangul
+            ("\u{AC00}", "A"),
+        ];
+        assert_boundaries(&JPN, &pairs[0..2], true);
+        assert_boundaries(&ZHO, &pairs[2..4], true);
+        assert_boundaries(&KOR, &pairs[4..6], true);
+    }
 
-//     #[inline(always)]
-//     fn needs_segmentation(&self) -> bool {
-//         LANG_TABLE
-//             .get(self.code)
-//             .map(|e| e.needs_segmentation)
-//             .unwrap_or(false)
-//     }
+    #[test]
+    fn test_same_cluster_no_break() {
+        let japanese = &[("あ", "ア")];
+        let hangul = &[("\u{AC00}", "\u{AC01}")];
+        let thai = &[("\u{0E01}", "\u{0E02}")];
 
-//     #[inline(always)]
-//     fn segment_rules(&self) -> &'static [SegmentRule] {
-//         LANG_TABLE
-//             .get(self.code)
-//             .map(|e| e.segment_rules)
-//             .unwrap_or(&[])
-//     }
+        assert_boundaries(&JPN, japanese, false);
+        assert_boundaries(&KOR, hangul, false);
+        assert_boundaries(&THA, thai, false);
+    }
 
-//     #[inline(always)]
-//     fn needs_word_segmentation(&self) -> bool {
-//         self.needs_segmentation() && !self.segment_rules().is_empty()
-//     }
+    #[test]
+    fn test_punctuation_and_symbols() {
+        let script_to_punct = &[
+            ("日", ")"),
+            ("文", "."),
+            ("\u{0E01}", ","),
+            ("\u{AC00}", "-"),
+        ];
+        let script_to_emoji = &[("あ", "😀"), ("😀", "あ"), ("A", "😃"), ("가", "🎉")];
 
-//     #[inline(always)]
-//     fn needs_unigram_cjk(&self) -> bool {
-//         LANG_TABLE
-//             .get(self.code)
-//             .map(|e| e.unigram_cjk)
-//             .unwrap_or(false)
-//     }
-// }
+        assert_boundaries(&JPN, &script_to_punct[0..2], true);
+        assert_boundaries(&THA, &script_to_punct[2..3], true);
+        assert_boundaries(&KOR, &script_to_punct[3..4], true);
+
+        assert_boundaries(&JPN, &script_to_emoji[0..2], true);
+        assert_boundaries(&ZHO, &script_to_emoji[2..3], true);
+        assert_boundaries(&KOR, &script_to_emoji[3..4], true);
+    }
+
+    #[test]
+    fn test_digits_break() {
+        let pairs = &[("1", "あ"), ("あ", "1"), ("9", "中"), ("0", "\u{AC00}")];
+        assert_boundaries(&JPN, &pairs[0..2], true);
+        assert_boundaries(&ZHO, &pairs[2..3], true);
+        assert_boundaries(&KOR, &pairs[3..4], true);
+    }
+
+    #[test]
+    fn test_cross_script_clusters() {
+        let pairs = &[
+            ("A", "Я"),
+            ("Z", "Ж"),
+            ("あ", "\u{0E01}"),
+            ("文", "\u{AC00}"),
+        ];
+        assert_boundaries(&JPN, &pairs[0..3], true);
+        assert_boundaries(&KOR, &pairs[1..4], true);
+    }
+
+    #[test]
+    fn test_edge_cjk_blocks() {
+        // No break inside CJK blocks
+        let no_break = &[("\u{2F00}", "\u{2F01}"), ("\u{2F00}", "\u{2F00}")];
+        assert_boundaries(&JPN, no_break, false);
+
+        // Break with CJK punctuation
+        let break_pairs = &[("、", "あ"), ("日", "。")];
+        assert_boundaries(&JPN, break_pairs, true);
+    }
+
+    #[test]
+    fn test_western_and_digits() {
+        let pairs = &[
+            ("A", "B"), // Western → Western
+            ("1", "2"), // Digit → Digit
+            ("A", "1"), // Letter → Digit
+            ("1", "A"), // Digit → Letter
+        ];
+        assert_boundaries(&JPN, &pairs[0..2], false); // Western→Western and digits: no break
+        assert_boundaries(&JPN, &pairs[2..4], false); // Cross Western class: no break
+    }
+
+    #[test]
+    fn test_ascii_to_cjk_and_back() {
+        let pairs = &[
+            ("H", "世"), // Western → CJK
+            ("o", "世"), // Western → CJK
+            ("世", "H"), // CJK → Western
+            ("文", "A"), // CJK → Western
+        ];
+        // Western -> CJK: MUST insert space (true)
+        assert_boundaries(&JPN, &pairs[0..2], true);
+
+        // CJK -> Western: MUST insert space (true)
+        assert_boundaries(&JPN, &pairs[2..4], true); // <-- FIX: Change false to true
+    }
+}

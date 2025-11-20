@@ -2,10 +2,20 @@
 mod integration_tests {
 
     use crate::{
-        ARA, FoldCase, DEU, LowerCase, NLD, Normy, RemoveDiacritics, TUR, NormalizeWhitespace,
-        stage::normalize_punctuation::NormalizePunctuation,
-        stage::remove_control_chars::RemoveControlChars,
-        stage::replace_fullwidth::ReplaceFullwidth,
+        ARA,
+        DEU,
+        FoldCase,
+        LowerCase,
+        NLD,
+        NormalizeWhitespace,
+        Normy,
+        RemoveDiacritics,
+        TUR, //JPN
+        stage::{
+            normalize_punctuation::NormalizePunctuation,
+            remove_control_chars::RemoveControlChars,
+            replace_fullwidth::ReplaceFullwidth, // unigram_cjk::UnigramCJK,
+        },
     };
 
     #[test]
@@ -132,6 +142,21 @@ mod integration_tests {
             .unwrap();
         assert_eq!(normalized, "Helloworld");
     }
+
+    // #[test]
+    // fn test_unigram_cjk_opt_in_for_japanese_works() {
+    //     use crate::Normy;
+
+    //     let normy = Normy::builder()
+    //         .lang(JPN)
+    //         .modify_lang(|lang| lang.unigram_cjk = true)
+    //         .add_stage(UnigramCJK)
+    //         .build();
+
+    //     let text = "最高の言語";
+    //     let result = normy.normalize(text).unwrap();
+    //     assert_eq!(&*result, "最 高 の 言 語");
+    // }
 
     // #[test]
     // fn test_remove_html() {

@@ -19,7 +19,7 @@ use std::{
 
 use crate::{
     context::Context,
-    lang::{Lang, LocaleBehavior},
+    lang::{Lang, behaviour::LocaleBehavior},
     stage::{CharMapper, Stage, StageError},
     unicode::is_any_whitespace,
 };
@@ -176,20 +176,14 @@ impl FusedIterator for SegmentWordIterator {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::*;
+    use crate::lang::data::{JPN, KHM, KOR, LAO, MYA, THA, ZHO};
     use std::borrow::Cow;
-
-    macro_rules! ctx {
-        ($lang:expr) => {
-            Context { lang: $lang }
-        };
-    }
 
     // --------------------------- Japanese ---------------------------
     #[test]
     fn test_japanese_segmentation() {
         let stage = SegmentWord;
-        let ctx = ctx!(JPN);
+        let ctx = Context::new(JPN);
 
         let cases = &[
             // Hiragana → Hiragana: no break
@@ -229,7 +223,7 @@ mod tests {
     #[test]
     fn test_chinese_segmentation() {
         let stage = SegmentWord;
-        let ctx = ctx!(ZHO);
+        let ctx = Context::new(ZHO);
 
         let cases = &[
             ("Hello世界", "Hello 世界"), // Western → CJK
@@ -259,7 +253,7 @@ mod tests {
     #[test]
     fn test_korean_segmentation() {
         let stage = SegmentWord;
-        let ctx = ctx!(KOR);
+        let ctx = Context::new(KOR);
 
         let cases = &[
             ("Hello안녕하세요", "Hello 안녕하세요"), // Western → Hangul
@@ -288,7 +282,7 @@ mod tests {
     #[test]
     fn test_thai_segmentation() {
         let stage = SegmentWord;
-        let ctx = ctx!(THA);
+        let ctx = Context::new(THA);
 
         let cases = &[
             ("Helloสวัสดี", "Hello สวัสดี"),  // Western → Thai
@@ -317,7 +311,7 @@ mod tests {
     #[test]
     fn test_lao_segmentation() {
         let stage = SegmentWord;
-        let ctx = ctx!(LAO);
+        let ctx = Context::new(LAO);
 
         let cases = &[
             ("Helloສະບາຍດີ", "Hello ສະບາຍດີ"),
@@ -346,7 +340,7 @@ mod tests {
     #[test]
     fn test_myanmar_segmentation() {
         let stage = SegmentWord;
-        let ctx = ctx!(MYA);
+        let ctx = Context::new(MYA);
 
         let cases = &[
             ("Helloမင်္ဂလာပါ", "Hello မင်္ဂလာပါ"),
@@ -375,7 +369,7 @@ mod tests {
     #[test]
     fn test_khmer_segmentation() {
         let stage = SegmentWord;
-        let ctx = ctx!(KHM);
+        let ctx = Context::new(KHM);
 
         let cases = &[
             ("Helloសួស្តី", "Hello សួស្តី"),

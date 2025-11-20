@@ -6,7 +6,7 @@ use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use crate::{
     context::Context,
-    lang::LocaleBehavior,
+    lang::behaviour::LocaleBehavior,
     stage::{CharMapper, Stage, StageError},
     unicode::is_cjk_han_or_kana,
 };
@@ -120,15 +120,9 @@ impl FusedIterator for UnigramCJKIterator {}
 
 #[cfg(test)]
 mod tests {
-    use crate::{ARA, DEU, ENG, FRA, JPN, KOR, TUR, ZHO};
+    use crate::lang::data::{ARA, DEU, ENG, FRA, JPN, KOR, TUR, ZHO};
 
     use super::*;
-
-    macro_rules! ctx {
-        ($lang:expr) => {
-            Context { lang: $lang }
-        };
-    }
 
     #[test]
     fn test_unigram_cjk_extended() {
@@ -159,7 +153,7 @@ mod tests {
     #[test]
     fn test_unigram_cjk_zho_enabled() {
         let stage = UnigramCJK;
-        let ctx = ctx!(ZHO);
+        let ctx = Context::new(ZHO);
 
         assert!(stage.needs_apply("中华人民共和国", &ctx).unwrap());
         assert!(stage.needs_apply("北京大学", &ctx).unwrap());
@@ -169,7 +163,7 @@ mod tests {
     #[test]
     fn test_unigram_cjk_jpn_disabled_by_default() {
         let stage = UnigramCJK;
-        let ctx = ctx!(JPN);
+        let ctx = Context::new(JPN);
 
         assert!(!stage.needs_apply("日本語", &ctx).unwrap());
         assert!(!stage.needs_apply("最高のプログラミング言語", &ctx).unwrap());
@@ -182,7 +176,7 @@ mod tests {
         let languages = [ENG, DEU, FRA, TUR, ARA, KOR];
 
         for &lang in &languages {
-            let ctx = ctx!(lang);
+            let ctx = Context::new(lang);
             assert!(!stage.needs_apply("東京大学", &ctx).unwrap());
             assert!(!stage.needs_apply("中华人民共和国", &ctx).unwrap());
         }
@@ -191,7 +185,7 @@ mod tests {
     #[test]
     fn test_unigram_cjk_correct_segmentation_when_enabled() {
         let stage = UnigramCJK;
-        let ctx = ctx!(ZHO);
+        let ctx = Context::new(ZHO);
 
         let cases = &[
             ("", ""),
@@ -209,15 +203,4 @@ mod tests {
             assert_eq!(&*result, expected, "Failed on input: {input}");
         }
     }
-
-    // #[test]
-    // fn test_unigram_cjk_opt_in_for_japanese_works() {
-    //     use crate::Normy;
-
-    //     let normy = Normy::builder().lang(JPN).add_stage(UnigramCJK).build();
-
-    //     let text = "最高の言語";
-    //     let result = normy.normalize(text).unwrap();
-    //     assert_eq!(&*result, "最 高 の 言 語");
-    // }
 }

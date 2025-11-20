@@ -7,44 +7,9 @@ pub mod stage;
 pub mod unicode;
 
 pub use lang::Lang;
-pub use lang::{
-    // Middle Eastern
-    ARA,
-    // European – existing
-    BUL,
-    CAT,
-    CES,
-    DAN,
-    DEU,
-    ENG,
-    FRA,
-    HEB,
-
-    HRV,
-    HUN,
-    ITA, // Italian
-
-    // Asian
-    JPN,
-    KHM,
-    KOR,
-    MYA,
-    NLD,
-    NOR,
-    POL,
-    POR, // Portuguese (already present)
-    SLK,
-    // Newly added Tier-1 major Latin languages
-    SPA, // Spanish
-    SRP,
-    SWE,
-    THA,
-    TUR,
-    UKR,
-
-    // Vietnamese stays
-    VIE,
-    ZHO,
+pub use lang::data::{
+    ARA, BUL, CAT, CES, DAN, DEU, ENG, FRA, HEB, HRV, HUN, ITA, JPN, KHM, KOR, MYA, NLD, NOR, POL,
+    POR, SLK, SPA, SRP, SWE, THA, TUR, UKR, VIE, ZHO,
 };
 pub use normy::Normy;
 pub use stage::fold_case::FoldCase;

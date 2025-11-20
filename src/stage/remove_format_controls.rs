@@ -76,16 +76,12 @@ impl CharMapper for RemoveFormatControls {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::ENG;
-
-    fn make_context() -> Context {
-        Context { lang: ENG }
-    }
+    use crate::lang::data::ENG;
 
     #[test]
     fn test_zero_width_space() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         let text = "hello\u{200B}world";
         assert!(stage.needs_apply(text, &ctx).unwrap());
@@ -97,7 +93,7 @@ mod tests {
     #[test]
     fn test_bidi_marks() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         // LRM + RLM
         let text = "hello\u{200E}world\u{200F}";
@@ -108,7 +104,7 @@ mod tests {
     #[test]
     fn test_bom() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         let text = "\u{FEFF}hello"; // BOM at start
         let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
@@ -118,7 +114,7 @@ mod tests {
     #[test]
     fn test_multiple_controls() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         let text = "\u{200B}\u{200C}\u{200D}text\u{202A}\u{202C}";
         let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
@@ -128,7 +124,7 @@ mod tests {
     #[test]
     fn test_no_controls_zero_copy() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         let text = "hello world";
         assert!(!stage.needs_apply(text, &ctx).unwrap());
@@ -140,7 +136,7 @@ mod tests {
     #[test]
     fn test_char_mapper_eligible() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         assert!(stage.as_char_mapper(&ctx).is_some());
     }
@@ -148,7 +144,7 @@ mod tests {
     #[test]
     fn test_real_world_arabic() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         // Arabic text with RLM
         let text = "مرحبا\u{200F} hello";
@@ -159,7 +155,7 @@ mod tests {
     #[test]
     fn test_idempotency() {
         let stage = RemoveFormatControls;
-        let ctx = make_context();
+        let ctx = Context::new(ENG);
 
         let text = "hello\u{200B}world";
         let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();

@@ -1,10 +1,7 @@
-//! src/stage/remove_diacritics.rs
-//!
 //! Removes language-specific diacritical marks using NFD (Canonical Decomposition).
-
 use crate::{
     context::Context,
-    lang::{Lang, LocaleBehavior},
+    lang::{Lang, behaviour::LocaleBehavior},
     stage::{CharMapper, Stage, StageError},
 };
 use std::borrow::Cow;
@@ -140,14 +137,7 @@ impl<I: Iterator<Item = char>> FusedIterator for RemoveDiacriticsIter<I> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        CES, POL, SLK,
-        lang::{ARA, ENG, FRA, HEB, VIE},
-    };
-
-    fn ctx(lang: crate::lang::Lang) -> Context {
-        Context { lang }
-    }
+    use crate::lang::data::{ARA, CES, DEU, ENG, FRA, HEB, NLD, POL, SLK, VIE};
 
     // ------------------------------------------------------------------------
     // Basic Functionality
@@ -156,7 +146,7 @@ mod tests {
     #[test]
     fn test_ascii_no_op() {
         let stage = RemoveDiacritics;
-        let c = ctx(ENG);
+        let c = Context::new(ENG);
 
         assert!(!stage.needs_apply("hello world", &c).unwrap());
         assert_eq!(stage.apply(Cow::Borrowed("hello"), &c).unwrap(), "hello");
@@ -165,7 +155,7 @@ mod tests {
     #[test]
     fn test_arabic_diacritics() {
         let stage = RemoveDiacritics;
-        let c = Context { lang: ARA };
+        let c = Context::new(ARA);
 
         let input1 = "مَرْحَبًا"; // "Hello" with tashkīl
         assert!(stage.needs_apply(input1, &c).unwrap());
@@ -186,7 +176,7 @@ mod tests {
     #[test]
     fn test_french_accents() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         assert_eq!(stage.apply(Cow::Borrowed("café"), &c).unwrap(), "cafe");
         assert_eq!(stage.apply(Cow::Borrowed("naïve"), &c).unwrap(), "naive");
@@ -196,7 +186,7 @@ mod tests {
     #[test]
     fn test_vietnamese() {
         let stage = RemoveDiacritics;
-        let c = ctx(VIE);
+        let c = Context::new(VIE);
 
         assert_eq!(stage.apply(Cow::Borrowed("Hà Nội"), &c).unwrap(), "Ha Noi");
     }
@@ -204,7 +194,7 @@ mod tests {
     #[test]
     fn test_hebrew() {
         let stage = RemoveDiacritics;
-        let c = ctx(HEB);
+        let c = Context::new(HEB);
 
         // Hebrew with nikud (vowel points)
         let input = "שָׁלוֹם"; // "Shalom" with diacritics
@@ -219,7 +209,7 @@ mod tests {
     #[test]
     fn test_preserves_ligatures() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         // Latin ligatures should be preserved
         assert_eq!(stage.apply(Cow::Borrowed("ﬁle"), &c).unwrap(), "ﬁle");
@@ -230,7 +220,7 @@ mod tests {
     #[test]
     fn test_preserves_fractions() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         assert_eq!(
             stage.apply(Cow::Borrowed("½ tasse"), &c).unwrap(),
@@ -242,7 +232,7 @@ mod tests {
     #[test]
     fn test_preserves_superscripts() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         assert_eq!(stage.apply(Cow::Borrowed("m²"), &c).unwrap(), "m²");
         assert_eq!(stage.apply(Cow::Borrowed("x³"), &c).unwrap(), "x³");
@@ -251,7 +241,7 @@ mod tests {
     #[test]
     fn test_combined_diacritics_and_ligatures() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         // Should remove diacritics but preserve ligatures
         let input = "café ﬁle";
@@ -269,7 +259,7 @@ mod tests {
     #[test]
     fn test_english_no_diacritics_early_return() {
         let stage = RemoveDiacritics;
-        let c = ctx(ENG);
+        let c = Context::new(ENG);
 
         // English has no diacritics, should return early
         let input = "file ﬁle ½";
@@ -285,8 +275,8 @@ mod tests {
         let stage = RemoveDiacritics;
 
         // Languages with empty diacritic lists
-        for lang in [ENG, crate::lang::DEU, crate::lang::NLD] {
-            let c = ctx(lang);
+        for lang in [ENG, DEU, NLD] {
+            let c = Context::new(lang);
             assert!(!stage.needs_apply("test", &c).unwrap());
             assert!(stage.as_char_mapper(&c).is_none());
         }
@@ -301,13 +291,13 @@ mod tests {
         let stage = RemoveDiacritics;
 
         // Languages with diacritics: eligible
-        assert!(stage.as_char_mapper(&ctx(ARA)).is_some());
-        assert!(stage.as_char_mapper(&ctx(FRA)).is_some());
-        assert!(stage.as_char_mapper(&ctx(HEB)).is_some());
-        assert!(stage.as_char_mapper(&ctx(VIE)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(ARA)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(FRA)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(HEB)).is_some());
+        assert!(stage.as_char_mapper(&Context::new(VIE)).is_some());
 
         // Languages without diacritics: not eligible
-        assert!(stage.as_char_mapper(&ctx(ENG)).is_none());
+        assert!(stage.as_char_mapper(&Context::new(ENG)).is_none());
     }
 
     // ------------------------------------------------------------------------
@@ -317,7 +307,7 @@ mod tests {
     #[test]
     fn test_idempotency() {
         let stage = RemoveDiacritics;
-        let c = ctx(ARA);
+        let c = Context::new(ARA);
 
         let once = stage.apply(Cow::Borrowed("مَرْحَبًا"), &c).unwrap();
         let twice = stage.apply(Cow::Borrowed(&once), &c).unwrap();
@@ -329,7 +319,7 @@ mod tests {
     #[test]
     fn test_empty_string() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         assert!(!stage.needs_apply("", &c).unwrap());
         assert_eq!(stage.apply(Cow::Borrowed(""), &c).unwrap(), "");
@@ -338,7 +328,7 @@ mod tests {
     #[test]
     fn test_no_diacritics_zero_copy() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         let input = "hello world";
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -350,7 +340,7 @@ mod tests {
     #[test]
     fn test_all_diacritics_removed() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         // String of only diacritics (combining marks after NFD)
         let input = "e\u{0301}\u{0300}"; // e with acute and grave
@@ -366,7 +356,7 @@ mod tests {
     #[test]
     fn test_french_sentences() {
         let stage = RemoveDiacritics;
-        let c = ctx(FRA);
+        let c = Context::new(FRA);
 
         let examples = vec![
             ("Crème brûlée", "Creme brulee"),
@@ -382,7 +372,7 @@ mod tests {
     #[test]
     fn test_mixed_scripts() {
         let stage = RemoveDiacritics;
-        let c = ctx(ARA);
+        let c = Context::new(ARA);
 
         // Arabic with English
         let input = "Hello مَرْحَبًا World";
@@ -394,7 +384,7 @@ mod tests {
     #[test]
     fn test_vietnamese_clean_text_zero_copy() {
         let stage = RemoveDiacritics;
-        let ctx = Context { lang: VIE };
+        let ctx = Context::new(VIE);
 
         let input = "toi ten la Nam"; // No diacritics
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
@@ -407,7 +397,7 @@ mod tests {
     #[test]
     fn test_vietnamese_diacritics_removal() {
         let stage = RemoveDiacritics;
-        let ctx = Context { lang: VIE };
+        let ctx = Context::new(VIE);
 
         // Real Vietnamese text — uses precomposed đ (U+0111), which must be PRESERVED
         let input = "Hà Nội đẹp quá! Tôi tên là Đạt.";
@@ -425,7 +415,7 @@ mod tests {
     #[test]
     fn test_vietnamese_rare_decomposed_stroke() {
         let stage = RemoveDiacritics;
-        let ctx = Context { lang: VIE };
+        let ctx = Context::new(VIE);
 
         // Extremely rare: someone used d + combining stroke below (U+0331)
         let input = "de\u{0302}\u{0323}p"; // d + circumflex + dot below + p
@@ -436,7 +426,7 @@ mod tests {
     #[test]
     fn test_czech_diacritics_removal() {
         let stage = RemoveDiacritics;
-        let ctx = Context { lang: CES };
+        let ctx = Context::new(CES);
 
         let input = "Příliš žluťoučký kůň úpěl ďábelské ódy";
         assert!(stage.needs_apply(input, &ctx).unwrap());
@@ -450,7 +440,7 @@ mod tests {
     #[test]
     fn test_polish_diacritics_removal() {
         let stage = RemoveDiacritics;
-        let ctx = Context { lang: POL };
+        let ctx = Context::new(POL);
         let input = "Łódź, Żółć, Gęślą, Jaźń";
         assert!(stage.needs_apply(input, &ctx).unwrap());
         assert_eq!(
@@ -463,7 +453,7 @@ mod tests {
     #[test]
     fn test_french_full_diacritics() {
         let stage = RemoveDiacritics;
-        let ctx = Context { lang: FRA };
+        let ctx = Context::new(FRA);
         let input = "naïve, Noël, façade, cœlacanthe, garçon";
         assert!(stage.needs_apply(input, &ctx).unwrap());
         assert_eq!(
@@ -476,7 +466,7 @@ mod tests {
     #[test]
     fn test_slovak_diacritics() {
         let stage = RemoveDiacritics;
-        let ctx = Context { lang: SLK };
+        let ctx = Context::new(SLK);
 
         let input = "Ľúbica a Ďurko štrikujú v Ťahanovciach";
         assert!(stage.needs_apply(input, &ctx).unwrap());

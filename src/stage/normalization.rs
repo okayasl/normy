@@ -186,20 +186,12 @@ impl Stage for NFKD {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::ENG;
-
-    fn ctx() -> Context {
-        Context { lang: ENG }
-    }
-
-    // ------------------------------------------------------------------------
-    // NFC Tests
-    // ------------------------------------------------------------------------
+    use crate::lang::data::ENG;
 
     #[test]
     fn test_nfc_compose_accents() {
         let stage = NFC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "cafe\u{0301}"; // e + combining acute
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -210,7 +202,7 @@ mod tests {
     #[test]
     fn test_nfc_preserves_ligatures() {
         let stage = NFC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "ﬁle ﬂoor oﬀer";
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -220,7 +212,7 @@ mod tests {
     #[test]
     fn test_nfc_already_normalized() {
         let stage = NFC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "hello world";
         assert!(!stage.needs_apply(text, &c).unwrap());
@@ -236,7 +228,7 @@ mod tests {
     #[test]
     fn test_nfd_decompose_accents() {
         let stage = NFD;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "café";
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -247,7 +239,7 @@ mod tests {
     #[test]
     fn test_nfd_preserves_ligatures() {
         let stage = NFD;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "ﬁle ﬂoor";
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -257,7 +249,7 @@ mod tests {
     #[test]
     fn test_nfd_preserves_fractions() {
         let stage = NFD;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "½ ¾";
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -271,7 +263,7 @@ mod tests {
     #[test]
     fn test_nfkc_expands_ligatures() {
         let stage = NFKC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(stage.apply(Cow::Borrowed("ﬁle"), &c).unwrap(), "file");
         assert_eq!(stage.apply(Cow::Borrowed("ﬂoor"), &c).unwrap(), "floor");
@@ -281,7 +273,7 @@ mod tests {
     #[test]
     fn test_nfkc_normalizes_superscripts() {
         let stage = NFKC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(stage.apply(Cow::Borrowed("m²"), &c).unwrap(), "m2");
         assert_eq!(stage.apply(Cow::Borrowed("x³"), &c).unwrap(), "x3");
@@ -290,7 +282,7 @@ mod tests {
     #[test]
     fn test_nfkc_normalizes_circled() {
         let stage = NFKC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(stage.apply(Cow::Borrowed("①②③"), &c).unwrap(), "123");
     }
@@ -298,7 +290,7 @@ mod tests {
     #[test]
     fn test_nfkc_normalizes_full_width() {
         let stage = NFKC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(stage.apply(Cow::Borrowed("ＡＢＣＤ"), &c).unwrap(), "ABCD");
     }
@@ -306,7 +298,7 @@ mod tests {
     #[test]
     fn test_nfkc_composes_accents() {
         let stage = NFKC;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "cafe\u{0301}";
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -320,7 +312,7 @@ mod tests {
     #[test]
     fn test_nfkd_fully_decomposes() {
         let stage = NFKD;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "café ﬁ";
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -333,7 +325,7 @@ mod tests {
     #[test]
     fn test_nfkd_expands_ligatures() {
         let stage = NFKD;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(stage.apply(Cow::Borrowed("ﬁ"), &c).unwrap(), "fi");
         assert_eq!(stage.apply(Cow::Borrowed("ﬂ"), &c).unwrap(), "fl");
@@ -342,7 +334,7 @@ mod tests {
     #[test]
     fn test_nfkd_normalizes_superscripts() {
         let stage = NFKD;
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "m²";
         let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
@@ -355,7 +347,7 @@ mod tests {
 
     #[test]
     fn test_canonical_vs_compatibility() {
-        let c = ctx();
+        let c = Context::new(ENG);
         let text = "café";
 
         let nfc = NFC.apply(Cow::Borrowed(text), &c).unwrap();
@@ -376,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_ligature_handling_across_forms() {
-        let c = ctx();
+        let c = Context::new(ENG);
         let text = "ﬁ";
 
         let nfc = NFC.apply(Cow::Borrowed(text), &c).unwrap();
@@ -395,7 +387,7 @@ mod tests {
 
     #[test]
     fn test_fraction_handling() {
-        let c = ctx();
+        let c = Context::new(ENG);
         let text = "½";
 
         let nfc = NFC.apply(Cow::Borrowed(text), &c).unwrap();
@@ -420,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_nfc_nfd_round_trip() {
-        let c = ctx();
+        let c = Context::new(ENG);
         let original = "café naïve résumé";
 
         // NFC → NFD → NFC should be idempotent
@@ -432,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_nfkc_nfkd_not_reversible() {
-        let c = ctx();
+        let c = Context::new(ENG);
         let original = "ﬁle"; // Ligature
 
         // NFKD expands ligature
@@ -451,7 +443,7 @@ mod tests {
 
     #[test]
     fn test_empty_string() {
-        let c = ctx();
+        let c = Context::new(ENG);
 
         for stage in [&NFC as &dyn Stage, &NFD, &NFKC, &NFKD] {
             assert!(!stage.needs_apply("", &c).unwrap());
@@ -461,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_ascii_only() {
-        let c = ctx();
+        let c = Context::new(ENG);
         let text = "hello world";
 
         for stage in [&NFC as &dyn Stage, &NFD, &NFKC, &NFKD] {
@@ -472,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_idempotency() {
-        let c = ctx();
+        let c = Context::new(ENG);
         let text = "café ﬁ";
 
         // Each form should be idempotent
@@ -489,7 +481,7 @@ mod tests {
 
     #[test]
     fn test_search_normalization_pipeline() {
-        let c = ctx();
+        let c = Context::new(ENG);
 
         // For search: NFKC to normalize everything
         let query = "½ ﬁle café";
@@ -502,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_display_normalization_pipeline() {
-        let c = ctx();
+        let c = Context::new(ENG);
 
         // For display: NFC to get precomposed characters
         let text = "cafe\u{0301}"; // Decomposed

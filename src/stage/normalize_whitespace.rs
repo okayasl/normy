@@ -175,15 +175,7 @@ fn has_sequential_whitespace(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FoldCase, lang::ENG};
-
-    fn ctx() -> Context {
-        Context { lang: ENG }
-    }
-
-    // ------------------------------------------------------------------------
-    // Basic Functionality
-    // ------------------------------------------------------------------------
+    use crate::{FoldCase, lang::data::ENG};
 
     #[test]
     fn test_collapse_sequential() {
@@ -192,7 +184,7 @@ mod tests {
             trim_edges: false,
             normalize_unicode: false,
         };
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(
             stage.apply(Cow::Borrowed("hello  world"), &c).unwrap(),
@@ -211,7 +203,7 @@ mod tests {
             trim_edges: true,
             normalize_unicode: false,
         };
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(
             stage.apply(Cow::Borrowed("  hello  "), &c).unwrap(),
@@ -230,7 +222,7 @@ mod tests {
             trim_edges: false,
             normalize_unicode: true,
         };
-        let c = ctx();
+        let c = Context::new(ENG);
 
         // NBSP → space
         assert_eq!(
@@ -252,7 +244,7 @@ mod tests {
     #[test]
     fn test_default_all_features() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "  hello\u{00A0}\u{00A0}world  ";
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -267,7 +259,7 @@ mod tests {
     #[test]
     fn test_collapse_only() {
         let stage = NormalizeWhitespace::collapse_only();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "  hello  world  ";
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -279,7 +271,7 @@ mod tests {
     #[test]
     fn test_trim_only() {
         let stage = NormalizeWhitespace::trim_only();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "  hello  world  ";
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -295,7 +287,7 @@ mod tests {
     #[test]
     fn test_empty_string() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert!(!stage.needs_apply("", &c).unwrap());
         assert_eq!(stage.apply(Cow::Borrowed(""), &c).unwrap(), "");
@@ -304,7 +296,7 @@ mod tests {
     #[test]
     fn test_only_whitespace() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(stage.apply(Cow::Borrowed("   "), &c).unwrap(), "");
         assert_eq!(stage.apply(Cow::Borrowed("\t\n\r"), &c).unwrap(), "");
@@ -313,7 +305,7 @@ mod tests {
     #[test]
     fn test_no_whitespace() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let text = "helloworld";
         assert!(!stage.needs_apply(text, &c).unwrap());
@@ -326,7 +318,7 @@ mod tests {
     #[test]
     fn test_single_word() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         assert_eq!(stage.apply(Cow::Borrowed("hello"), &c).unwrap(), "hello");
     }
@@ -340,7 +332,7 @@ mod tests {
             // to a standard ASCII space before collapsing/trimming.
             normalize_unicode: true,
         };
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "\thello\n\nworld\r\n";
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -356,7 +348,7 @@ mod tests {
     #[test]
     fn test_search_query_normalization() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let queries = vec![
             ("  machine   learning  ", "machine learning"),
@@ -372,7 +364,7 @@ mod tests {
     #[test]
     fn test_user_input_cleanup() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         // Typical messy user input
         let input = "  John   Doe  ";
@@ -383,7 +375,7 @@ mod tests {
     #[test]
     fn test_preserve_internal_whitespace_when_only_trimming() {
         let stage = NormalizeWhitespace::trim_only();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "  hello     world  ";
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -403,7 +395,7 @@ mod tests {
             trim_edges: true,
             normalize_unicode: true,
         };
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let spaces = vec![
             '\u{00A0}', // NO-BREAK SPACE
@@ -422,7 +414,7 @@ mod tests {
     #[test]
     fn test_mixed_whitespace_types() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "hello\t\u{00A0} \u{3000}world";
         let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -438,7 +430,7 @@ mod tests {
     #[test]
     fn test_needs_apply_optimization() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         // Text that doesn't need normalization
         let clean_texts = vec!["hello", "hello world", "a b c d e f"];
@@ -470,7 +462,7 @@ mod tests {
     #[test]
     fn test_idempotency() {
         let stage = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "  hello   world  ";
         let once = stage.apply(Cow::Borrowed(input), &c).unwrap();
@@ -488,7 +480,7 @@ mod tests {
     fn test_after_case_fold() {
         let case_fold = FoldCase;
         let whitespace = NormalizeWhitespace::default();
-        let c = ctx();
+        let c = Context::new(ENG);
 
         let input = "  HELLO   WORLD  ";
 

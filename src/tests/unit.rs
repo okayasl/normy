@@ -141,7 +141,7 @@ mod unit_tests {
     // ─────────────────────────────────────────────────────────────────────────────
     #[test]
     fn turkish_zero_alloc_when_already_lower() {
-        use crate::{lang::TUR, normy::Normy, stage::fold_case::FoldCase};
+        use crate::{TUR, normy::Normy, stage::fold_case::FoldCase};
 
         // Build a pipeline that only contains FoldCase (no other stages)
         let normy = Normy::builder().lang(TUR).add_stage(FoldCase).build();

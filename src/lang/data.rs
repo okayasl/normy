@@ -1,9 +1,10 @@
+use crate::lang::{CaseMap, FoldMap, Lang, LangEntry, PeekPair, SegmentRule};
+
 use paste::paste;
 use phf::{Map, phf_map};
 
 /// ---------------------------------------------------------------------------
-/// 4. Macro – generates everything from a single table
-///    Fields: peek_pairs: [ ($a, $b => $target),* ]
+///    Macro – generates everything from a single table
 /// ---------------------------------------------------------------------------
 macro_rules! define_languages {
 ($(
@@ -96,13 +97,26 @@ macro_rules! define_languages {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Language definitions (single source of truth)
+//    Language definitions (single source of truth)
 //    Note: peek_pairs provided only where needed (Dutch IJ as example)
 // ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// CJK Segmentation Strategy — Normy's Official Position (2025-11-20)
+// ─────────────────────────────────────────────────────────────────────────────
+// • Chinese (ZHO): CJKIdeographUnigram = true
+//   → Matches Google, Baidu, Lucene, Elastic, Meilisearch, ICU tokenizer defaults
+//   → Maximizes recall for single-character queries ("北" finds "北京")
+//   → Expected by virtually all Chinese search/indexing systems
+//
+// • Japanese (JPN): CJKIdeographUnigram = false
+//   → Matches linguistic reality and UAX#29 default (no break in ALetter runs)
+//   → Avoids pathological tokens like 最 高
+//   → Users wanting unigram Japanese for IR must opt-in via explicit stage
+//
+// • This asymmetry is intentional and correct.
+//   Normalization ≠ tokenization. We give each language its expected default.
+// ─────────────────────────────────────────────────────────────────────────────
 define_languages! {
-    // ──────────────────────────────────────────────────────────────────────
-    // Turkish
-    // ──────────────────────────────────────────────────────────────────────
     TUR,  "TUR", "Turkish",
         case: [ 'I' => 'ı', 'İ' => 'i' ],
         fold: [ 'I' => "ı", 'İ' => "i" ],
@@ -113,9 +127,6 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
-    // ──────────────────────────────────────────────────────────────────────
-    // Germanic + Northern European (unchanged – correct as-is)
-    // ──────────────────────────────────────────────────────────────────────
     DEU, "DEU", "German",
         case: [],
         fold: [ 'ß' => "ss", 'ẞ' => "ss" ],
@@ -257,25 +268,6 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
-    // ─────────────────────────────────────────────────────────────────────────────
-    // CJK Segmentation Strategy — Normy's Official Position (2025-11-20)
-    // ─────────────────────────────────────────────────────────────────────────────
-    // • Chinese (ZHO): CJKIdeographUnigram = true
-    //   → Matches Google, Baidu, Lucene, Elastic, Meilisearch, ICU tokenizer defaults
-    //   → Maximizes recall for single-character queries ("北" finds "北京")
-    //   → Expected by virtually all Chinese search/indexing systems
-    //
-    // • Japanese (JPN): CJKIdeographUnigram = false
-    //   → Matches linguistic reality and UAX#29 default (no break in ALetter runs)
-    //   → Avoids pathological tokens like 最 高
-    //   → Users wanting unigram Japanese for IR must opt-in via explicit stage
-    //
-    // • This asymmetry is intentional and correct.
-    //   Normalization ≠ tokenization. We give each language its expected default.
-    // ─────────────────────────────────────────────────────────────────────────────
-    // ──────────────────────────────────────────────────────────────────────
-    // Asian scripts – segmentation only
-    // ──────────────────────────────────────────────────────────────────────
     JPN, "JPN", "Japanese",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
@@ -306,9 +298,6 @@ define_languages! {
         ],
         unigram_cjk: false,
 
-    // ──────────────────────────────────────────────────────────────────────
-    // Southeast Asian Scripts (no unigram breaking, same cluster stays fused)
-    // ──────────────────────────────────────────────────────────────────────
     THA, "THA", "Thai",
         case: [], fold: [], diac: [],
         segment: true, peek_ahead: false, peek_pairs: [],
@@ -345,9 +334,6 @@ define_languages! {
         ],
         unigram_cjk: false,
 
-    // ──────────────────────────────────────────────────────────────────────
-    // Remaining languages (unchanged – correct)
-    // ──────────────────────────────────────────────────────────────────────
     HUN, "HUN", "Hungarian",
         case: [], fold: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
@@ -383,4 +369,280 @@ define_languages! {
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::lang::{
+        behaviour::LocaleBehavior,
+        data::{
+            ARA, BUL, CAT, CES, DAN, DEU, ENG, FRA, HEB, HRV, HUN, JPN, KHM, KOR, LANG_TABLE, MYA,
+            NLD, NOR, POL, SLK, SRP, SWE, THA, TUR, UKR, VIE, ZHO, from_code,
+        },
+    };
+
+    #[test]
+    fn test_turkish_metadata() {
+        let entry = LANG_TABLE.get("TUR").unwrap();
+        assert!(entry.has_one_to_one_folds());
+        assert!(!TUR.requires_peek_ahead());
+        assert!(TUR.needs_case_fold('İ'));
+        assert!(TUR.needs_case_fold('I'));
+        assert_eq!(TUR.fold_char('İ'), Some('i'));
+        assert_eq!(TUR.fold_char('I'), Some('ı'));
+    }
+
+    #[test]
+    fn test_german_metadata() {
+        let entry = LANG_TABLE.get("DEU").unwrap();
+        assert!(!entry.has_one_to_one_folds());
+        assert!(!DEU.requires_peek_ahead());
+        assert!(DEU.needs_case_fold('ß'));
+    }
+
+    #[test]
+    fn test_dutch_metadata() {
+        let entry = LANG_TABLE.get("NLD").unwrap();
+        assert!(!entry.has_one_to_one_folds());
+        assert!(NLD.requires_peek_ahead());
+
+        // Only uppercase triggers peek-ahead
+        assert_eq!(NLD.peek_ahead_fold('I', Some('J')), Some("ij"));
+        assert_eq!(NLD.peek_ahead_fold('i', Some('j')), None); // ← FIXED
+        assert_eq!(NLD.peek_ahead_fold('I', Some('K')), None);
+        assert_eq!(NLD.peek_ahead_fold('I', None), None);
+    }
+
+    #[test]
+    fn test_english_metadata() {
+        let entry = LANG_TABLE.get("ENG").unwrap();
+        assert!(entry.has_one_to_one_folds());
+        assert!(!ENG.requires_peek_ahead());
+        assert!(ENG.needs_case_fold('A'));
+        assert_eq!(ENG.fold_char('A'), Some('a'));
+    }
+
+    #[test]
+    fn test_arabic_diacritics() {
+        assert!(ARA.has_diacritics());
+        assert!(ARA.is_diacritic('َ'));
+        assert!(!ARA.is_diacritic('ا'));
+        // assert!(ARA.contains_diacritics("مَرْحَبًا"));
+        // assert!(!ARA.contains_diacritics("مرحبا"));
+    }
+
+    #[test]
+    fn test_from_code() {
+        assert_eq!(from_code("TUR"), Some(TUR));
+        assert_eq!(from_code("tur"), Some(TUR));
+        assert_eq!(from_code("ENG"), Some(ENG));
+        assert_eq!(from_code("XXX"), None);
+    }
+
+    // #[test]
+    // fn test_needs_trim() {
+    //     assert!(ENG.needs_trim(" hello"));
+    //     assert!(ENG.needs_trim("hello "));
+    //     assert!(ENG.needs_trim(" hello "));
+    //     assert!(!ENG.needs_trim("hello"));
+    // }
+
+    // #[test]
+    // fn test_count_foldable_chars() {
+    //     assert_eq!(ENG.count_foldable_chars("HELLO"), 5);
+    //     assert_eq!(ENG.count_foldable_chars("hello"), 0);
+    //     assert_eq!(ENG.count_foldable_chars("HeLLo"), 3);
+    //     assert_eq!(TUR.count_foldable_chars("İSTANBUL"), 8);
+    // }
+
+    // #[test]
+    // fn test_count_diacritics() {
+    //     assert_eq!(ARA.count_diacritics("مَرْحَبًا"), 4);
+    //     assert_eq!(ARA.count_diacritics("مرحبا"), 0);
+    //     assert_eq!(ENG.count_diacritics("hello"), 0);
+    // }
+
+    #[test]
+    fn test_byte_vs_char_length() {
+        let mapping = TUR.fold_map();
+        let i_mapping = mapping.iter().find(|m| m.from == 'I').unwrap();
+        assert_eq!(i_mapping.to.chars().count(), 1);
+        let entry = LANG_TABLE.get("TUR").unwrap();
+        assert!(entry.has_one_to_one_folds());
+    }
+
+    #[test]
+    fn test_all_languages_have_valid_metadata() {
+        let langs = [
+            TUR, DEU, NLD, DAN, NOR, SWE, ARA, HEB, VIE, JPN, ZHO, KOR, THA, MYA, KHM, FRA, CAT,
+            HUN, POL, CES, SLK, HRV, SRP, UKR, BUL, ENG,
+        ];
+
+        for lang in langs {
+            let entry = LANG_TABLE.get(lang.code()).expect("Entry exists");
+
+            if entry.requires_peek_ahead {
+                assert!(!entry.fold_map.is_empty() || !entry.peek_pairs.is_empty());
+            }
+
+            for fold in entry.fold_map {
+                let char_count = fold.to.chars().count();
+
+                if entry.has_one_to_one_folds() {
+                    assert_eq!(
+                        char_count,
+                        1,
+                        "{}: fold {} -> {} should be 1→1",
+                        lang.code(),
+                        fold.from,
+                        fold.to
+                    );
+                }
+            }
+
+            if entry.diacritics.is_some() {
+                assert!(entry.diacritic_slice.is_some());
+                assert!(lang.has_diacritics());
+            }
+        }
+    }
+
+    #[test]
+    fn test_segmentation_languages() {
+        assert!(JPN.needs_segmentation());
+        assert!(ZHO.needs_segmentation());
+        assert!(KOR.needs_segmentation());
+        assert!(THA.needs_segmentation());
+        assert!(!ENG.needs_segmentation());
+        assert!(!TUR.needs_segmentation());
+    }
+
+    #[test]
+    fn test_case_map_only_turkish() {
+        assert!(!TUR.case_map().is_empty());
+        assert!(ENG.case_map().is_empty());
+        assert!(DEU.case_map().is_empty());
+        assert!(ARA.case_map().is_empty());
+    }
+
+    #[test]
+    fn test_idempotency_metadata() {
+        let langs = [
+            TUR, DEU, NLD, DAN, NOR, SWE, FRA, HUN, POL, CES, SLK, HRV, SRP, UKR, BUL,
+        ];
+
+        for lang in langs {
+            for fold in lang.fold_map() {
+                let target_lower: String = fold.to.chars().flat_map(|c| c.to_lowercase()).collect();
+                assert_eq!(
+                    fold.to,
+                    target_lower,
+                    "{}: fold target '{}' should already be lowercase",
+                    lang.code(),
+                    fold.to
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_dutch_ij_variants() {
+        assert_eq!(NLD.peek_ahead_fold('I', Some('J')), Some("ij"));
+        assert_eq!(NLD.peek_ahead_fold('i', Some('j')), None); // ← FIXED
+        assert_eq!(NLD.peek_ahead_fold('I', Some('K')), None);
+        assert_eq!(NLD.peek_ahead_fold('I', None), None);
+        assert_eq!(ENG.peek_ahead_fold('I', Some('J')), None);
+        assert_eq!(TUR.peek_ahead_fold('I', Some('J')), None);
+    }
+
+    #[test]
+    fn test_peek_ahead_fold_is_generalized() {
+        assert_eq!(NLD.peek_ahead_fold('I', Some('J')), Some("ij"));
+        assert_eq!(NLD.peek_ahead_fold('A', Some('B')), None);
+    }
+
+    #[test]
+    fn test_performance_o1_lookup() {
+        let text = "AAAAAAAAAA";
+        let count = text.chars().filter(|&c| ENG.needs_case_fold(c)).count();
+        assert_eq!(count, 10);
+
+        let turkish_text = "İİİİİİİİİİ";
+        let count = turkish_text
+            .chars()
+            .filter(|&c| TUR.needs_case_fold(c))
+            .count();
+        assert_eq!(count, 10);
+    }
+
+    #[test]
+    fn test_fold_char_rejects_multi_char() {
+        // German: multi-char folds should return None
+        assert_eq!(DEU.fold_char('ß'), None, "ß→ss is multi-char");
+        assert_eq!(DEU.fold_char('ẞ'), None, "ẞ→ss is multi-char");
+
+        // Dutch: multi-char folds (ligatures) should return None
+        assert_eq!(NLD.fold_char('Ĳ'), None, "Ĳ→ij is multi-char");
+        assert_eq!(NLD.fold_char('ĳ'), None, "ĳ→ij is multi-char");
+
+        // But regular chars work
+        assert_eq!(DEU.fold_char('A'), Some('a'));
+        assert_eq!(NLD.fold_char('A'), Some('a'));
+    }
+
+    #[test]
+    fn test_fold_char_accepts_one_to_one() {
+        // Turkish: 1→1 folds should work
+        assert_eq!(TUR.fold_char('İ'), Some('i'));
+        assert_eq!(TUR.fold_char('I'), Some('ı'));
+
+        // English: Unicode lowercase
+        assert_eq!(ENG.fold_char('A'), Some('a'));
+        assert_eq!(ENG.fold_char('Z'), Some('z'));
+    }
+
+    #[test]
+    fn test_lowercase_char_always_one_to_one() {
+        // German: lowercase is always 1→1 (ẞ→ß, not →"ss")
+        assert_eq!(DEU.lowercase_char('ẞ'), 'ß');
+        assert_eq!(DEU.lowercase_char('ß'), 'ß');
+
+        // Turkish
+        assert_eq!(TUR.lowercase_char('İ'), 'i');
+        assert_eq!(TUR.lowercase_char('I'), 'ı');
+
+        // English
+        assert_eq!(ENG.lowercase_char('A'), 'a');
+    }
+
+    #[test]
+    fn test_fold_vs_lowercase_difference() {
+        // German ẞ (capital eszett)
+        assert_eq!(DEU.lowercase_char('ẞ'), 'ß', "Lowercase: ẞ→ß");
+        assert_eq!(
+            DEU.fold_char('ẞ'),
+            None,
+            "Fold: ẞ→ss (multi-char, rejected)"
+        );
+
+        // German ß (lowercase eszett)
+        assert_eq!(DEU.lowercase_char('ß'), 'ß', "Already lowercase");
+        assert_eq!(
+            DEU.fold_char('ß'),
+            None,
+            "Fold: ß→ss (multi-char, rejected)"
+        );
+
+        // This is why German can use CharMapper for Lowercase but not FoldCase
+        assert!(!DEU.has_one_to_one_folds());
+    }
+
+    #[test]
+    fn lowercase_char_is_infallible() {
+        assert_eq!(TUR.lowercase_char('İ'), 'i');
+        assert_eq!(TUR.lowercase_char('I'), 'ı');
+        assert_eq!(ENG.lowercase_char('A'), 'a');
+        assert_eq!(DEU.lowercase_char('ẞ'), 'ß');
+        assert_eq!(ARA.lowercase_char('ا'), 'ا');
+    }
 }
