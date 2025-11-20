@@ -79,6 +79,7 @@ pub struct LangEntry {
     pub diacritic_slice: Option<&'static [char]>,
     pub peek_pairs: &'static [PeekPair],
     pub segment_rules: &'static [SegmentRule],
+    pub unigram_cjk: bool, // ← NEW: zero-cost gate for UnigramCJK stage
 }
 
 impl LangEntry {
@@ -105,7 +106,8 @@ macro_rules! define_languages {
         segment: $segment:expr,
         peek_ahead: $peek:expr,
         peek_pairs: [ $( ($pa:expr, $pb:expr => $pto:expr) ),* $(,)? ],
-        segment_rules: [ $($sr:expr),* $(,)? ]
+        segment_rules: [ $($sr:expr),* $(,)? ],
+        unigram_cjk: $unigram:expr
     ),* $(,)?) => {
         // 4.1 Public `Lang` constants
         $(
@@ -140,6 +142,7 @@ macro_rules! define_languages {
                     ];
 
                     pub static SEGMENT_RULES: &[SegmentRule] = &[$($sr),*];
+                    pub const UNIGRAM_CJK: bool = $unigram;
                 }
             }
         )*
@@ -166,6 +169,7 @@ macro_rules! define_languages {
                         },
                         peek_pairs: [<$code:lower _data>]::PEEK_PAIRS,
                         segment_rules: [<$code:lower _data>]::SEGMENT_RULES,
+                        unigram_cjk:         [<$code:lower _data>]::UNIGRAM_CJK,
                     }
                 ),*
             };
@@ -199,6 +203,7 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     // ──────────────────────────────────────────────────────────────────────
     // Germanic + Northern European (unchanged – correct as-is)
@@ -211,6 +216,7 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     NLD, "NLD", "Dutch",
         case: [],
@@ -220,6 +226,7 @@ define_languages! {
         peek_ahead: true,
         peek_pairs: [ ('I', 'J' => "ij") ],
         segment_rules: [],
+        unigram_cjk: false,
 
     DAN, "DAN", "Danish",
         case: [],
@@ -229,6 +236,7 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     NOR, "NOR", "Norwegian",
         case: [],
@@ -238,6 +246,7 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     SWE, "SWE", "Swedish",
         case: [],
@@ -247,6 +256,7 @@ define_languages! {
         peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     ARA, "ARA", "Arabic",
         case: [], fold: [], diac: [
@@ -256,6 +266,7 @@ define_languages! {
         ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     HEB, "HEB", "Hebrew",
         case: [], fold: [], diac: [
@@ -266,6 +277,7 @@ define_languages! {
         ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     VIE, "VIE", "Vietnamese",
         case: [], fold: [],
@@ -275,6 +287,7 @@ define_languages! {
         ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     FRA, "FRA", "French",
         case: [],
@@ -282,6 +295,7 @@ define_languages! {
         diac: [ '\u{0301}', '\u{0300}', '\u{0302}', '\u{0308}', '\u{0327}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     CES, "CES", "Czech",
         case: [],
@@ -289,6 +303,7 @@ define_languages! {
         diac: [ '\u{030C}', '\u{0301}', '\u{030A}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     SLK, "SLK", "Slovak",
         case: [],
@@ -296,6 +311,7 @@ define_languages! {
         diac: [ '\u{030C}', '\u{0301}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     POL, "POL", "Polish",
         case: [],
@@ -303,30 +319,35 @@ define_languages! {
         diac: [ '\u{0328}', '\u{0301}', '\u{0307}', '\u{02DB}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     CAT, "CAT", "Catalan",
         case: [], fold: [],
         diac: [ '\u{0301}', '\u{0300}', '\u{0308}', '\u{0327}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     SPA, "SPA", "Spanish",
         case: [], fold: [ 'Ñ' => "n", 'ñ' => "n" ],
         diac: [ '\u{0301}', '\u{0303}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     POR, "POR", "Portuguese",
         case: [], fold: [],
         diac: [ '\u{0301}', '\u{0300}', '\u{0303}', '\u{0302}', '\u{0327}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     ITA, "ITA", "Italian",
         case: [], fold: [],
         diac: [ '\u{0300}', '\u{0301}' ],
         segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     // ─────────────────────────────────────────────────────────────────────────────
     // CJK Segmentation Strategy — Normy's Official Position (2025-11-20)
@@ -355,6 +376,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
 
         ],
+        unigram_cjk: false,
 
     ZHO, "ZHO", "Chinese (Simplified)",
         case: [], fold: [], diac: [],
@@ -365,6 +387,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
 
         ],
+        unigram_cjk: true,
 
     KOR, "KOR", "Korean",
         case: [], fold: [], diac: [],
@@ -373,6 +396,7 @@ define_languages! {
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
         ],
+        unigram_cjk: false,
 
     // ──────────────────────────────────────────────────────────────────────
     // Southeast Asian Scripts (no unigram breaking, same cluster stays fused)
@@ -384,6 +408,7 @@ define_languages! {
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
         ],
+        unigram_cjk: false,
 
     LAO, "LAO", "Lao",
         case: [], fold: [], diac: [],
@@ -392,6 +417,7 @@ define_languages! {
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
         ],
+        unigram_cjk: false,
 
     MYA, "MYA", "Myanmar",
         case: [], fold: [], diac: [],
@@ -400,6 +426,7 @@ define_languages! {
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
         ],
+        unigram_cjk: false,
 
     KHM, "KHM", "Khmer",
         case: [], fold: [], diac: [],
@@ -408,6 +435,7 @@ define_languages! {
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
         ],
+        unigram_cjk: false,
 
     // ──────────────────────────────────────────────────────────────────────
     // Remaining languages (unchanged – correct)
@@ -416,31 +444,37 @@ define_languages! {
         case: [], fold: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     HRV, "HRV", "Croatian",
         case: [], fold: [ 'ǈ' => "lj", 'ǉ' => "lj", 'ǋ' => "nj", 'ǌ' => "nj" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     SRP, "SRP", "Serbian",
         case: [], fold: [ 'Љ' => "lj", 'љ' => "lj", 'Њ' => "nj", 'њ' => "nj", 'Џ' => "dz", 'џ' => "dz" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     UKR, "UKR", "Ukrainian",
         case: [], fold: [ 'Ґ' => "g", 'ґ' => "g" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     BUL, "BUL", "Bulgarian",
         case: [], fold: [ 'Щ' => "sht", 'щ' => "sht" ],
         diac: [], segment: false, peek_ahead: false, peek_pairs: [],
         segment_rules: [],
+        unigram_cjk: false,
 
     ENG, "ENG", "English",
         case: [], fold: [], diac: [],
         segment: false, peek_ahead: false, peek_pairs: [],
-        segment_rules: []
+        segment_rules: [],
+        unigram_cjk: false
 }
 
 /// ---------------------------------------------------------------------------
@@ -678,6 +712,14 @@ pub trait LocaleBehavior {
         text.chars().filter(|&c| self.is_diacritic(c)).count()
     }
 
+    #[inline(always)]
+    fn needs_unigram_cjk(&self) -> bool {
+        LANG_TABLE
+            .get(self.id().code)
+            .map(|e| e.unigram_cjk)
+            .unwrap_or(false)
+    }
+
     /// Returns the compile-time segmentation rules for this language.
     /// Empty slice = no special rules (fast path).
     #[inline(always)]
@@ -781,6 +823,14 @@ impl LocaleBehavior for Lang {
     #[inline(always)]
     fn needs_word_segmentation(&self) -> bool {
         self.needs_segmentation() && !self.segment_rules().is_empty()
+    }
+
+    #[inline(always)]
+    fn needs_unigram_cjk(&self) -> bool {
+        LANG_TABLE
+            .get(self.code)
+            .map(|e| e.unigram_cjk)
+            .unwrap_or(false)
     }
 }
 

@@ -2,14 +2,11 @@
 //! UnigramCJK stage – inserts spaces between consecutive CJK ideographs.
 //! Works after SegmentWord. Fully iterator-based and fused for efficiency.
 
-use std::{
-    borrow::Cow,
-    iter::{FusedIterator, Peekable},
-    sync::Arc,
-};
+use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use crate::{
     context::Context,
+    lang::LocaleBehavior,
     stage::{CharMapper, Stage, StageError},
     unicode::is_cjk_han_or_kana,
 };
@@ -22,9 +19,8 @@ impl Stage for UnigramCJK {
         "unigram_cjk"
     }
 
-    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        // Only apply if text contains at least one CJK ideograph
-        Ok(text.chars().any(is_cjk_han_or_kana))
+    fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
+        Ok(ctx.lang.needs_unigram_cjk() && text.chars().any(is_cjk_han_or_kana))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
@@ -49,23 +45,20 @@ impl CharMapper for UnigramCJK {
         Box::new(segment_chars(text.chars()).fuse())
     }
 }
-
-/// Iterator-based implementation
 fn segment_chars<I>(chars: I) -> impl FusedIterator<Item = char>
 where
     I: Iterator<Item = char>,
 {
-    struct Seg<I: Iterator<Item = char>> {
-        inner: Peekable<I>,
+    struct Seg<I> {
+        inner: I,
         prev_was_cjk: bool,
-        pending: Option<char>, // Store pending character
+        pending: Option<char>,
     }
 
     impl<I: Iterator<Item = char>> Iterator for Seg<I> {
         type Item = char;
 
         fn next(&mut self) -> Option<Self::Item> {
-            // First, yield any pending character
             if let Some(ch) = self.pending.take() {
                 self.prev_was_cjk = is_cjk_han_or_kana(ch);
                 return Some(ch);
@@ -75,9 +68,8 @@ where
             let curr_is_cjk = is_cjk_han_or_kana(curr);
 
             if self.prev_was_cjk && curr_is_cjk {
-                // Need to insert space before curr
                 self.pending = Some(curr);
-                self.prev_was_cjk = false; // The space we're returning is not CJK!
+                self.prev_was_cjk = false; // space is not CJK
                 return Some(' ');
             }
 
@@ -89,7 +81,7 @@ where
     impl<I: Iterator<Item = char>> FusedIterator for Seg<I> {}
 
     Seg {
-        inner: chars.peekable(),
+        inner: chars,
         prev_was_cjk: false,
         pending: None,
     }
@@ -128,19 +120,34 @@ impl FusedIterator for UnigramCJKIterator {}
 
 #[cfg(test)]
 mod tests {
+    use crate::{ARA, DEU, ENG, FRA, JPN, KOR, TUR, ZHO};
+
     use super::*;
 
+    macro_rules! ctx {
+        ($lang:expr) => {
+            Context { lang: $lang }
+        };
+    }
+
     #[test]
-    fn test_unigram_cjk_basic() {
+    fn test_unigram_cjk_extended() {
         let cases = &[
             ("", ""),
+            ("A", "A"),
             ("中", "中"),
-            ("日本語漢字", "日 本 語 漢 字"), // consecutive CJK → spaces inserted
-            ("Rust日本語", "Rust日 本 語"),   // no space between 't' and '日' (not both CJK)
-            ("私はRustが好きです", "私 はRustが 好 き で す"), // space only between CJK pairs
-            ("東京2024年", "東 京2024年"),    // no space between '4' and '年'
-            ("漢字", "漢 字"),
-            ("一二三四五", "一 二 三 四 五"),
+            ("日本語漢字", "日 本 語 漢 字"),
+            ("Rust日本語123漢字", "Rust日 本 語123漢 字"),
+            ("CJKテスト2025", "CJKテ ス ト2025"),
+            ("Hello世界!", "Hello世 界!"),
+            (
+                "私はRustとPythonが好き😊2025年",
+                "私 はRustとPythonが 好 き😊2025年",
+            ),
+            ("漢字ABC漢字123", "漢 字ABC漢 字123"),
+            ("東京2024年", "東 京2024年"),
+            ("一二三四五六七八九十", "一 二 三 四 五 六 七 八 九 十"),
+            ("日 本", "日 本"),
         ];
 
         for &(input, expected) in cases {
@@ -148,4 +155,69 @@ mod tests {
             assert_eq!(output, expected, "Failed on input: {input}");
         }
     }
+
+    #[test]
+    fn test_unigram_cjk_zho_enabled() {
+        let stage = UnigramCJK;
+        let ctx = ctx!(ZHO);
+
+        assert!(stage.needs_apply("中华人民共和国", &ctx).unwrap());
+        assert!(stage.needs_apply("北京大学", &ctx).unwrap());
+        assert!(!stage.needs_apply("Hello world", &ctx).unwrap());
+    }
+
+    #[test]
+    fn test_unigram_cjk_jpn_disabled_by_default() {
+        let stage = UnigramCJK;
+        let ctx = ctx!(JPN);
+
+        assert!(!stage.needs_apply("日本語", &ctx).unwrap());
+        assert!(!stage.needs_apply("最高のプログラミング言語", &ctx).unwrap());
+        assert!(!stage.needs_apply("漢字漢字漢字", &ctx).unwrap());
+    }
+
+    #[test]
+    fn test_unigram_cjk_non_cjk_languages_never_run() {
+        let stage = UnigramCJK;
+        let languages = [ENG, DEU, FRA, TUR, ARA, KOR];
+
+        for &lang in &languages {
+            let ctx = ctx!(lang);
+            assert!(!stage.needs_apply("東京大学", &ctx).unwrap());
+            assert!(!stage.needs_apply("中华人民共和国", &ctx).unwrap());
+        }
+    }
+
+    #[test]
+    fn test_unigram_cjk_correct_segmentation_when_enabled() {
+        let stage = UnigramCJK;
+        let ctx = ctx!(ZHO);
+
+        let cases = &[
+            ("", ""),
+            ("中", "中"),
+            ("中国人民", "中 国 人 民"),
+            ("中华人民共和国", "中 华 人 民 共 和 国"),
+            ("北京大学2025", "北 京 大 学2025"),
+            ("编程语言Rust", "编 程 语 言Rust"),
+            ("Hello世界你好", "Hello世 界 你 好"),
+            ("一二三四五六七八九十", "一 二 三 四 五 六 七 八 九 十"),
+        ];
+
+        for &(input, expected) in cases {
+            let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(&*result, expected, "Failed on input: {input}");
+        }
+    }
+
+    // #[test]
+    // fn test_unigram_cjk_opt_in_for_japanese_works() {
+    //     use crate::Normy;
+
+    //     let normy = Normy::builder().lang(JPN).add_stage(UnigramCJK).build();
+
+    //     let text = "最高の言語";
+    //     let result = normy.normalize(text).unwrap();
+    //     assert_eq!(&*result, "最 高 の 言 語");
+    // }
 }
