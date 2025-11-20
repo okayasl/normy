@@ -6,7 +6,9 @@
 use paste::paste;
 use phf::{Map, phf_map};
 
-use crate::unicode::is_any_whitespace;
+use crate::unicode::{
+    CharClass, classify, is_any_whitespace, is_cjk_unified_ideograph, is_same_script_cluster,
+};
 
 /// ---------------------------------------------------------------------------
 /// 1. Public Language Identifier
@@ -341,8 +343,7 @@ define_languages! {
         segment: true, peek_ahead: false, peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
-            SegmentRule::CJKIdeographUnigram,
-                        SegmentRule::ScriptToWestern,
+            SegmentRule::ScriptToWestern,
 
         ],
 
@@ -352,7 +353,7 @@ define_languages! {
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::CJKIdeographUnigram,
-                        SegmentRule::ScriptToWestern,
+            SegmentRule::ScriptToWestern,
 
         ],
 
@@ -364,6 +365,22 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // CJK Segmentation Strategy — Normy's Official Position (2025-11-20)
+    // ─────────────────────────────────────────────────────────────────────────────
+    // • Chinese (ZHO): CJKIdeographUnigram = true
+    //   → Matches Google, Baidu, Lucene, Elastic, Meilisearch, ICU tokenizer defaults
+    //   → Maximizes recall for single-character queries ("北" finds "北京")
+    //   → Expected by virtually all Chinese search/indexing systems
+    //
+    // • Japanese (JPN): CJKIdeographUnigram = false
+    //   → Matches linguistic reality and UAX#29 default (no break in ALetter runs)
+    //   → Avoids pathological tokens like 最 高
+    //   → Users wanting unigram Japanese for IR must opt-in via explicit stage
+    //
+    // • This asymmetry is intentional and correct.
+    //   Normalization ≠ tokenization. We give each language its expected default.
+    // ─────────────────────────────────────────────────────────────────────────────
     // ──────────────────────────────────────────────────────────────────────
     // Southeast Asian Scripts (no unigram breaking, same cluster stays fused)
     // ──────────────────────────────────────────────────────────────────────
@@ -685,16 +702,12 @@ pub trait LocaleBehavior {
     }
 
     fn needs_boundary_between(&self, prev: char, curr: char) -> bool {
-        use crate::unicode::{
-            CharClass, classify, is_cjk_unified_ideograph, is_same_script_cluster,
-        };
-
-        // --- 0. Whitespace never produces boundaries
+        // Whitespace never produces boundaries
         if is_any_whitespace(prev) || is_any_whitespace(curr) {
             return false;
         }
 
-        // --- 1. Same cluster logic
+        // Same cluster logic
         if is_same_script_cluster(prev, curr) {
             // CJK unigram breaking (Japanese/Chinese only)
             if self
@@ -710,7 +723,7 @@ pub trait LocaleBehavior {
             return false;
         }
 
-        // --- 2. Cross-cluster transitions
+        // Cross-cluster transitions
         let prev_class = classify(prev);
         let curr_class = classify(curr);
 

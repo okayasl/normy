@@ -68,6 +68,10 @@ pub fn needs_segmentation(text: &str, lang: Lang) -> bool {
         if let Some(p) = prev
             && lang.needs_boundary_between(p, curr)
         {
+            println!(
+                "Needs boundary between {} and {} for text {}",
+                p, curr, text
+            );
             return true;
         }
         prev = Some(curr);
@@ -78,15 +82,6 @@ pub fn needs_segmentation(text: &str, lang: Lang) -> bool {
 #[inline]
 pub fn segment_allocating(text: &str, lang: Lang) -> String {
     segment_chars(text.chars(), lang).collect()
-}
-
-#[inline]
-fn emit_space_if_needed(prev: Option<char>, next_exists: bool) -> Option<char> {
-    if prev.is_some() && prev != Some(' ') && next_exists {
-        Some(' ')
-    } else {
-        None
-    }
 }
 
 #[inline]
@@ -101,44 +96,66 @@ where
         pending_space: bool,
     }
 
-    impl<I: Iterator> Iterator for Seg<I>
-    where
-        I: Iterator<Item = char>,
-    {
+    impl<I: Iterator<Item = char>> Iterator for Seg<I> {
         type Item = char;
 
-        fn next(&mut self) -> Option<Self::Item> {
-            loop {
-                if self.pending_space && self.inner.peek().is_some() {
-                    self.pending_space = false;
-                    self.prev = Some(' ');
-                    return Some(' ');
-                }
+        fn next(&mut self) -> Option<char> {
+            // --- Case 1: Emit pending artificial space ---
+            if self.pending_space {
+                println!("Emitting pending space after {:?}", self.prev);
+                self.pending_space = false;
+                return Some(' ');
+            }
 
-                let curr = self.inner.next()?;
+            // --- Case 2: Main iteration ---
+            while let Some(curr) = self.inner.next() {
+                println!("Current char: {:?}", curr);
 
+                // --- collapse whitespace ---
                 if is_any_whitespace(curr) {
-                    while self.inner.peek().is_some_and(|&c| is_any_whitespace(c)) {
-                        self.inner.next();
+                    println!("Whitespace detected: {:?}", curr);
+                    while self.inner.peek().is_some_and(|c| is_any_whitespace(*c)) {
+                        let skipped = self.inner.next().unwrap();
+                        println!("Skipping whitespace: {:?}", skipped);
                     }
-                    if let Some(space) =
-                        emit_space_if_needed(self.prev, self.inner.peek().is_some())
-                    {
-                        self.prev = Some(' ');
-                        return Some(space);
+                    if self.prev.is_some() && self.inner.peek().is_some() {
+                        println!(
+                            "Inserting space due to collapsed whitespace after {:?}",
+                            self.prev
+                        );
+                        self.pending_space = true;
                     }
                     continue;
                 }
 
+                // --- segmentation boundary ---
                 if let Some(prev_c) = self.prev
                     && self.lang.needs_boundary_between(prev_c, curr)
                 {
+                    println!("Boundary detected between {:?} and {:?}", prev_c, curr);
                     self.pending_space = true;
                 }
 
-                self.prev = Some(curr);
-                return Some(curr);
+                // --- emit previous char if present ---
+                if let Some(prev_c) = self.prev.take() {
+                    // We only emit prev_c here; curr will be emitted in next iteration
+                    println!("Emitting previous char: {:?}", prev_c);
+                    self.prev = Some(curr);
+                    return Some(prev_c);
+                } else {
+                    // first char, store and continue
+                    println!("Storing first char: {:?}", curr);
+                    self.prev = Some(curr);
+                }
             }
+
+            // --- End of iterator: emit last char if present ---
+            if let Some(last) = self.prev.take() {
+                println!("Emitting last char at end: {:?}", last);
+                return Some(last);
+            }
+
+            None
         }
     }
 
@@ -188,9 +205,62 @@ mod tests {
         };
     }
 
-    // ------------------------------
-    // Pure function tests
-    // ------------------------------
+    #[test]
+    fn focused_boundary_hiragana_to_kanji() {
+        let lang = JPN;
+        let stage = SegmentWord;
+        let ctx = ctx!(lang);
+
+        // Hiragana to Kanji — no space, normalization-correct
+        let input_1 = "は最高";
+        assert!(!stage.needs_apply(input_1, &ctx).unwrap());
+        assert!(!needs_segmentation(input_1, lang));
+
+        let expected_1 = "は最高";
+        assert_eq!(
+            segment_allocating(input_1, lang),
+            expected_1,
+            "Failure on 'は最高'"
+        );
+
+        // Hiragana/Hiragana boundary (should *not* segment)
+        let input_2 = "こんにちは";
+        let expected_2 = "こんにちは";
+        assert_eq!(
+            segment_allocating(input_2, lang),
+            expected_2,
+            "Failure on 'こんにちは'"
+        );
+
+        // Western to Hiragana (should segment)
+        let input_3 = "Rustは";
+        let expected_3 = "Rust は";
+        assert_eq!(
+            segment_allocating(input_3, lang),
+            expected_3,
+            "Failure on 'Rustは'"
+        );
+    }
+
+    #[test]
+    fn focused_boundary_western_to_cjk() {
+        let lang = JPN;
+
+        // ASCII letter to Kanji
+        let input_1 = "o世";
+        let expected_1 = "o 世";
+        assert_eq!(segment_allocating(input_1, lang), expected_1);
+
+        // Number to Kanji
+        let input_2 = "25年";
+        let expected_2 = "25 年";
+        assert_eq!(segment_allocating(input_2, lang), expected_2);
+
+        // Western → Kanji
+        let input_3 = "Hello世界";
+        let expected_3 = "Hello 世界";
+        assert_eq!(segment_allocating(input_3, lang), expected_3);
+    }
 
     #[test]
     fn test_needs_segmentation() {
@@ -213,21 +283,13 @@ mod tests {
         assert_eq!(output, expected);
     }
 
-    // ------------------------------
-    // Iterator tests
-    // ------------------------------
-
     #[test]
     fn test_iterator_basic() {
         let input = "Rustは最高";
         let iter = SegmentWordIterator::new(input.chars().fuse(), JPN);
         let output: String = iter.collect();
-        assert_eq!(output, "Rust は 最高");
+        assert_eq!(output, "Rust は最高");
     }
-
-    // ------------------------------
-    // Stage / integration tests
-    // ------------------------------
 
     #[test]
     fn non_segmented_languages_unchanged() {
@@ -250,7 +312,7 @@ mod tests {
 
         let cases = &[
             ("Hello世界", "Hello 世界"),
-            ("Rustは最高", "Rust は 最高"),
+            ("Rustは最高", "Rust は最高"),
             ("東京2025年", "東京 2025 年"),
             ("AIとLLM", "AI と LLM"),
         ];
@@ -289,7 +351,7 @@ mod tests {
             );
         }
 
-        let text = "こんにちは 世界";
+        let text = "こんにちは 世界"; // extra space will be normalized away
         let ctx = ctx!(JPN);
         let once = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
         let twice = stage.apply(Cow::Borrowed(&once), &ctx).unwrap();
