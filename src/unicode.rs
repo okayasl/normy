@@ -314,7 +314,9 @@ pub fn is_same_script_cluster(a: char, b: char) -> bool {
         (CharClass::CJK, CharClass::CJK) => true, // CJK cluster
         (CharClass::Hangul, CharClass::Hangul) => true, // Hangul cluster
         (CharClass::SEAsian, CharClass::SEAsian) => true, // SE-Asian cluster
-        _ => false,                               // everything else treated as cross-script
+        // --- Prevent space between consecutive CJK ideographs ---
+        _ if is_cjk_unified_ideograph(a) && is_cjk_unified_ideograph(b) => true,
+        _ => false,
     }
 }
 

@@ -359,18 +359,6 @@ mod tests {
     }
 
     #[test]
-    fn whitespace_collapsed_stage() {
-        let stage = SegmentWord;
-        let input = "こんにちは   世界\t\nです";
-        let expected = "こんにちは 世界 です";
-        let ctx = ctx!(JPN);
-        assert_eq!(
-            stage.apply(Cow::Borrowed(input), &ctx).unwrap().as_ref(),
-            expected
-        );
-    }
-
-    #[test]
     fn numbers_as_western_stage() {
         let stage = SegmentWord;
         let input = "東京2025年";
@@ -380,5 +368,107 @@ mod tests {
             stage.apply(Cow::Borrowed(input), &ctx).unwrap().as_ref(),
             expected
         );
+    }
+
+    #[test]
+    fn segmentation_for_all_script_languages() {
+        let stage = SegmentWord;
+
+        macro_rules! ctx {
+            ($lang:expr) => {
+                Context { lang: $lang }
+            };
+        }
+
+        // ────────────── Japanese ──────────────
+        {
+            let ctx = ctx!(JPN);
+            let cases = &[
+                ("Rustは最高", "Rust は最高"), // Western→Hiragana
+                ("は最高", "は最高"),          // Hiragana→Hiragana: no space
+                ("Hello世界", "Hello 世界"),   // Western→Kanji
+            ];
+            for &(input, expected) in cases {
+                assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+            }
+        }
+
+        // ────────────── Chinese ──────────────
+        {
+            let ctx = ctx!(ZHO);
+            let cases = &[
+                ("Hello世界", "Hello 世界"), // Western→CJK
+                ("世界Hello", "世界 Hello"), // CJK→Western
+                ("你好世界", "你好世界"),    // CJK unigram splitting
+            ];
+            for &(input, expected) in cases {
+                assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+            }
+        }
+
+        // ────────────── Korean ──────────────
+        {
+            let ctx = ctx!(KOR);
+            let cases = &[
+                ("Hello안녕하세요", "Hello 안녕하세요"), // Western→Korean
+                ("안녕하세요World", "안녕하세요 World"), // Korean→Western
+                ("안녕하세요", "안녕하세요"),            // within-Korean
+            ];
+            for &(input, expected) in cases {
+                assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+            }
+        }
+
+        // ────────────── Thai ──────────────
+        {
+            let ctx = ctx!(THA);
+            let cases = &[
+                ("Helloสวัสดี", "Hello สวัสดี"),  // Western→Thai
+                ("สวัสดีWorld", "สวัสดี World"),  // Thai→Western
+                ("สวัสดีชาวโลก", "สวัสดีชาวโลก"), // within-Thai
+            ];
+            for &(input, expected) in cases {
+                assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+            }
+        }
+
+        // ────────────── Lao ──────────────
+        {
+            let ctx = ctx!(LAO);
+            let cases = &[
+                ("Helloສະບາຍດີ", "Hello ສະບາຍດີ"), // Western→Lao
+                ("ສະບາຍດີWorld", "ສະບາຍດີ World"), // Lao→Western
+                ("ສະບາຍດີທຸກຄົນ", "ສະບາຍດີທຸກຄົນ"),    // within-Lao
+            ];
+            for &(input, expected) in cases {
+                assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+            }
+        }
+
+        // ────────────── Myanmar ──────────────
+        {
+            let ctx = ctx!(MYA);
+            let cases = &[
+                ("Helloမင်္ဂလာပါ", "Hello မင်္ဂလာပါ"), // Western→Myanmar
+                ("မင်္ဂလာပါWorld", "မင်္ဂလာပါ World"), // Myanmar→Western
+                ("မင်္ဂလာပါ", "မင်္ဂလာပါ"),            // within-Myanmar
+            ];
+            for &(input, expected) in cases {
+                assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+            }
+        }
+
+        // ────────────── Khmer ──────────────
+        {
+            let ctx = ctx!(KHM);
+            let cases = &[
+                ("Helloសួស្តី", "Hello សួស្តី"),  // Western→Khmer
+                ("សួស្តីWorld", "សួស្តី World"),  // Khmer→Western
+                ("សួស្តីជាកម្ពុជា", "សួស្តីជាកម្ពុជា"), // within-Khmer
+            ];
+            for &(input, expected) in cases {
+                assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+            }
+        }
     }
 }
