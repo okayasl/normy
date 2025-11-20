@@ -694,23 +694,33 @@ pub trait LocaleBehavior {
         self.needs_segmentation() && !self.segment_rules().is_empty()
     }
 
+    /// Determine whether a boundary (space) should be inserted between two characters.
+    /// Returns `true` if a segmentation boundary is required, `false` otherwise.
+    ///
+    /// Rules:
+    /// 1. Whitespace never produces boundaries.
+    /// 2. Characters in the same script cluster (Western, CJK, Hangul, SE-Asian) do not produce boundaries.
+    /// 3. Consecutive CJK ideographs do not produce boundaries.
+    /// 4. Western → Script or Script → Western boundaries follow the language's segment rules.
+    /// 5. Cross-script transitions produce a boundary.
+    #[inline(always)]
     fn needs_boundary_between(&self, prev: char, curr: char) -> bool {
-        // Whitespace never produces boundaries
+        // --- 1. Whitespace never produces boundaries ---
         if is_any_whitespace(prev) || is_any_whitespace(curr) {
             return false;
         }
 
-        // Same cluster logic
+        // --- 2. Same script cluster: no boundary ---
         if is_same_script_cluster(prev, curr) {
             return false;
         }
 
-        // Cross-cluster transitions
+        // --- 3. Cross-cluster transitions ---
         let prev_class = classify(prev);
         let curr_class = classify(curr);
 
         match (prev_class, curr_class) {
-            // Western → Script
+            // Western → Script (CJK/Hangul/SEAsian/NonCJKScript)
             (
                 CharClass::Western,
                 CharClass::CJK | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
@@ -725,7 +735,7 @@ pub trait LocaleBehavior {
             // Cross-script (CJK → Hangul/SEAsian/NonCJKScript etc.)
             (pc, cc) if pc != cc => true,
 
-            // Otherwise, no break
+            // Everything else: no boundary
             _ => false,
         }
     }

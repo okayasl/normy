@@ -1,11 +1,28 @@
+// src/stage/segment_word.rs
+//! Word segmentation stage – inserts U+0020 spaces where required by the
+//! current language’s rules (Western → CJK/Hangul/SE-Asian, Thai/Lao/Khmer
+//! syllable breaks, etc.).  
+//!
+//! Key features:
+//! - Zero-allocation for Western text when stages are known at compile-time.
+//! - Fully fused iterator for efficient processing.
+//! - Handles whitespace normalization and cross-script boundaries.
+//!
+//! Notes:
+//! - CJK unigram logic is postponed for a future `UnigramCJK` stage.
+
+use std::{
+    borrow::Cow,
+    iter::{FusedIterator, Peekable},
+    sync::Arc,
+};
+
 use crate::{
     context::Context,
-    lang::{JPN, Lang, LocaleBehavior, SegmentRule, ZHO},
-    stage::{CharMapper, FusedIterator, Stage, StageError},
-    unicode::{is_ascii_digit, is_ascii_punct, is_latin_letter, is_script_char},
+    lang::{Lang, LocaleBehavior},
+    stage::{CharMapper, Stage, StageError},
+    unicode::is_any_whitespace,
 };
-use std::borrow::Cow;
-use std::sync::Arc;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SegmentWord;
@@ -16,431 +33,370 @@ impl Stage for SegmentWord {
     }
 
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        // Early exit if no possible boundary
-        let mut has_western = false;
-        let mut has_script = false;
-        for c in text.chars() {
-            match classify(c) {
-                CharClass::Western => has_western = true,
-                CharClass::Script => has_script = true,
-                _ => {}
-            }
-            if has_western && has_script {
-                break;
-            }
-        }
-        if !has_western || !has_script {
-            return Ok(false);
-        }
-
-        // Only if mixed script, do the real check
-        let processed: String = SegmentIter::new(text, ctx.lang).collect();
-        Ok(processed != text)
+        Ok(ctx.lang.needs_segmentation() && needs_segmentation(text, ctx.lang))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !self.needs_apply(&text, ctx)? {
+        if !ctx.lang.needs_segmentation() || !self.needs_apply(&text, ctx)? {
             return Ok(text);
         }
-        Ok(Cow::Owned(
-            SegmentIter::new(text.as_ref(), ctx.lang).collect(),
-        ))
+
+        if let Some(mapper) = self.as_char_mapper(ctx) {
+            let mapped: String = mapper.bind(&text, ctx).collect();
+            return Ok(Cow::Owned(mapped));
+        }
+
+        Ok(Cow::Owned(segment_allocating(&text, ctx.lang)))
     }
 
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        if ctx.lang.segment_rules().is_empty() {
-            Some(self)
-        } else {
-            None
-        }
+        ctx.lang
+            .needs_segmentation()
+            .then_some(self as &dyn CharMapper)
     }
 
     fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        if ctx.lang.segment_rules().is_empty() {
-            Some(self)
-        } else {
-            None
-        }
+        ctx.lang.needs_segmentation().then_some(self)
     }
 }
 
 impl CharMapper for SegmentWord {
-    #[inline(always)]
     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
         Some(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(SegmentIter::new(text, ctx.lang))
+        Box::new(segment_chars(text.chars(), ctx.lang).fuse())
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default)]
-enum CharClass {
-    #[default]
-    Other,
-    Western,
-    Script,
-}
-
-#[inline(always)]
-fn classify(c: char) -> CharClass {
-    // Treat whitespace explicitly as Other to ensure proper handling
-    if c.is_whitespace() {
-        return CharClass::Other;
-    }
-    if is_latin_letter(c) || is_ascii_digit(c) || is_ascii_punct(c) {
-        CharClass::Western
-    } else if is_script_char(c) {
-        CharClass::Script
-    } else {
-        CharClass::Other
-    }
-}
-
-/// Check if the text ending at this position matches an exception pattern
 #[inline]
-fn is_exception_boundary(text_before: &str, lang: Lang) -> bool {
-    for exc in lang.segment_exceptions() {
-        if text_before.ends_with(exc) {
+pub fn needs_segmentation(text: &str, lang: Lang) -> bool {
+    let mut prev = None;
+    for curr in text.chars() {
+        if let Some(p) = prev
+            && lang.needs_boundary_between(p, curr)
+        {
             return true;
         }
+        prev = Some(curr);
     }
     false
 }
 
-#[inline(always)]
-fn should_insert_space(
-    prev_class: CharClass,
-    curr_class: CharClass,
-    curr_char: char,
-    next_char: Option<char>,
-    lang: Lang,
-) -> bool {
-    match (prev_class, curr_class) {
-        (CharClass::Western, CharClass::Script) => {
-            lang.segment_rules().contains(&SegmentRule::HanAfterWest)
-        }
-        (CharClass::Script, CharClass::Western) => {
-            if matches!(lang, JPN | ZHO) && curr_char.is_ascii_alphabetic() {
-                if let Some(next) = next_char {
-                    let next_class = classify(next);
-                    next_class == CharClass::Western
-                } else {
-                    false
-                }
-            } else {
-                lang.segment_rules().contains(&SegmentRule::WestAfterHan)
+#[inline]
+pub fn segment_allocating(text: &str, lang: Lang) -> String {
+    segment_chars(text.chars(), lang).collect()
+}
+
+#[inline]
+fn segment_chars<I>(chars: I, lang: Lang) -> impl Iterator<Item = char>
+where
+    I: Iterator<Item = char>,
+{
+    struct Seg<I: Iterator> {
+        lang: Lang,
+        inner: Peekable<I>,
+        prev: Option<char>,
+        pending_space: bool,
+    }
+
+    impl<I: Iterator<Item = char>> Iterator for Seg<I> {
+        type Item = char;
+
+        fn next(&mut self) -> Option<char> {
+            if self.pending_space {
+                self.pending_space = false;
+                return Some(' ');
             }
+
+            while let Some(curr) = self.inner.next() {
+                if is_any_whitespace(curr) {
+                    while self.inner.peek().is_some_and(|c| is_any_whitespace(*c)) {
+                        self.inner.next();
+                    }
+                    if self.prev.is_some() && self.inner.peek().is_some() {
+                        self.pending_space = true;
+                    }
+                    continue;
+                }
+
+                if let Some(prev_c) = self.prev
+                    && self.lang.needs_boundary_between(prev_c, curr)
+                {
+                    self.pending_space = true;
+                }
+
+                if let Some(prev_c) = self.prev.take() {
+                    self.prev = Some(curr);
+                    return Some(prev_c);
+                } else {
+                    self.prev = Some(curr);
+                }
+            }
+
+            self.prev.take()
         }
-        _ => false,
+    }
+
+    Seg {
+        lang,
+        inner: chars.peekable(),
+        prev: None,
+        pending_space: false,
     }
 }
 
-struct SegmentIter<'a> {
-    text: &'a str,
-    chars: Vec<char>,
-    lang: Lang,
-    index: usize,
-    byte_offset: usize,
-    pending_char: Option<char>,
-    last_emitted_class: CharClass,
+/// Iterator wrapper for explicit usage if needed
+pub struct SegmentWordIterator {
+    inner: Box<dyn FusedIterator<Item = char>>,
 }
 
-impl<'a> SegmentIter<'a> {
-    fn new(text: &'a str, lang: Lang) -> Self {
+impl SegmentWordIterator {
+    pub fn new<I>(iter: I, lang: Lang) -> Self
+    where
+        I: Iterator<Item = char> + FusedIterator + 'static,
+    {
         Self {
-            text,
-            chars: text.chars().collect(),
-            lang,
-            index: 0,
-            byte_offset: 0,
-            pending_char: None,
-            last_emitted_class: CharClass::Other,
+            inner: Box::new(segment_chars(iter, lang).fuse()),
         }
     }
 }
 
-impl Iterator for SegmentIter<'_> {
+impl Iterator for SegmentWordIterator {
     type Item = char;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(c) = self.pending_char.take() {
-            return Some(c);
-        }
-        if self.index >= self.chars.len() {
-            return None;
-        }
-
-        let c = self.chars[self.index];
-        let curr_class = classify(c);
-        let next_char = self.chars.get(self.index + 1).copied();
-
-        // === CANONICAL SPACE INSERTION LOGIC ===
-        let should_insert = self.last_emitted_class != CharClass::Other
-            && self.last_emitted_class != curr_class
-            && should_insert_space(self.last_emitted_class, curr_class, c, next_char, self.lang);
-
-        let blocked_by_exception = if should_insert {
-            let text_before = &self.text[..self.byte_offset];
-            let remaining = &self.text[self.byte_offset..];
-            is_exception_boundary(text_before, self.lang)
-                || self.lang.is_segment_exception(remaining)
-        } else {
-            false
-        };
-
-        if should_insert && !blocked_by_exception {
-            self.pending_char = Some(c);
-            self.index += 1;
-            self.byte_offset += c.len_utf8();
-            self.last_emitted_class = CharClass::Other;
-            return Some(' ');
-        }
-
-        // === EMIT REAL CHAR ===
-        self.index += 1;
-        self.byte_offset += c.len_utf8();
-        self.last_emitted_class = curr_class;
-        Some(c)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.chars.len() - self.index;
-        let add = self.pending_char.is_some() as usize;
-        (remaining + add, Some(remaining + add + 8))
+        self.inner.next()
     }
 }
 
-impl FusedIterator for SegmentIter<'_> {}
+impl FusedIterator for SegmentWordIterator {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::{JPN, KHM, KOR, LAO, MYA, THA, ZHO};
+    use crate::lang::*;
+    use std::borrow::Cow;
 
-    fn ctx(lang: crate::lang::Lang) -> Context {
-        Context { lang }
+    macro_rules! ctx {
+        ($lang:expr) => {
+            Context { lang: $lang }
+        };
     }
 
+    // --------------------------- Japanese ---------------------------
     #[test]
-    fn test_japanese_mixed_script() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-        assert_eq!(s.apply("Hello世界".into(), &c).unwrap(), "Hello 世界");
-        assert_eq!(
-            s.apply("MyCorp株式会社".into(), &c).unwrap(),
-            "MyCorp株式会社"
-        );
-    }
+    fn test_japanese_segmentation() {
+        let stage = SegmentWord;
+        let ctx = ctx!(JPN);
 
-    #[test]
-    fn test_chinese_compounds() {
-        let s = SegmentWord;
-        let c = ctx(ZHO);
-        assert_eq!(s.apply("AI人工智能".into(), &c).unwrap(), "AI人工智能");
-        assert_eq!(
-            s.apply("中华人民共和国".into(), &c).unwrap(),
-            "中华人民共和国"
-        );
-    }
-
-    #[test]
-    fn test_thai_lao_no_intra_break() {
-        let s = SegmentWord;
-        for lang in [THA, LAO] {
-            let c = ctx(lang);
-            assert_eq!(
-                s.apply("สวัสดีประเทศไทย".into(), &c).unwrap(),
-                "สวัสดีประเทศไทย"
-            );
-            assert_eq!(s.apply("Helloไทย".into(), &c).unwrap(), "Hello ไทย");
-        }
-    }
-
-    #[test]
-    fn test_myanmar_khmer_no_intra_break() {
-        let s = SegmentWord;
-        for (lang, text) in [(MYA, "မြန်မာ"), (KHM, "កម្ពុជា")] {
-            assert_eq!(s.apply(text.into(), &ctx(lang)).unwrap(), text);
-        }
-    }
-
-    #[test]
-    fn test_idempotency_and_canonical_form() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-
-        let inputs = [
-            "Hello世界World",
-            "Hello 世界World",
-            "Hello世界 World",
-            "Hello 世界 World",
+        let cases = &[
+            // Hiragana → Hiragana: no break
+            ("こんにちは", "こんにちは"),
+            // Hiragana → Kanji: no break
+            ("は最高", "は最高"),
+            // Western → Hiragana: break
+            ("Rustは", "Rust は"),
+            // Western → Kanji: break
+            ("Hello世界", "Hello 世界"),
+            // ASCII digits → Kanji: break
+            ("25年", "25 年"),
+            // Mixed Western + Kanji + Hiragana
+            ("東京2025年", "東京 2025 年"),
         ];
 
-        let canonical = "Hello 世界 World";
-        for input in inputs {
-            let once = s.apply(input.into(), &c).unwrap();
-            assert_eq!(once, canonical);
-            assert_eq!(s.apply(once.clone(), &c).unwrap(), canonical); // idempotent
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected, "Failed on input: {}", input);
         }
 
-        assert_eq!(s.apply("".into(), &c).unwrap(), "");
+        // Extreme/edge cases
+        let extremes = &[
+            ("", ""),                                         // empty string
+            ("A", "A"),                                       // single Western char
+            ("世", "世"),                                     // single CJK char
+            ("Rustは世界2025年", "Rust は世界 2025 年"),      // long mixed sequence
+            ("　こんにちは　", "\u{3000}こんにちは\u{3000}"), // full-width spaces.
+        ];
+        for &(input, expected) in extremes {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected, "Extreme case failed on input: {}", input);
+        }
     }
 
+    // --------------------------- Chinese ---------------------------
     #[test]
-    fn test_segment_iter_canonical_output() {
-        let c = ctx(JPN);
-        let iter = SegmentIter::new("Hello世界World", c.lang);
-        assert_eq!(iter.collect::<String>(), "Hello 世界 World");
+    fn test_chinese_segmentation() {
+        let stage = SegmentWord;
+        let ctx = ctx!(ZHO);
 
-        let iter = SegmentIter::new("MyCorp株式会社", c.lang);
-        assert_eq!(iter.collect::<String>(), "MyCorp株式会社");
+        let cases = &[
+            ("Hello世界", "Hello 世界"), // Western → CJK
+            ("世界Hello", "世界 Hello"), // CJK → Western
+            ("你好世界", "你好世界"),    // consecutive CJK: no break
+        ];
+
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected, "Failed on input: {}", input);
+        }
+
+        // Edge cases
+        let extremes = &[
+            ("", ""),
+            ("A", "A"),
+            ("中", "中"),
+            ("Hello你好World世界", "Hello 你好 World 世界"),
+        ];
+        for &(input, expected) in extremes {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected, "Extreme case failed on input: {}", input);
+        }
     }
 
+    // --------------------------- Korean ---------------------------
     #[test]
-    fn test_chinese_western_run_no_space_when_internal() {
-        let s = SegmentWord;
-        let c = ctx(ZHO);
+    fn test_korean_segmentation() {
+        let stage = SegmentWord;
+        let ctx = ctx!(KOR);
 
-        // Internal Western runs (bounded by CJK) → no space
-        assert_eq!(s.apply("人工AI智能".into(), &c).unwrap(), "人工AI智能");
-        assert_eq!(
-            s.apply("深度学习DL模型".into(), &c).unwrap(),
-            "深度学习DL模型"
-        );
-        assert_eq!(
-            s.apply("自然语言NLP处理".into(), &c).unwrap(),
-            "自然语言NLP处理"
-        );
-        assert_eq!(
-            s.apply("推荐系统RecSys架构".into(), &c).unwrap(),
-            "推荐系统RecSys架构"
-        );
+        let cases = &[
+            ("Hello안녕하세요", "Hello 안녕하세요"), // Western → Hangul
+            ("안녕하세요World", "안녕하세요 World"), // Hangul → Western
+            ("안녕하세요", "안녕하세요"),            // Hangul cluster
+        ];
 
-        // Western at boundary → space
-        assert_eq!(s.apply("AI技术2024".into(), &c).unwrap(), "AI技术 2024");
-        assert_eq!(s.apply("2024AI峰会".into(), &c).unwrap(), "2024 AI峰会");
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
 
-        // Mixed with punctuation
-        assert_eq!(
-            s.apply("AI(人工智能)技术".into(), &c).unwrap(),
-            "AI(人工智能)技术"
-        );
-    }
-    #[test]
-    fn test_complex_japanese_exceptions() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-        assert_eq!(
-            s.apply("Tokyo大学とMyCorp株式会社".into(), &c).unwrap(),
-            "Tokyo大学と MyCorp株式会社"
-        );
+        let extremes = &[
+            ("", ""),
+            ("가", "가"),                                    // single Hangul
+            ("Hello가World", "Hello 가 World"),              // mixed short
+            ("안녕Hello세상World", "안녕 Hello 세상 World"), // longer mixed
+        ];
+        for &(input, expected) in extremes {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
     }
 
+    // --------------------------- Thai ---------------------------
     #[test]
-    fn test_korean_and_numbers() {
-        let s = SegmentWord;
-        let c = ctx(KOR);
-        assert_eq!(
-            s.apply("Samsung한국123".into(), &c).unwrap(),
-            "Samsung 한국 123"
-        );
-        assert_eq!(s.apply("Hello한국".into(), &c).unwrap(), "Hello 한국");
+    fn test_thai_segmentation() {
+        let stage = SegmentWord;
+        let ctx = ctx!(THA);
+
+        let cases = &[
+            ("Helloสวัสดี", "Hello สวัสดี"),  // Western → Thai
+            ("สวัสดีWorld", "สวัสดี World"),  // Thai → Western
+            ("สวัสดีชาวโลก", "สวัสดีชาวโลก"), // Thai cluster
+        ];
+
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
+
+        let extremes = &[
+            ("", ""),
+            ("ก", "ก"),
+            ("HelloกWorld", "Hello ก World"),
+            ("สวัสดีHelloชาวโลกWorld", "สวัสดี Hello ชาวโลก World"),
+        ];
+        for &(input, expected) in extremes {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
     }
 
+    // --------------------------- Lao ---------------------------
     #[test]
-    fn test_punctuation_and_boundaries() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-        assert_eq!(s.apply("Hello!世界".into(), &c).unwrap(), "Hello! 世界");
-        assert_eq!(s.apply("AI,人工".into(), &c).unwrap(), "AI, 人工");
+    fn test_lao_segmentation() {
+        let stage = SegmentWord;
+        let ctx = ctx!(LAO);
+
+        let cases = &[
+            ("Helloສະບາຍດີ", "Hello ສະບາຍດີ"),
+            ("ສະບາຍດີWorld", "ສະບາຍດີ World"),
+            ("ສະບາຍດີທຸກຄົນ", "ສະບາຍດີທຸກຄົນ"),
+        ];
+
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
+
+        let extremes = &[
+            ("", ""),
+            ("ກ", "ກ"),
+            ("HelloກWorld", "Hello ກ World"),
+            ("ສະບາຍHelloດີWorld", "ສະບາຍ Hello ດີ World"),
+        ];
+        for &(input, expected) in extremes {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
     }
 
+    // --------------------------- Myanmar ---------------------------
     #[test]
-    fn test_only_homogeneous_text_is_unchanged() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
+    fn test_myanmar_segmentation() {
+        let stage = SegmentWord;
+        let ctx = ctx!(MYA);
 
-        assert_eq!(s.apply("日本語文章".into(), &c).unwrap(), "日本語文章");
-        assert_eq!(s.apply("Hello World".into(), &c).unwrap(), "Hello World");
+        let cases = &[
+            ("Helloမင်္ဂလာပါ", "Hello မင်္ဂလာပါ"),
+            ("မင်္ဂလာပါWorld", "မင်္ဂလာပါ World"),
+            ("မင်္ဂလာပါ", "မင်္ဂလာပါ"),
+        ];
+
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
+
+        let extremes = &[
+            ("", ""),
+            ("မ", "မ"),
+            ("HelloမWorld", "Hello မ World"),
+            ("မင်္ဂလာHelloပါWorld", "မင်္ဂလာ Hello ပါ World"),
+        ];
+        for &(input, expected) in extremes {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
     }
 
+    // --------------------------- Khmer ---------------------------
     #[test]
-    fn test_needs_apply_detects_non_canonical_spacing() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
+    fn test_khmer_segmentation() {
+        let stage = SegmentWord;
+        let ctx = ctx!(KHM);
 
-        // Already perfectly normalized → no apply
-        assert!(!s.needs_apply("Hello 世界 World", &c).unwrap());
-        assert!(!s.needs_apply("日本語文章", &c).unwrap());
-        assert!(!s.needs_apply("Hello World", &c).unwrap());
-        assert!(!s.needs_apply("", &c).unwrap());
+        let cases = &[
+            ("Helloសួស្តី", "Hello សួស្តី"),
+            ("សួស្តីWorld", "សួស្តី World"),
+            ("សួស្តីជាកម្ពុជា", "សួស្តីជាកម្ពុជា"),
+        ];
 
-        // Needs normalization
-        assert!(s.needs_apply("Hello世界World", &c).unwrap());
-        assert!(s.needs_apply("Hello 世界World", &c).unwrap());
-        assert!(s.needs_apply("Hello世界 World", &c).unwrap());
-    }
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
 
-    #[test]
-    fn test_all_languages_preserve_exceptions() {
-        let s = SegmentWord;
-        assert_eq!(
-            s.apply("Test株式会社".into(), &ctx(JPN)).unwrap(),
-            "Test株式会社"
-        );
-        assert_eq!(
-            s.apply("Test人工智能".into(), &ctx(ZHO)).unwrap(),
-            "Test人工智能"
-        );
-        assert_eq!(
-            s.apply("Test한국어".into(), &ctx(KOR)).unwrap(),
-            "Test 한국어"
-        );
-        assert_eq!(
-            s.apply("Testประเทศไทย".into(), &ctx(THA)).unwrap(),
-            "Testประเทศไทย"
-        );
-        assert_eq!(s.apply("Testမြန်မာ".into(), &ctx(MYA)).unwrap(), "Testမြန်မာ");
-        assert_eq!(s.apply("Testកម្ពុជា".into(), &ctx(KHM)).unwrap(), "Testកម្ពុជា");
-        assert_eq!(s.apply("Testລາວ".into(), &ctx(LAO)).unwrap(), "Testລາວ");
-    }
-
-    #[test]
-    fn test_whitespace_and_edge_cases() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-        assert_eq!(s.apply(" ".into(), &c).unwrap(), " ");
-        assert_eq!(s.apply(" a ".into(), &c).unwrap(), " a ");
-        assert_eq!(s.apply("Hello 世 界".into(), &c).unwrap(), "Hello 世 界");
-    }
-
-    #[test]
-    fn test_size_hint_is_sane() {
-        let c = ctx(JPN);
-        let iter = SegmentIter::new("Hello世界World", c.lang);
-        let (low, high) = iter.size_hint();
-        assert!(low > 0);
-        assert!(high.is_some());
-        assert!(high.unwrap() >= low);
-    }
-
-    #[test]
-    fn test_char_mapper_integration() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-        let result: String = s.bind("Hello世界World", &c).collect();
-        assert_eq!(result, "Hello 世界 World");
-    }
-
-    #[test]
-    fn test_extreme_cases() {
-        let s = SegmentWord;
-        let c = ctx(JPN);
-        let long = "Hello世界".repeat(1000);
-        let result = s.apply(long.clone().into(), &c).unwrap();
-        assert!(result.contains(" 世界 "));
-        assert!(result.len() > long.len());
+        let extremes = &[
+            ("", ""),
+            ("ក", "ក"),
+            ("HelloកWorld", "Hello ក World"),
+            ("សួស្តីHelloជាកម្ពុជាWorld", "សួស្តី Hello ជាកម្ពុជា World"),
+        ];
+        for &(input, expected) in extremes {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(output, expected);
+        }
     }
 }

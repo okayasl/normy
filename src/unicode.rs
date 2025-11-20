@@ -305,8 +305,13 @@ pub fn is_ascii_digit_or_punct(c: char) -> bool {
     is_ascii_digit(c) || is_ascii_punct(c)
 }
 
-/// Determine whether two chars belong to the same script cluster (no-break).
-/// Clusters: Western ASCII, CJK Han/Kana, Hangul, SE Asian
+/// Determine whether two characters belong to the same script cluster (no-break).
+///
+/// Clusters:
+/// - Western ASCII
+/// - CJK Han/Kana
+/// - Hangul
+/// - Southeast Asian scripts (Thai, Lao, Khmer, Myanmar, etc.)
 #[inline(always)]
 pub fn is_same_script_cluster(a: char, b: char) -> bool {
     match (classify(a), classify(b)) {
