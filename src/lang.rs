@@ -1,3 +1,7 @@
+mod entry;
+mod data;
+mod behaviour;
+
 use paste::paste;
 use phf::{Map, phf_map};
 
