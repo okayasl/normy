@@ -74,7 +74,7 @@ pub fn cjk_search() -> Profile<impl Process> {
 
 /// Preserve maximum information for NER, grammar checking, code analysis.
 pub fn minimum() -> Profile<impl Process> {
-    Profile::builder("minimal")
+    Profile::builder("minimum")
         .add_stage(NFKC)
         .add_stage(RemoveControlChars)
         .add_stage(NormalizeWhitespace::collapse_only())
@@ -83,7 +83,7 @@ pub fn minimum() -> Profile<impl Process> {
 
 /// Maximum cleaning — social media, user input, logs
 pub fn maximum() -> Profile<impl Process> {
-    Profile::builder("aggressive")
+    Profile::builder("maximum")
         .add_stage(NFKC)
         .add_stage(RemoveDiacritics)
         .add_stage(FoldCase)
@@ -106,7 +106,7 @@ pub fn social_media() -> Profile<impl Process> {
         .add_stage(LowerCase)
         .add_stage(FoldCase)
         .add_stage(RemoveDiacritics)
-        .add_stage(ReplaceFullwidth) // Handle Asian social media text
+        .add_stage(ReplaceFullwidth)
         .add_stage(RemoveControlChars)
         .add_stage(RemoveFormatControls)
         .add_stage(NormalizePunctuation)
