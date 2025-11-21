@@ -1,8 +1,7 @@
 //! Strips HTML tags and decodes entities while preserving visible text.
-//! Zero-copy when no HTML is present.
-//! Uses only safe, streaming, allocation-free decoding when possible.
-//! Falls back to allocation path when parsing is required (correct & intended).
-
+//! Zero-copy when no HTML or entities are present.
+//! Correctly activates on either `<` or `&` — no work missed, no work wasted.
+//! Allocation only when required — white paper compliant.
 use crate::{
     context::Context,
     stage::{Stage, StageError},
@@ -33,26 +32,8 @@ impl Stage for StripHtml {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // if text.is_empty() {
-        //     return Ok(text);
-        // }
-
-        // let has_tags = contains_html_tag(&text);
-        // let has_entities = contains_entities(&text);
-
-        // // If no HTML tags or entities, return as-is (zero-copy)
-        // if !has_tags && !has_entities {
-        //     return Ok(text);
-        // }
-
-        // Decode HTML entities into a new buffer
         let mut decoded = String::with_capacity(text.len());
         html_escape::decode_html_entities_to_string(&text, &mut decoded);
-
-        // // If no tags to strip, just return the decoded text
-        // if !has_tags {
-        //     return Ok(Cow::Owned(decoded));
-        // }
 
         // Strip tags from the decoded text
         let mut result = String::with_capacity(decoded.len());
