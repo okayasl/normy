@@ -1,3 +1,4 @@
+pub mod preset;
 use crate::{
     context::Context,
     process::{ChainedProcess, DynProcess, EmptyProcess, Process},

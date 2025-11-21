@@ -43,12 +43,19 @@ impl Default for NormalizeWhitespace {
 }
 
 impl NormalizeWhitespace {
-    /// Create with all features enabled (default)
+    /// Create a new instance with default behavior:
+    /// - Collapse sequential whitespace
+    /// - Trim leading/trailing whitespace
+    /// - Normalize Unicode whitespace → ASCII space
+    ///
+    /// This is the recommended configuration for search, indexing, and display.
+    #[inline(always)]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Create with only collapse enabled
+    /// Collapse only — useful when you want to preserve user formatting
+    /// (e.g. code blocks, preformatted text)
     pub fn collapse_only() -> Self {
         Self {
             collapse_sequential: true,
@@ -57,7 +64,8 @@ impl NormalizeWhitespace {
         }
     }
 
-    /// Create with only trim enabled
+    /// Trim only — useful when you want to preserve internal spacing
+    /// (e.g. log parsing, diff tools)
     pub fn trim_only() -> Self {
         Self {
             collapse_sequential: false,

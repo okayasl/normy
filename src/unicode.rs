@@ -316,7 +316,7 @@ pub fn is_ascii_digit_or_punct(c: char) -> bool {
 pub fn is_same_script_cluster(a: char, b: char) -> bool {
     match (classify(a), classify(b)) {
         (CharClass::Western, CharClass::Western) => true,
-        (CharClass::CJK, CharClass::CJK) => true, // CJK cluster
+        (CharClass::Cjk, CharClass::Cjk) => true, // CJK cluster
         (CharClass::Hangul, CharClass::Hangul) => true, // Hangul cluster
         (CharClass::SEAsian, CharClass::SEAsian) => true, // SE-Asian cluster
         // --- Prevent space between consecutive CJK ideographs ---
@@ -337,7 +337,7 @@ pub enum CharClass {
     Other,        // Symbols, emojis, non-script, etc.
     Whitespace,   // ASCII + Unicode spaces
     Western,      // ASCII letters/digits/punct
-    CJK,          // Han ideographs + Kana + Kangxi radicals
+    Cjk,          // Han ideographs + Kana + Kangxi radicals
     Hangul,       // Hangul syllables & Jamo
     SEAsian,      // Thai, Lao, Myanmar, Khmer, Tai Tham
     NonCJKScript, // Greek, Cyrillic, Arabic, Hebrew, etc.
@@ -370,7 +370,7 @@ pub fn classify(c: char) -> CharClass {
 
     // 3. CJK cluster
     if is_cjk_han_or_kana(c) {
-        return CharClass::CJK;
+        return CharClass::Cjk;
     }
 
     // 4. Hangul
@@ -458,7 +458,7 @@ mod tests {
 
         // --- CJK
         for c in &['日', 'ア', '漢'] {
-            assert_eq!(classify(*c), CharClass::CJK, "Failed for {}", c);
+            assert_eq!(classify(*c), CharClass::Cjk, "Failed for {}", c);
         }
 
         // --- Hangul

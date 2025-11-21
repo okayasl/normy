@@ -311,12 +311,12 @@ impl LangEntry {
             // Western → Script (CJK/Hangul/SEAsian/NonCJKScript)
             (
                 CharClass::Western,
-                CharClass::CJK | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
+                CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
             ) => self.segment_rules().contains(&SegmentRule::WesternToScript),
 
             // Script → Western
             (
-                CharClass::CJK | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
+                CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
                 CharClass::Western,
             ) => self.segment_rules().contains(&SegmentRule::ScriptToWestern),
 
