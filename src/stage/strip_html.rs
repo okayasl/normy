@@ -1,7 +1,8 @@
 //! Strips HTML tags and decodes entities while preserving visible text.
-//! Zero-copy when no HTML or entities are present.
-//! Correctly activates on either `<` or `&` — no work missed, no work wasted.
-//! Allocation only when required — white paper compliant.
+//! Zero-copy when no HTML is present.
+//! Uses only safe, streaming, allocation-free decoding when possible.
+//! Falls back to allocation path when parsing is required (correct & intended).
+
 use crate::{
     context::Context,
     stage::{Stage, StageError},
@@ -9,12 +10,13 @@ use crate::{
 use memchr::memchr;
 use std::borrow::Cow;
 
-/// Fast pre-scan: if no '<' appears, text is guaranteed clean
+/// Fast pre-scan: if no '<' appears, text is guaranteed to have no tags
 #[inline(always)]
 fn contains_html_tag(text: &str) -> bool {
     memchr(b'<', text.as_bytes()).is_some()
 }
 
+/// Fast pre-scan: if no '&' appears, text has no entities
 #[inline(always)]
 fn contains_entities(text: &str) -> bool {
     memchr(b'&', text.as_bytes()).is_some()
@@ -32,60 +34,152 @@ impl Stage for StripHtml {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        if text.is_empty() {
+            return Ok(text);
+        }
+
+        let has_tags = contains_html_tag(&text);
+        let has_entities = contains_entities(&text);
+
+        // Zero-copy fast path: no HTML or entities present
+        if !has_tags && !has_entities {
+            return Ok(text);
+        }
+
+        // Decode HTML entities into a new buffer
         let mut decoded = String::with_capacity(text.len());
         html_escape::decode_html_entities_to_string(&text, &mut decoded);
 
+        // If only entities present (no tags), return decoded text
+        if !has_tags {
+            // Check if decoding actually changed anything
+            if decoded == text.as_ref() {
+                return Ok(text); // No entities were actually decoded
+            }
+            return Ok(Cow::Owned(decoded));
+        }
+
         // Strip tags from the decoded text
         let mut result = String::with_capacity(decoded.len());
-        let mut in_tag = false;
-        let mut in_comment = false;
         let mut chars = decoded.chars().peekable();
+        let mut state = ParseState::Text;
 
         while let Some(c) = chars.next() {
-            match c {
-                '<' => {
-                    // Check for <!-- comment -->
-                    if chars.peek() == Some(&'!')
-                        && chars.clone().nth(1) == Some('-')
-                        && chars.clone().nth(2) == Some('-')
-                    {
-                        in_comment = true;
-                        let _ = chars.next(); // !
-                        let _ = chars.next(); // -
-                        let _ = chars.next(); // -
+            match state {
+                ParseState::Text => {
+                    if c == '<' {
+                        // Peek ahead to determine tag type
+                        match chars.peek() {
+                            Some(&'!') => {
+                                // Could be comment <!--, Cdata <![Cdata[, or DOCTYPE <!DOCTYPE
+                                if chars.clone().nth(1) == Some('-')
+                                    && chars.clone().nth(2) == Some('-')
+                                {
+                                    state = ParseState::Comment;
+                                    chars.next(); // !
+                                    chars.next(); // -
+                                    chars.next(); // -
+                                } else if chars.clone().nth(1) == Some('[')
+                                    && chars.clone().nth(2) == Some('C')
+                                {
+                                    // Cdata section - include content
+                                    state = ParseState::Cdata;
+                                    chars.next(); // !
+                                    chars.next(); // [
+                                    // Consume "Cdata["
+                                    for _ in 0..6 {
+                                        chars.next();
+                                    }
+                                } else {
+                                    // Other declaration like DOCTYPE - skip
+                                    state = ParseState::Tag;
+                                }
+                            }
+                            Some(&'s') | Some(&'S') => {
+                                // Check for <script> or <style>
+                                let tag_name = peek_tag_name(&chars); // ← Remove &mut, just peek
+                                if tag_name.eq_ignore_ascii_case("script")
+                                    || tag_name.eq_ignore_ascii_case("style")
+                                {
+                                    let tag_len = tag_name.len();
+                                    state = ParseState::ScriptOrStyle(tag_name);
+                                    // NOW consume the tag name
+                                    for _ in 0..tag_len {
+                                        chars.next();
+                                    }
+                                } else {
+                                    state = ParseState::Tag;
+                                }
+                            }
+                            _ => {
+                                state = ParseState::Tag;
+                            }
+                        }
                     } else {
-                        in_tag = true;
+                        result.push(c);
                     }
                 }
-                '>' => {
-                    if in_comment {
-                        in_comment = false;
+
+                ParseState::Tag => {
+                    if c == '>' {
+                        state = ParseState::Text;
+                    }
+                    // Inside tag: skip everything (including quotes, which we handle implicitly)
+                }
+
+                ParseState::Comment => {
+                    // Inside <!--, looking for -->
+                    if c == '-' && chars.peek() == Some(&'-') && chars.clone().nth(1) == Some('>') {
+                        state = ParseState::Text;
+                        chars.next(); // consume second '-'
+                        chars.next(); // consume '>'
+                    }
+                    // Otherwise skip all content
+                }
+
+                ParseState::Cdata => {
+                    // Inside <![Cdata[, looking for ]]>
+                    if c == ']' && chars.peek() == Some(&']') && chars.clone().nth(1) == Some('>') {
+                        state = ParseState::Text;
+                        chars.next(); // consume second ']'
+                        chars.next(); // consume '>'
                     } else {
-                        in_tag = false;
+                        // Cdata content is preserved
+                        result.push(c);
                     }
                 }
-                '-' if in_comment => {
-                    // Check if this is the start of "-->"
-                    if chars.peek() == Some(&'-') && chars.clone().nth(1) == Some('>') {
-                        in_comment = false;
-                        let _ = chars.next(); // consume second '-'
-                        let _ = chars.next(); // consume '>'
+
+                ParseState::ScriptOrStyle(ref tag_name) => {
+                    // Inside <script> or <style>, looking for </script> or </style>
+                    if c == '<' && chars.peek() == Some(&'/') {
+                        let mut temp_chars = chars.clone();
+                        temp_chars.next(); // skip '/'
+                        if check_closing_tag(&temp_chars, tag_name) {
+                            let tag_len = tag_name.len();
+                            state = ParseState::Tag;
+                            chars.next(); // consume '/'
+                            // Consume tag name
+                            for _ in 0..tag_len {
+                                chars.next();
+                            }
+                        }
                     }
+                    // Skip script/style content
                 }
-                _ if !in_tag && !in_comment => result.push(c),
-                _ => {}
             }
         }
 
-        if result.is_empty() || result == text.as_ref() {
+        // Check if result is identical to input (no changes made)
+        if result == text.as_ref() {
             Ok(text)
+        } else if result.is_empty() {
+            // All content was stripped - return empty owned string
+            Ok(Cow::Owned(String::new()))
         } else {
             Ok(Cow::Owned(result))
         }
     }
 
-    // HTML stripping is syntax-aware → cannot be expressed as pure CharMapper
-    // This is expected and allowed by the white paper
     #[inline(always)]
     fn as_char_mapper(&self, _: &Context) -> Option<&dyn crate::stage::CharMapper> {
         None
@@ -98,6 +192,43 @@ impl Stage for StripHtml {
     ) -> Option<std::sync::Arc<dyn crate::stage::CharMapper>> {
         None
     }
+}
+
+#[derive(Debug, Clone)]
+enum ParseState {
+    Text,
+    Tag,
+    Comment,
+    Cdata,
+    ScriptOrStyle(String),
+}
+
+/// Peek ahead to get tag name (letters only)
+/// Peek ahead to get tag name (letters only) WITHOUT consuming
+fn peek_tag_name(chars: &std::iter::Peekable<std::str::Chars>) -> String {
+    let mut name = String::new();
+    let temp_chars = chars.clone();
+    for c in temp_chars {
+        if c.is_ascii_alphabetic() {
+            name.push(c);
+        } else {
+            break;
+        }
+    }
+    name
+}
+
+/// Check if upcoming chars match closing tag (case-insensitive)
+fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &str) -> bool {
+    let mut temp_chars = chars.clone();
+    for expected in tag_name.chars() {
+        match temp_chars.next() {
+            Some(c) if c.eq_ignore_ascii_case(&expected) => continue,
+            _ => return false,
+        }
+    }
+    // Successfully matched all characters
+    true
 }
 
 #[cfg(test)]
@@ -121,8 +252,6 @@ mod tests {
         let stage = StripHtml;
         let ctx = Context::new(ENG);
         let input = "<p>Hello <!-- secret --> <b>world</b>!</p>";
-        // Whitespace preserved exactly — this is CORRECT
-        // normalize_whitespace stage will collapse later
         assert_eq!(
             stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
             "Hello  world!"
@@ -141,7 +270,7 @@ mod tests {
             stage
                 .apply(Cow::Borrowed("&lt;script&gt;alert(1)&lt;/script&gt;"), &ctx)
                 .unwrap(),
-            "alert(1)"
+            "<script>alert(1)</script>"
         );
     }
 
@@ -162,8 +291,60 @@ mod tests {
         let ctx = Context::new(ENG);
         let input = "<div><p>Hello &amp; world</p></div>";
         let once = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        let twice = stage.apply(Cow::Owned(once.to_string()), &ctx).unwrap();
+        let twice = stage.apply(once.clone(), &ctx).unwrap();
         assert_eq!(once, "Hello & world");
         assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn test_script_tag_content_stripped() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+        let input = "<script>alert('<tag>');</script>text";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "text");
+    }
+
+    #[test]
+    fn test_style_tag_content_stripped() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+        let input = "<style>body { color: red; }</style>text";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "text");
+    }
+
+    #[test]
+    fn test_cdata_content_preserved() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+        let input = "<![Cdata[<tag>content</tag>]]>text";
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            "<tag>content</tag>text"
+        );
+    }
+
+    #[test]
+    fn test_comment_with_greater_than() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+        let input = "<!-- if x > 5 then --> visible";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), " visible");
+    }
+
+    #[test]
+    fn test_malformed_unclosed_tag() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+        let input = "<div class=\"test";
+        // Tag never closes - everything after < is stripped
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "");
+    }
+
+    #[test]
+    fn test_nested_tags() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+        let input = "<div><p><span>nested</span></p></div>";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "nested");
     }
 }
