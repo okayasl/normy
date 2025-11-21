@@ -8,7 +8,7 @@
 
 use crate::{
     context::Context,
-    lang::behaviour::LocaleBehavior,
+    lang::LangEntry,
     stage::{CharMapper, FusedIterator, Stage, StageError},
 };
 use std::borrow::Cow;
@@ -23,13 +23,17 @@ impl Stage for FoldCase {
     }
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        if text.chars().any(|c| ctx.lang.needs_case_fold(c)) {
+        if text.chars().any(|c| ctx.lang_entry.needs_case_fold(c)) {
             return Ok(true);
         }
-        if ctx.lang.requires_peek_ahead() {
+        if ctx.lang_entry.requires_peek_ahead() {
             let mut chars = text.chars().peekable();
             while let Some(c) = chars.next() {
-                if ctx.lang.peek_ahead_fold(c, chars.peek().copied()).is_some() {
+                if ctx
+                    .lang_entry
+                    .peek_ahead_fold(c, chars.peek().copied())
+                    .is_some()
+                {
                     return Ok(true);
                 }
             }
@@ -38,7 +42,7 @@ impl Stage for FoldCase {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let fold_map = ctx.lang.fold_map();
+        let fold_map = ctx.lang_entry.fold_map();
 
         // ═══════════════════════════════════════════════════════════════
         // Fast path: No language-specific rules → Unicode lowercase only
@@ -59,14 +63,14 @@ impl Stage for FoldCase {
         // ═══════════════════════════════════════════════════════════════
         // Context-sensitive path: Dutch IJ, or future multi-char sequences
         // ═══════════════════════════════════════════════════════════════
-        if ctx.lang.requires_peek_ahead() {
+        if ctx.lang_entry.requires_peek_ahead() {
             return apply_with_peek_ahead(text, ctx);
         }
 
         // ═══════════════════════════════════════════════════════════════
         // Standard path: Language-specific folding without peek-ahead
         // ═══════════════════════════════════════════════════════════════
-        let (foldable_count, extra_bytes) = ctx.lang.count_foldable_bytes(&text);
+        let (foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
         if foldable_count == 0 {
             return Ok(text); // Zero-copy
         }
@@ -86,7 +90,7 @@ impl Stage for FoldCase {
     #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
         // Use lang.rs helpers instead of manual checks
-        if ctx.lang.has_one_to_one_folds() && !ctx.lang.requires_peek_ahead() {
+        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
             Some(self)
         } else {
             None
@@ -95,7 +99,7 @@ impl Stage for FoldCase {
 
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        if ctx.lang.has_one_to_one_folds() && !ctx.lang.requires_peek_ahead() {
+        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
             Some(self)
         } else {
             None
@@ -110,12 +114,12 @@ fn apply_with_peek_ahead<'a>(
     text: Cow<'a, str>,
     ctx: &Context,
 ) -> Result<Cow<'a, str>, StageError> {
-    let fold_map = ctx.lang.fold_map();
-    let (foldable_count, extra_bytes) = ctx.lang.count_foldable_bytes(&text); // Reuse helper
+    let fold_map = ctx.lang_entry.fold_map();
+    let (foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text); // Reuse helper
     let mut out = String::with_capacity(
         text.len()
             + extra_bytes
-            + if ctx.lang.requires_peek_ahead() {
+            + if ctx.lang_entry.requires_peek_ahead() {
                 foldable_count
             } else {
                 0
@@ -123,7 +127,7 @@ fn apply_with_peek_ahead<'a>(
     ); // Rough peek adjustment
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
-        if let Some(target) = ctx.lang.peek_ahead_fold(c, chars.peek().copied()) {
+        if let Some(target) = ctx.lang_entry.peek_ahead_fold(c, chars.peek().copied()) {
             chars.next();
             out.push_str(target);
             continue;
@@ -144,11 +148,11 @@ impl CharMapper for FoldCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         // Use lang.rs helper for 1→1 folding
-        ctx.lang.fold_char(c)
+        ctx.lang_entry.fold_char(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        let fold_map = ctx.lang.fold_map();
+        let fold_map = ctx.lang_entry.fold_map();
 
         // Fast path: no language-specific rules
         if fold_map.is_empty() {
@@ -164,7 +168,7 @@ impl CharMapper for FoldCase {
         // Language-specific 1→1 iterator
         Box::new(FoldCaseIter {
             chars: text.chars(),
-            lang: ctx.lang,
+            lang: ctx.lang_entry,
         })
     }
 }
@@ -198,12 +202,9 @@ impl<'a> Iterator for AsciiFoldCaseIter<'a> {
 #[cfg(feature = "ascii-fast")]
 impl<'a> FusedIterator for AsciiFoldCaseIter<'a> {}
 
-// ────── UNICODE / 1→1 CASE FOLD ITERATOR ──────
-use crate::lang::Lang;
-
 struct FoldCaseIter<'a> {
     chars: std::str::Chars<'a>,
-    lang: Lang,
+    lang: LangEntry,
 }
 
 impl<'a> Iterator for FoldCaseIter<'a> {

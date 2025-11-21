@@ -13,14 +13,13 @@
 //! - **No peek-ahead** (IJ stays IJ in lowercase, not treated as digraph)
 
 use crate::{
-    Lang,
     context::Context,
-    lang::behaviour::LocaleBehavior,
+    lang::LangEntry,
     stage::{CharMapper, Stage, StageError},
 };
-use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
+use std::{borrow::Cow, str::Chars};
 
 pub struct LowerCase;
 
@@ -32,11 +31,11 @@ impl Stage for LowerCase {
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
         // Use lang.rs helper (checks case_map slice + Unicode)
-        Ok(text.chars().any(|c| ctx.lang.needs_lowercase(c)))
+        Ok(text.chars().any(|c| ctx.lang_entry.needs_lowercase(c)))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let case_map = ctx.lang.case_map();
+        let case_map = ctx.lang_entry.case_map();
         if case_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
@@ -82,11 +81,11 @@ impl CharMapper for LowerCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         // ✅ Use helper method
-        Some(ctx.lang.lowercase_char(c))
+        Some(ctx.lang_entry.lowercase_char(c))
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        let case_map = ctx.lang.case_map();
+        let case_map = ctx.lang_entry.case_map();
         if case_map.is_empty() {
             #[cfg(feature = "ascii-fast")]
             if text.is_ascii() {
@@ -102,7 +101,7 @@ impl CharMapper for LowerCase {
         }
         Box::new(LowercaseIter {
             chars: text.chars(),
-            lang: ctx.lang,
+            lang: ctx.lang_entry,
         })
     }
 }
@@ -138,8 +137,8 @@ impl<'a> FusedIterator for AsciiLowercaseIter<'a> {}
 
 // ────── UNICODE / LANGUAGE-SPECIFIC LOWERCASE ITERATOR ──────
 struct LowercaseIter<'a> {
-    chars: std::str::Chars<'a>,
-    lang: Lang,
+    chars: Chars<'a>,
+    lang: LangEntry,
 }
 
 impl<'a> Iterator for LowercaseIter<'a> {

@@ -19,7 +19,7 @@ use std::{
 
 use crate::{
     context::Context,
-    lang::{Lang, behaviour::LocaleBehavior},
+    lang::LangEntry,
     stage::{CharMapper, Stage, StageError},
     unicode::is_any_whitespace,
 };
@@ -33,11 +33,11 @@ impl Stage for SegmentWord {
     }
 
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        Ok(ctx.lang.needs_segmentation() && needs_segmentation(text, ctx.lang))
+        Ok(ctx.lang_entry.needs_segmentation() && needs_segmentation(text, ctx.lang_entry))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !ctx.lang.needs_segmentation() || !self.needs_apply(&text, ctx)? {
+        if !ctx.lang_entry.needs_segmentation() || !self.needs_apply(&text, ctx)? {
             return Ok(text);
         }
 
@@ -46,17 +46,17 @@ impl Stage for SegmentWord {
             return Ok(Cow::Owned(mapped));
         }
 
-        Ok(Cow::Owned(segment_allocating(&text, ctx.lang)))
+        Ok(Cow::Owned(segment_allocating(&text, ctx.lang_entry)))
     }
 
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        ctx.lang
+        ctx.lang_entry
             .needs_segmentation()
             .then_some(self as &dyn CharMapper)
     }
 
     fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        ctx.lang.needs_segmentation().then_some(self)
+        ctx.lang_entry.needs_segmentation().then_some(self)
     }
 }
 
@@ -66,12 +66,12 @@ impl CharMapper for SegmentWord {
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(segment_chars(text.chars(), ctx.lang).fuse())
+        Box::new(segment_chars(text.chars(), ctx.lang_entry).fuse())
     }
 }
 
 #[inline]
-pub fn needs_segmentation(text: &str, lang: Lang) -> bool {
+pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
     let mut prev = None;
     for curr in text.chars() {
         if let Some(p) = prev
@@ -85,17 +85,17 @@ pub fn needs_segmentation(text: &str, lang: Lang) -> bool {
 }
 
 #[inline]
-pub fn segment_allocating(text: &str, lang: Lang) -> String {
+pub fn segment_allocating(text: &str, lang: LangEntry) -> String {
     segment_chars(text.chars(), lang).collect()
 }
 
 #[inline]
-fn segment_chars<I>(chars: I, lang: Lang) -> impl Iterator<Item = char>
+fn segment_chars<I>(chars: I, lang: LangEntry) -> impl Iterator<Item = char>
 where
     I: Iterator<Item = char>,
 {
     struct Seg<I: Iterator> {
-        lang: Lang,
+        lang: LangEntry,
         inner: Peekable<I>,
         prev: Option<char>,
         pending_space: bool,
@@ -153,7 +153,7 @@ pub struct SegmentWordIterator {
 }
 
 impl SegmentWordIterator {
-    pub fn new<I>(iter: I, lang: Lang) -> Self
+    pub fn new<I>(iter: I, lang: LangEntry) -> Self
     where
         I: Iterator<Item = char> + FusedIterator + 'static,
     {

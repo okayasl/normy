@@ -8,7 +8,7 @@ use crate::lang::{Lang, LangEntry, data::LANG_TABLE};
 ///
 /// Contains:
 /// - `lang`: human identifier (for logging, metrics, debugging)
-/// - `config`: the actual language rules used in every hot path (zero-cost)
+/// - `lang_entry`: the actual language rules used in every hot path (zero-cost)
 #[derive(Debug, Clone, Copy)]
 pub struct Context {
     pub lang: Lang,

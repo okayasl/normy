@@ -1,7 +1,7 @@
 //! Removes language-specific diacritical marks using NFD (Canonical Decomposition).
 use crate::{
     context::Context,
-    lang::{Lang, behaviour::LocaleBehavior},
+    lang::LangEntry,
     stage::{CharMapper, Stage, StageError},
 };
 use std::borrow::Cow;
@@ -43,7 +43,7 @@ impl Stage for RemoveDiacritics {
         }
 
         // 2. Language-specific activation
-        if !ctx.lang.has_diacritics() {
+        if !ctx.lang_entry.has_diacritics() {
             return Ok(false);
         }
 
@@ -55,7 +55,7 @@ impl Stage for RemoveDiacritics {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !ctx.lang.has_diacritics() {
+        if !ctx.lang_entry.has_diacritics() {
             return Ok(text);
         }
 
@@ -63,7 +63,7 @@ impl Stage for RemoveDiacritics {
         let mut out = String::with_capacity(text.len());
 
         for c in text.nfd() {
-            if ctx.lang.is_diacritic(c) {
+            if ctx.lang_entry.is_diacritic(c) {
                 has_diacritic = true;
                 continue;
             }
@@ -79,19 +79,19 @@ impl Stage for RemoveDiacritics {
 
     #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        ctx.lang.has_diacritics().then_some(self)
+        ctx.lang_entry.has_diacritics().then_some(self)
     }
 
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        ctx.lang.has_diacritics().then_some(self)
+        ctx.lang_entry.has_diacritics().then_some(self)
     }
 }
 
 impl CharMapper for RemoveDiacritics {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        if ctx.lang.is_diacritic(c) {
+        if ctx.lang_entry.is_diacritic(c) {
             None
         } else {
             Some(c)
@@ -99,19 +99,19 @@ impl CharMapper for RemoveDiacritics {
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        if text.is_ascii() || !ctx.lang.has_diacritics() {
+        if text.is_ascii() || !ctx.lang_entry.has_diacritics() {
             return Box::new(text.chars());
         }
         Box::new(RemoveDiacriticsIter {
             chars: text.nfd(),
-            lang: ctx.lang,
+            lang: ctx.lang_entry,
         })
     }
 }
 
 struct RemoveDiacriticsIter<I> {
     chars: I,
-    lang: Lang,
+    lang: LangEntry,
 }
 
 impl<I: Iterator<Item = char>> Iterator for RemoveDiacriticsIter<I> {

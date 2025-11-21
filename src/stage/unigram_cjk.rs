@@ -6,7 +6,6 @@ use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use crate::{
     context::Context,
-    lang::behaviour::LocaleBehavior,
     stage::{CharMapper, Stage, StageError},
     unicode::is_cjk_han_or_kana,
 };
@@ -20,7 +19,7 @@ impl Stage for UnigramCJK {
     }
 
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        Ok(ctx.lang.needs_unigram_cjk() && text.chars().any(is_cjk_han_or_kana))
+        Ok(ctx.lang_entry.needs_unigram_cjk() && text.chars().any(is_cjk_han_or_kana))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {

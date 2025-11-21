@@ -2,19 +2,10 @@
 mod integration_tests {
 
     use crate::{
-        ARA,
-        DEU,
-        FoldCase,
-        LowerCase,
-        NLD,
-        NormalizeWhitespace,
-        Normy,
-        RemoveDiacritics,
-        TUR, //JPN
+        ARA, DEU, FoldCase, JPN, LowerCase, NLD, NormalizeWhitespace, Normy, RemoveDiacritics, TUR,
         stage::{
-            normalize_punctuation::NormalizePunctuation,
-            remove_control_chars::RemoveControlChars,
-            replace_fullwidth::ReplaceFullwidth, // unigram_cjk::UnigramCJK,
+            normalize_punctuation::NormalizePunctuation, remove_control_chars::RemoveControlChars,
+            replace_fullwidth::ReplaceFullwidth, unigram_cjk::UnigramCJK,
         },
     };
 
@@ -143,20 +134,20 @@ mod integration_tests {
         assert_eq!(normalized, "Helloworld");
     }
 
-    // #[test]
-    // fn test_unigram_cjk_opt_in_for_japanese_works() {
-    //     use crate::Normy;
+    #[test]
+    fn test_unigram_cjk_opt_in_for_japanese_works() {
+        use crate::Normy;
 
-    //     let normy = Normy::builder()
-    //         .lang(JPN)
-    //         .modify_lang(|lang| lang.unigram_cjk = true)
-    //         .add_stage(UnigramCJK)
-    //         .build();
+        let normy = Normy::builder()
+            .lang(JPN)
+            .modify_lang(|lang| lang.unigram_cjk = true)
+            .add_stage(UnigramCJK)
+            .build();
 
-    //     let text = "最高の言語";
-    //     let result = normy.normalize(text).unwrap();
-    //     assert_eq!(&*result, "最 高 の 言 語");
-    // }
+        let text = "最高の言語";
+        let result = normy.normalize(text).unwrap();
+        assert_eq!(&*result, "最 高 の 言 語");
+    }
 
     // #[test]
     // fn test_remove_html() {
