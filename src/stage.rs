@@ -31,6 +31,8 @@ pub mod remove_diacritics;
 pub mod remove_format_controls;
 pub mod replace_fullwidth;
 pub mod segment_word;
+pub mod strip_html;
+pub mod strip_markdown;
 pub mod unigram_cjk;
 
 use crate::context::Context;
