@@ -1,11 +1,11 @@
 //! How a modern search engine (Meilisearch-style) normalizes documents and queries
 
-use normy::{ENG, FRA, TUR, builder, profile::preset::search};
+use normy::{ENG, FRA, NormyBuilder, TUR, profile::preset::search};
 
 fn main() {
-    let tr = builder().lang(TUR).build();
-    let fr = builder().lang(FRA).build();
-    let en = builder().lang(ENG).build();
+    let tr = NormyBuilder::default().lang(TUR).build();
+    let fr = NormyBuilder::default().lang(FRA).build();
+    let en = NormyBuilder::default().lang(ENG).build();
 
     let text = "café naïve résumé İstanbul";
 

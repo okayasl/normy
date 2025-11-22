@@ -8,9 +8,8 @@
 //! • Real-world performance: 10–15 GB/s on mixed data (scalar only!)
 
 use normy::{
-    DEU, ENG, FRA, FoldCase, NFKC, NLD, NormalizeWhitespace, RemoveDiacritics,
-    RemoveFormatControls, StripHtml, StripMarkdown, TUR, UnigramCJK, ZHO, builder,
-    profile::ProfileBuilder,
+    DEU, ENG, FRA, FoldCase, NFKC, NLD, NormalizeWhitespace, NormyBuilder, RemoveDiacritics,
+    RemoveFormatControls, StripHtml, StripMarkdown, TUR, UnigramCJK, ZHO, profile::ProfileBuilder,
 };
 use std::borrow::Cow;
 
@@ -48,7 +47,7 @@ fn main() {
     ];
 
     for (input, lang, expected) in cases {
-        let normalizer = builder().lang(*lang).build();
+        let normalizer = NormyBuilder::default().lang(*lang).build();
         let result: Cow<str> = normalizer
             .normalize_with_profile(&profile, input)
             .expect("norm failed");
@@ -63,7 +62,7 @@ fn main() {
         assert_eq!(result.as_ref(), *expected);
     }
 
-    let normalizer = builder().lang(ENG).build();
+    let normalizer = NormyBuilder::default().lang(ENG).build();
     // Zero-copy guarantee — proven
     let clean = "already perfectly normalized text";
     let out = normalizer.normalize(clean).unwrap();

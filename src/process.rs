@@ -13,6 +13,7 @@ use crate::{
     context::Context,
     stage::{Stage, StageError},
 };
+use smallvec::SmallVec;
 use std::{borrow::Cow, sync::Arc};
 
 pub trait Process {
@@ -21,6 +22,7 @@ pub trait Process {
 
 pub struct EmptyProcess;
 impl Process for EmptyProcess {
+    #[inline(always)]
     fn process<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(text)
     }
@@ -31,6 +33,7 @@ pub struct ChainedProcess<S: Stage, P: Process> {
 }
 
 impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
+    #[inline(always)]
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let current: Cow<'_, str> = self.previous.process(text, ctx)?;
         if !self.stage.needs_apply(&current, ctx)? {
@@ -49,13 +52,16 @@ impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
 }
 #[derive(Default)]
 pub struct DynProcess {
-    stages: Vec<Arc<dyn Stage + Send + Sync>>,
+    // Most real pipelines have ≤ 12 stages → zero heap until then
+    stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,
 }
 
 impl DynProcess {
+    #[inline(always)]
     pub fn new() -> Self {
         Self::default()
     }
+    #[inline(always)]
     pub fn push<T: Stage + Send + Sync + 'static>(mut self, stage: T) -> Self {
         self.stages.push(Arc::new(stage));
         self
@@ -63,29 +69,24 @@ impl DynProcess {
 }
 
 impl Process for DynProcess {
+    #[inline(always)]
     fn process<'a>(
         &self,
         mut text: Cow<'a, str>,
         ctx: &Context,
     ) -> Result<Cow<'a, str>, StageError> {
         for stage in &self.stages {
-            if !stage.needs_apply(&text, ctx)? {
-                continue;
+            let needs_apply = stage.needs_apply(&text, ctx)?;
+            if needs_apply {
+                text = match stage.clone().into_dyn_char_mapper(ctx) {
+                    Some(mapper) => {
+                        let mut out = String::with_capacity(text.len());
+                        out.extend(mapper.bind(&text, ctx));
+                        Cow::Owned(out)
+                    }
+                    None => stage.apply(text, ctx)?,
+                };
             }
-
-            // === ZERO-COPY DYNAMIC PATH ===
-            if let Some(mapper) = stage.clone().into_dyn_char_mapper(ctx) {
-                let iter = mapper.bind(&text, ctx);
-                let mut out = String::with_capacity(text.len());
-                for c in iter {
-                    out.push(c);
-                }
-                text = Cow::Owned(out);
-                continue;
-            }
-
-            // === FALLBACK PATH ===
-            text = stage.apply(text, ctx)?;
         }
         Ok(text)
     }

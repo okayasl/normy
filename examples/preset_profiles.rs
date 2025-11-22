@@ -1,5 +1,5 @@
 use normy::{
-    ENG, JPN, TUR, ZHO, builder,
+    ENG, JPN, NormyBuilder, TUR, ZHO,
     profile::preset::{
         ascii_fast, cjk_search, machine_translation, markdown_processing, maximum, minimum, search,
         social_media, web_scraping,
@@ -10,10 +10,10 @@ fn main() {
     println!("=== NORMY PROFILE EXAMPLES ===\n");
 
     // Setup normalizers for different languages
-    let tr = builder().lang(TUR).build();
-    let en = builder().lang(ENG).build();
-    let zh = builder().lang(ZHO).build();
-    let ja = builder().lang(JPN).build();
+    let tr = NormyBuilder::default().lang(TUR).build();
+    let en = NormyBuilder::default().lang(ENG).build();
+    let zh = NormyBuilder::default().lang(ZHO).build();
+    let ja = NormyBuilder::default().lang(JPN).build();
 
     // ========================================
     // 1. ASCII_FAST - Ultra-fast for clean text

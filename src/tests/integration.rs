@@ -2,10 +2,11 @@
 mod integration_tests {
 
     use crate::{
-        ARA, DEU, FoldCase, JPN, LowerCase, NLD, NormalizeWhitespace, Normy, RemoveDiacritics, TUR,
+        ARA, DEU, FoldCase, JPN, LowerCase, NLD, NormalizeWhitespace, Normy, TUR,
         stage::{
             normalize_punctuation::NormalizePunctuation, remove_control_chars::RemoveControlChars,
-            replace_fullwidth::ReplaceFullwidth, unigram_cjk::UnigramCJK,
+            remove_diacritics::RemoveDiacritics, replace_fullwidth::ReplaceFullwidth,
+            unigram_cjk::UnigramCJK,
         },
     };
 

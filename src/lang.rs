@@ -331,9 +331,9 @@ impl LangEntry {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
+    use crate::lang::{
         Lang,
-        lang::data::{JPN, KOR, LANG_TABLE, THA, ZHO},
+        data::{JPN, KOR, LANG_TABLE, THA, ZHO},
     };
 
     // Small helper for iterating character pairs
