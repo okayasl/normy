@@ -85,8 +85,9 @@ pub fn minimum() -> Profile<impl Process> {
 pub fn maximum() -> Profile<impl Process> {
     Profile::builder("maximum")
         .add_stage(NFKC)
-        .add_stage(RemoveDiacritics)
+        .add_stage(LowerCase)
         .add_stage(FoldCase)
+        .add_stage(RemoveDiacritics)
         .add_stage(StripHtml)
         .add_stage(StripMarkdown)
         .add_stage(RemoveFormatControls)
