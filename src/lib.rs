@@ -2,7 +2,9 @@
 // #![deny(missing_docs, clippy::all)]
 // #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
+pub mod context;
 pub mod lang;
+pub mod process;
 pub mod profile;
 pub mod stage;
 
@@ -26,9 +28,7 @@ pub use stage::strip_markdown::StripMarkdown;
 pub use stage::unigram_cjk::UnigramCJK;
 
 // Internal only
-mod context;
 mod normy;
-mod process;
 mod unicode;
 
 #[cfg(test)]

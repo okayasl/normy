@@ -119,17 +119,17 @@ pub fn is_ideographic(c: char) -> bool {
     )
 }
 
+/// Convenience function used in benchmarks and utilities.
+pub fn strip_format_controls(text: &str) -> String {
+    text.chars().filter(|&c| !is_format_control(c)).collect()
+}
+
 /// Returns `true` for control characters (General Category = Cc).
 /// Does **not** include format controls (Cf) — those are handled separately.
 #[inline(always)]
 pub fn is_control(c: char) -> bool {
     let cp = c as u32;
     cp <= 0x1F || (0x7F..=0x9F).contains(&cp)
-}
-
-/// Convenience function used in benchmarks and utilities.
-pub fn strip_format_controls(text: &str) -> String {
-    text.chars().filter(|&c| !is_format_control(c)).collect()
 }
 
 /// Fast early-out check used by `needs_apply` implementations.
@@ -245,12 +245,6 @@ pub fn is_cjk_han_or_kana(c: char) -> bool {
         || is_kangxi_radical(c)
 }
 
-/// Convenience: Japanese Kana (hiragana or katakana)
-#[inline(always)]
-pub fn is_japanese_kana(c: char) -> bool {
-    is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
-}
-
 /// Southeast Asian scripts requiring syllable-level no-break rules.
 /// Includes Thai, Lao, Myanmar (and extensions), Khmer, Tai Tham.
 #[inline(always)]
@@ -276,6 +270,11 @@ pub fn is_ascii_letter(c: char) -> bool {
     )
 }
 
+/// Convenience: Japanese Kana (hiragana or katakana)
+#[inline(always)]
+pub fn is_japanese_kana(c: char) -> bool {
+    is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
+}
 /// ASCII digits 0-9
 #[inline(always)]
 pub fn is_ascii_digit(c: char) -> bool {
@@ -305,6 +304,12 @@ pub fn is_ascii_digit_or_punct(c: char) -> bool {
     is_ascii_digit(c) || is_ascii_punct(c)
 }
 
+/// Small helper: is char considered "Script" for segmentation (Han/Kana/Hangul/SE-Asian)
+#[inline(always)]
+pub fn is_segmentation_script_char(c: char) -> bool {
+    is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
+}
+
 /// Determine whether two characters belong to the same script cluster (no-break).
 ///
 /// Clusters:
@@ -323,12 +328,6 @@ pub fn is_same_script_cluster(a: char, b: char) -> bool {
         _ if is_cjk_unified_ideograph(a) && is_cjk_unified_ideograph(b) => true,
         _ => false,
     }
-}
-
-/// Small helper: is char considered "Script" for segmentation (Han/Kana/Hangul/SE-Asian)
-#[inline(always)]
-pub fn is_segmentation_script_char(c: char) -> bool {
-    is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
