@@ -70,13 +70,10 @@ impl Stage for FoldCase {
         // ═══════════════════════════════════════════════════════════════
         // Standard path: Language-specific folding without peek-ahead
         // ═══════════════════════════════════════════════════════════════
-        let (foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
-        if foldable_count == 0 {
-            return Ok(text); // Zero-copy
-        }
-
+        let (_foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
         let capacity = text.len() + extra_bytes;
         let mut out = String::with_capacity(capacity);
+
         for c in text.chars() {
             if let Some(m) = fold_map.iter().find(|m| m.from == c) {
                 out.push_str(m.to);
@@ -230,7 +227,10 @@ impl<'a> FusedIterator for FoldCaseIter<'a> {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::data::{DEU, ENG, NLD, TUR};
+    use crate::{
+        FRA,
+        lang::data::{DEU, ENG, NLD, TUR},
+    };
 
     #[test]
     fn test_english_basic() {
@@ -242,6 +242,17 @@ mod tests {
 
         let result = stage.apply(Cow::Borrowed("HELLO"), &ctx).unwrap();
         assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn test_french_basic() {
+        let stage = FoldCase;
+        let ctx = Context::new(FRA);
+
+        assert!(stage.needs_apply("Café", &ctx).unwrap());
+
+        let result = stage.apply(Cow::Borrowed("Café"), &ctx).unwrap();
+        assert_eq!(result, "café");
     }
 
     #[test]

@@ -33,6 +33,7 @@ pub mod replace_fullwidth;
 pub mod segment_word;
 pub mod strip_html;
 pub mod strip_markdown;
+pub mod transliterate;
 pub mod unigram_cjk;
 
 use crate::context::Context;

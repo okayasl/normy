@@ -10,9 +10,9 @@
 //! • Same profile → different behavior per user
 //! • Zero-cost, zero-duplication, perfect fusion
 //! • This is how you scale to 200+ languages with 5 profiles
-
+//!
 use normy::{
-    ENG, FoldCase, NormalizeWhitespace, Normy, RemoveControlChars, RemoveDiacritics,
+    ENG, FRA, FoldCase, ITA, NormalizeWhitespace, Normy, RemoveControlChars, RemoveDiacritics,
     ReplaceFullwidth, StripHtml, StripMarkdown, TUR, UnigramCJK, ZHO,
     context::Context,
     profile::Profile,
@@ -116,36 +116,52 @@ fn maximum_profile() -> Profile<normy::process::DynProcess> {
 }
 
 fn main() {
-    let input = "İSTANBUL ❤️ café naïve Zürich 東京タワー <b>BOLD</b> https://x.com";
+    let input = "I ❤️ İSTANBUL!!! café naïve Zürich 東京タワー <b>BOLD</b> https://x.com";
 
     // One Normy per user/session — holds language context
     let turkish_user = Normy::plugin_builder().lang(TUR).build();
     let english_user = Normy::plugin_builder().lang(ENG).build();
     let chinese_user = Normy::plugin_builder().lang(ZHO).build();
+    let french_user = Normy::plugin_builder().lang(FRA).build();
+    let italian_user = Normy::plugin_builder().lang(ITA).build();
 
     println!("Input: {input}\n");
 
     // Same profile → different behavior based on runtime context
-    let search = search_profile();
+    let search = &search_profile();
+    let maximum = &maximum_profile();
+    let cjk_search = &cjk_search_profile();
+    let social_media = &social_media_profile();
+
     println!("PROFILE: search (language-agnostic)");
     println!(
         "  Turkish user → {}",
-        turkish_user.normalize_with_profile(&search, input).unwrap()
+        turkish_user.normalize_with_profile(search, input).unwrap()
     );
     println!(
         "  English user → {}",
-        english_user.normalize_with_profile(&search, input).unwrap()
+        english_user.normalize_with_profile(search, input).unwrap()
     );
     println!(
         "  Chinese user → {}",
-        chinese_user.normalize_with_profile(&search, input).unwrap()
+        chinese_user.normalize_with_profile(search, input).unwrap()
+    );
+
+    println!(
+        "  French user → {}",
+        french_user.normalize_with_profile(search, input).unwrap()
+    );
+
+    println!(
+        "  Italian user → {}",
+        italian_user.normalize_with_profile(search, input).unwrap()
     );
 
     println!("\nPROFILE: cjk_search");
     println!(
         "  Chinese user → {}",
         chinese_user
-            .normalize_with_profile(&cjk_search_profile(), input)
+            .normalize_with_profile(cjk_search, input)
             .unwrap()
     );
 
@@ -153,33 +169,31 @@ fn main() {
     println!(
         "  Any user     → {}",
         english_user
-            .normalize_with_profile(&social_media_profile(), input)
+            .normalize_with_profile(social_media, input)
             .unwrap()
     );
 
     println!("\nPROFILE: maximum (nuclear)");
     println!(
+        "  Turkish user → {}",
+        turkish_user.normalize_with_profile(maximum, input).unwrap()
+    );
+    println!(
         "  English user → {}",
-        english_user
-            .normalize_with_profile(&maximum_profile(), input)
-            .unwrap()
+        english_user.normalize_with_profile(maximum, input).unwrap()
+    );
+    println!(
+        "  Chinese user → {}",
+        chinese_user.normalize_with_profile(maximum, input).unwrap()
     );
 
-    // Real-world: Accept-Language routing
-    println!("\n=== REAL-WORLD USAGE ===");
-    let accept_language = "tr-TR,tr;q=0.9,en;q=0.7";
-    let normalizer = if accept_language.starts_with("tr") {
-        Normy::plugin_builder().lang(TUR).build()
-    } else if accept_language.contains("zh") {
-        Normy::plugin_builder().lang(ZHO).build()
-    } else {
-        Normy::plugin_builder().lang(ENG).build()
-    };
-
-    println!("Accept-Language: {accept_language}");
-    println!("Using profile: search");
     println!(
-        "Output: {}",
-        normalizer.normalize_with_profile(&search, input).unwrap()
+        "  French user → {}",
+        french_user.normalize_with_profile(maximum, input).unwrap()
+    );
+
+    println!(
+        "  Italian user → {}",
+        italian_user.normalize_with_profile(maximum, input).unwrap()
     );
 }

@@ -25,6 +25,7 @@ pub use stage::replace_fullwidth::ReplaceFullwidth;
 pub use stage::segment_word::SegmentWord;
 pub use stage::strip_html::StripHtml;
 pub use stage::strip_markdown::StripMarkdown;
+pub use stage::transliterate::Transliterate;
 pub use stage::unigram_cjk::UnigramCJK;
 
 // Internal only

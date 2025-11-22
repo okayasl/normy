@@ -11,6 +11,7 @@ macro_rules! define_languages {
         $code:ident, $code_str:literal, $name:literal,
         case: [ $($cfrom:expr => $cto:expr),* $(,)? ],
         fold: [ $($ffrom:expr => $fto:expr),* $(,)? ],
+        transliterate: [ $($tfrom:expr => $tto:expr),* $(,)? ],
         diac: [ $($d:expr),* $(,)? ],
         segment: $segment:expr,
         peek_ahead: $peek:expr,
@@ -37,6 +38,10 @@ macro_rules! define_languages {
                         $(FoldMap { from: $ffrom, to: $fto }),*
                     ];
 
+                    pub static TRANSLITERATE: &[FoldMap] = &[
+                        $(FoldMap { from: $tfrom, to: $tto }),*
+                    ];
+
                     pub static DIAC: &[char] = &[$($d),*];
 
                     pub const NEEDS_SEGMENTATION: bool = $segment;
@@ -44,6 +49,7 @@ macro_rules! define_languages {
 
                     // small slices (always valid even if empty)
                     pub static FOLD_CHAR_SLICE: &[char] = &[$($ffrom),*];
+                    pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[$($tfrom),*];
                     pub static DIACRITIC_SLICE: &[char] = &[$($d),*];
 
                     pub static PEEK_PAIRS: &[PeekPair] = &[
@@ -63,6 +69,7 @@ macro_rules! define_languages {
                     $code_str => LangEntry {
                         case_map: [<$code:lower _data>]::CASE,
                         fold_map: [<$code:lower _data>]::FOLD,
+                        transliterate_map: [<$code:lower _data>]::TRANSLITERATE,
                         diacritics: if [<$code:lower _data>]::DIAC.is_empty() {
                             None
                         } else {
@@ -71,6 +78,7 @@ macro_rules! define_languages {
                         needs_segmentation: [<$code:lower _data>]::NEEDS_SEGMENTATION,
                         requires_peek_ahead: [<$code:lower _data>]::REQUIRES_PEEK_AHEAD,
                         fold_char_slice: [<$code:lower _data>]::FOLD_CHAR_SLICE,
+                        transliterate_char_slice: [<$code:lower _data>]::TRANSLITERATE_CHAR_SLICE,
                         diacritic_slice: if [<$code:lower _data>]::DIACRITIC_SLICE.is_empty() {
                             None
                         } else {
@@ -98,8 +106,33 @@ macro_rules! define_languages {
 
 // ---------------------------------------------------------------------------
 //    Language definitions (single source of truth)
-//    Note: peek_pairs provided only where needed (Dutch IJ as example)
 // ---------------------------------------------------------------------------
+// ─────────────────────────────────────────────────────────────────────────────
+// LANGUAGE NORMALIZATION STRATEGY — Normy's Design Philosophy
+// ─────────────────────────────────────────────────────────────────────────────
+// Three distinct operations are provided:
+//
+// 1. case_map: Locale-specific case conversions TO lowercase
+//    - Turkish: İ→i, I→ı (linguistic correctness)
+//    - Applied automatically during normalization
+//
+// 2. fold: Character folding for search (one-to-many expansions)
+//    - German: ß→"ss", ẞ→"ss"
+//    - Dutch: Ĳ→"ij", via peek-ahead I+J→"ij"
+//    - Applied automatically for search normalization
+//
+// 3. transliterate: Optional ASCII transliteration (lossy, explicit opt-in)
+//    - French: Œ→"oe", Æ→"ae"
+//    - Spanish: Ñ→"n" (destroys linguistic meaning!)
+//    - Czech: Ď→"d", Ť→"t", Ň→"n"
+//    - Scandinavian: Å→"aa", Ä→"ae", Ö→"oe"
+//    - User must explicitly enable this (not applied by default)
+//
+// Why separate transliteration?
+// - Preserves linguistic correctness by default
+// - Ñ, Œ, Å, Ő are distinct letters, not variants
+// - Transliteration is for international/cross-language search only
+// - Follows CLDR/ICU philosophy: complete > predictable > lossy
 // ─────────────────────────────────────────────────────────────────────────────
 // CJK Segmentation Strategy — Normy's Official Position (2025-11-20)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -116,10 +149,12 @@ macro_rules! define_languages {
 // • This asymmetry is intentional and correct.
 //   Normalization ≠ tokenization. We give each language its expected default.
 // ─────────────────────────────────────────────────────────────────────────────
+
 define_languages! {
     TUR,  "TUR", "Turkish",
         case: [ 'I' => 'ı', 'İ' => 'i' ],
-        fold: [ 'I' => "ı", 'İ' => "i" ],
+        fold: [],
+        transliterate: [],
         diac: [],
         segment: false,
         peek_ahead: false,
@@ -130,6 +165,7 @@ define_languages! {
     DEU, "DEU", "German",
         case: [],
         fold: [ 'ß' => "ss", 'ẞ' => "ss" ],
+        transliterate: [],
         diac: [],
         segment: false,
         peek_ahead: false,
@@ -140,16 +176,18 @@ define_languages! {
     NLD, "NLD", "Dutch",
         case: [],
         fold: [ 'Ĳ' => "ij", 'ĳ' => "ij" ],
+        transliterate: [],
         diac: [],
         segment: false,
         peek_ahead: true,
-        peek_pairs: [ ('I', 'J' => "ij") ],
+        peek_pairs: [ ('I', 'J' => "ij"), ('I', 'j' => "ij") ],
         segment_rules: [],
         unigram_cjk: false,
 
     DAN, "DAN", "Danish",
         case: [],
-        fold: [ 'Å' => "aa", 'å' => "aa" ],
+        fold: [],
+        transliterate: [ 'Å' => "aa", 'å' => "aa" ],
         diac: [],
         segment: false,
         peek_ahead: false,
@@ -159,7 +197,8 @@ define_languages! {
 
     NOR, "NOR", "Norwegian",
         case: [],
-        fold: [ 'Æ' => "ae", 'æ' => "ae", 'Ø' => "oe", 'ø' => "oe" ],
+        fold: [],
+        transliterate: [ 'Æ' => "ae", 'æ' => "ae", 'Ø' => "oe", 'ø' => "oe" ],
         diac: [],
         segment: false,
         peek_ahead: false,
@@ -169,7 +208,8 @@ define_languages! {
 
     SWE, "SWE", "Swedish",
         case: [],
-        fold: [ 'Å' => "aa", 'å' => "aa", 'Ä' => "ae", 'ä' => "ae", 'Ö' => "oe", 'ö' => "oe" ],
+        fold: [],
+        transliterate: [ 'Å' => "aa", 'å' => "aa", 'Ä' => "ae", 'ä' => "ae", 'Ö' => "oe", 'ö' => "oe" ],
         diac: [],
         segment: false,
         peek_ahead: false,
@@ -178,120 +218,175 @@ define_languages! {
         unigram_cjk: false,
 
     ARA, "ARA", "Arabic",
-        case: [], fold: [], diac: [
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [
             '\u{064E}', '\u{064F}', '\u{0650}', '\u{0651}', '\u{0652}',
             '\u{0653}', '\u{0654}', '\u{0670}', '\u{064B}', '\u{064C}',
             '\u{064D}'
         ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     HEB, "HEB", "Hebrew",
-        case: [], fold: [], diac: [
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [
             '\u{05B0}', '\u{05B1}', '\u{05B2}', '\u{05B3}', '\u{05B4}',
             '\u{05B5}', '\u{05B6}', '\u{05B7}', '\u{05B8}', '\u{05B9}',
             '\u{05BB}', '\u{05BC}', '\u{05BD}', '\u{05BF}', '\u{05C1}',
             '\u{05C2}'
         ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     VIE, "VIE", "Vietnamese",
-        case: [], fold: [],
+        case: [],
+        fold: [],
+        transliterate: [],
         diac: [
             '\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}',
             '\u{0302}', '\u{0306}', '\u{031B}'
         ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     FRA, "FRA", "French",
-        case: [],
-        fold: [ 'Œ' => "oe", 'œ' => "oe", 'Æ' => "ae", 'æ' => "ae" ],
+        case: [ 'Œ' => 'œ', 'Æ' => 'æ' ],
+        fold: [],
+        transliterate: [ 'Œ' => "oe", 'œ' => "oe", 'Æ' => "ae", 'æ' => "ae" ],
         diac: [ '\u{0301}', '\u{0300}', '\u{0302}', '\u{0308}', '\u{0327}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     CES, "CES", "Czech",
-        case: [],
-        fold: [ 'Ď' => "d", 'ď' => "d", 'Ť' => "t", 'ť' => "t", 'Ň' => "n", 'ň' => "n" ],
+        case: [ 'Ď' => 'ď', 'Ť' => 'ť', 'Ň' => 'ň' ],
+        fold: [],
+        transliterate: [ 'Ď' => "d", 'ď' => "d", 'Ť' => "t", 'ť' => "t", 'Ň' => "n", 'ň' => "n" ],
         diac: [ '\u{030C}', '\u{0301}', '\u{030A}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     SLK, "SLK", "Slovak",
-        case: [],
-        fold: [ 'Ľ' => "l", 'ľ' => "l", 'Ĺ' => "l", 'ĺ' => "l", 'Ŕ' => "r", 'ŕ' => "r" ],
+        case: [ 'Ľ' => 'ľ', 'Ĺ' => 'ĺ', 'Ŕ' => 'ŕ' ],
+        fold: [],
+        transliterate: [ 'Ľ' => "l", 'ľ' => "l", 'Ĺ' => "l", 'ĺ' => "l", 'Ŕ' => "r", 'ŕ' => "r" ],
         diac: [ '\u{030C}', '\u{0301}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     POL, "POL", "Polish",
-        case: [],
-        fold: [ 'Ł' => "l", 'ł' => "l" ],
+        case: [ 'Ł' => 'ł' ],
+        fold: [],
+        transliterate: [ 'Ł' => "l", 'ł' => "l" ],
         diac: [ '\u{0328}', '\u{0301}', '\u{0307}', '\u{02DB}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     CAT, "CAT", "Catalan",
-        case: [], fold: [],
+        case: [],
+        fold: [],
+        transliterate: [],
         diac: [ '\u{0301}', '\u{0300}', '\u{0308}', '\u{0327}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     SPA, "SPA", "Spanish",
-        case: [], fold: [ 'Ñ' => "n", 'ñ' => "n" ],
-        diac: [ '\u{0301}', '\u{0303}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        case: [ 'Ñ' => 'ñ' ],
+        fold: [],
+        transliterate: [ 'Ñ' => "n", 'ñ' => "n" ],
+        diac: [ '\u{0301}' ],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     POR, "POR", "Portuguese",
-        case: [], fold: [],
+        case: [],
+        fold: [],
+        transliterate: [],
         diac: [ '\u{0301}', '\u{0300}', '\u{0303}', '\u{0302}', '\u{0327}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     ITA, "ITA", "Italian",
-        case: [], fold: [],
+        case: [],
+        fold: [],
+        transliterate: [],
         diac: [ '\u{0300}', '\u{0301}' ],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     JPN, "JPN", "Japanese",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: true,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
-
         ],
         unigram_cjk: false,
 
     ZHO, "ZHO", "Chinese (Simplified)",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: true,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::CJKIdeographUnigram,
             SegmentRule::ScriptToWestern,
-
         ],
         unigram_cjk: true,
 
     KOR, "KOR", "Korean",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: true,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -299,8 +394,13 @@ define_languages! {
         unigram_cjk: false,
 
     THA, "THA", "Thai",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: true,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -308,8 +408,13 @@ define_languages! {
         unigram_cjk: false,
 
     LAO, "LAO", "Lao",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: true,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -317,8 +422,13 @@ define_languages! {
         unigram_cjk: false,
 
     MYA, "MYA", "Myanmar",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: true,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -326,8 +436,13 @@ define_languages! {
         unigram_cjk: false,
 
     KHM, "KHM", "Khmer",
-        case: [], fold: [], diac: [],
-        segment: true, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: true,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -335,38 +450,68 @@ define_languages! {
         unigram_cjk: false,
 
     HUN, "HUN", "Hungarian",
-        case: [], fold: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
-        diac: [], segment: false, peek_ahead: false, peek_pairs: [],
+        case: [ 'Ő' => 'ő', 'Ű' => 'ű' ],
+        fold: [],
+        transliterate: [ 'Ő' => "oe", 'ő' => "oe", 'Ű' => "ue", 'ű' => "ue" ],
+        diac: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     HRV, "HRV", "Croatian",
-        case: [], fold: [ 'ǈ' => "lj", 'ǉ' => "lj", 'ǋ' => "nj", 'ǌ' => "nj" ],
-        diac: [], segment: false, peek_ahead: false, peek_pairs: [],
+        case: [ 'Ǉ' => 'ǉ', 'Ǌ' => 'ǌ' ],
+        fold: [],
+        transliterate: [ 'ǈ' => "lj", 'ǉ' => "lj", 'ǋ' => "nj", 'ǌ' => "nj" ],
+        diac: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     SRP, "SRP", "Serbian",
-        case: [], fold: [ 'Љ' => "lj", 'љ' => "lj", 'Њ' => "nj", 'њ' => "nj", 'Џ' => "dz", 'џ' => "dz" ],
-        diac: [], segment: false, peek_ahead: false, peek_pairs: [],
+        case: [ 'Љ' => 'љ', 'Њ' => 'њ', 'Џ' => 'џ' ],
+        fold: [],
+        transliterate: [ 'Љ' => "lj", 'љ' => "lj", 'Њ' => "nj", 'њ' => "nj", 'Џ' => "dz", 'џ' => "dz" ],
+        diac: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     UKR, "UKR", "Ukrainian",
-        case: [], fold: [ 'Ґ' => "g", 'ґ' => "g" ],
-        diac: [], segment: false, peek_ahead: false, peek_pairs: [],
+        case: [ 'Ґ' => 'ґ' ],
+        fold: [],
+        transliterate: [ 'Ґ' => "g", 'ґ' => "g" ],
+        diac: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     BUL, "BUL", "Bulgarian",
-        case: [], fold: [ 'Щ' => "sht", 'щ' => "sht" ],
-        diac: [], segment: false, peek_ahead: false, peek_pairs: [],
+        case: [ 'Щ' => 'щ' ],
+        fold: [],
+        transliterate: [ 'Щ' => "sht", 'щ' => "sht" ],
+        diac: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     ENG, "ENG", "English",
-        case: [], fold: [], diac: [],
-        segment: false, peek_ahead: false, peek_pairs: [],
+        case: [],
+        fold: [],
+        transliterate: [],
+        diac: [],
+        segment: false,
+        peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false
 }

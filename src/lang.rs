@@ -56,10 +56,12 @@ pub enum SegmentRule {
 pub struct LangEntry {
     pub case_map: &'static [CaseMap],
     pub fold_map: &'static [FoldMap],
+    pub transliterate_map: &'static [FoldMap], // NEW!
     pub diacritics: Option<DiacriticSet>,
     pub needs_segmentation: bool,
     pub requires_peek_ahead: bool,
     pub fold_char_slice: &'static [char],
+    pub transliterate_char_slice: &'static [char], // NEW!
     pub diacritic_slice: Option<&'static [char]>,
     pub peek_pairs: &'static [PeekPair],
     pub segment_rules: &'static [SegmentRule],
@@ -245,6 +247,45 @@ impl LangEntry {
     #[inline(always)]
     pub fn segment_rules(&self) -> &'static [SegmentRule] {
         self.segment_rules
+    }
+
+    #[inline(always)]
+    pub fn transliterate_map(&self) -> &'static [FoldMap] {
+        self.transliterate_map
+    }
+
+    #[inline(always)]
+    pub fn transliterate_char_slice(&self) -> &'static [char] {
+        self.transliterate_char_slice
+    }
+
+    #[inline(always)]
+    pub fn transliterate_is_one_to_one(&self) -> bool {
+        !self.transliterate_map.is_empty()
+            && self
+                .transliterate_map
+                .iter()
+                .all(|m| m.to.chars().count() == 1)
+    }
+
+    /// Count how many transliterations will occur + extra bytes needed
+    pub fn count_transliterate_bytes(&self, text: &str) -> (usize, usize) {
+        let map = self.transliterate_map();
+        if map.is_empty() {
+            return (0, 0);
+        }
+        let mut count = 0;
+        let mut extra = 0;
+        for c in text.chars() {
+            if let Some(m) = map.iter().find(|m| m.from == c) {
+                count += 1;
+                let len_diff = m.to.len() as isize - c.len_utf8() as isize;
+                if len_diff > 0 {
+                    extra += len_diff as usize;
+                }
+            }
+        }
+        (count, extra)
     }
 
     // -------------------------------------------------------------------------
