@@ -177,8 +177,10 @@ impl LangEntry {
             } else {
                 None
             }
+        } else if let Some(m) = entry.case_map().iter().find(|m| m.from == c) {
+            Some(m.to) // e.g., 'İ' → 'i' via case_map
         } else {
-            c.to_lowercase().next()
+            c.to_lowercase().next() // Default Unicode
         }
     }
 

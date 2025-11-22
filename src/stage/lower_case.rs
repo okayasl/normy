@@ -80,7 +80,6 @@ impl Stage for LowerCase {
 impl CharMapper for LowerCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        // ✅ Use helper method
         Some(ctx.lang_entry.lowercase_char(c))
     }
 

@@ -203,4 +203,11 @@ mod unit_tests {
             );
         }
     }
+
+    #[test]
+    fn test_turkish_dotted_i() {
+        let normy = Normy::builder().lang(TUR).add_stage(FoldCase).build();
+        assert_eq!(normy.normalize("İSTANBUL").unwrap(), "istanbul");
+        assert_eq!(normy.normalize("ISPARTA").unwrap(), "ısparta");
+    }
 }

@@ -613,12 +613,25 @@ mod tests {
     // }
 
     #[test]
-    fn test_byte_vs_char_length() {
-        let entry = get_from_table("TUR");
-        let mapping = entry.fold_map();
-        let i_mapping = mapping.iter().find(|m| m.from == 'I').unwrap();
-        assert_eq!(i_mapping.to.chars().count(), 1);
-        assert!(entry.has_one_to_one_folds());
+    fn test_fold_char_preserves_grapheme_count_in_one_to_one_cases() {
+        let cases = [
+            ("ABCabc", "ENG"), // ASCII: byte == char
+            ("éÉèÈ", "FRA"),   // Latin-1: 2-byte chars, but 1:1 mapping
+            ("İIıi", "TUR"),   // Turkish: should preserve grapheme count
+        ];
+
+        for (text, code) in cases {
+            let entry = get_from_table(code);
+            let folded: String = text.chars().filter_map(|c| entry.fold_char(c)).collect();
+
+            assert_eq!(
+                text.chars().count(),
+                folded.chars().count(),
+                "Grapheme count changed for {} in lang {}",
+                text,
+                code
+            );
+        }
     }
 
     #[test]
