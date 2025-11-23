@@ -52,8 +52,7 @@ impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
 }
 #[derive(Default)]
 pub struct DynProcess {
-    // Most real pipelines have ≤ 12 stages → zero heap until then
-    stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,
+    pub(crate) stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,
 }
 
 impl DynProcess {

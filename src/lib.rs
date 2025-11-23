@@ -1,4 +1,4 @@
-// #![forbid(unsafe_code)]
+#![forbid(unsafe_code)]
 // #![deny(missing_docs, clippy::all)]
 // #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
@@ -8,11 +8,9 @@ pub mod process;
 pub mod profile;
 pub mod stage;
 
-// Public API — zero duplication, zero indirection
 pub use lang::data::*;
-pub use normy::{DynNormyBuilder, Normy, NormyBuilder}; // All languages auto-exported
+pub use normy::{DynamicNormyBuilder, Normy, NormyBuilder}; // All languages auto-exported
 
-// All stages — flat, zero nesting
 pub use stage::fold_case::FoldCase;
 pub use stage::lower_case::LowerCase;
 pub use stage::normalization::{NFC, NFD, NFKC, NFKD};

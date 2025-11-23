@@ -1,7 +1,7 @@
 pub mod preset;
 use crate::{
     context::Context,
-    process::{ChainedProcess, DynProcess, EmptyProcess, Process},
+    process::{ChainedProcess, EmptyProcess, Process},
     stage::Stage,
 };
 use std::borrow::Cow;
@@ -60,35 +60,6 @@ impl<P: Process> ProfileBuilder<P> {
         Profile {
             name: self.name,
             pipeline: self.current,
-        }
-    }
-}
-impl Profile<DynProcess> {
-    pub fn plugin_builder(name: &'static str) -> DynProfileBuilder {
-        DynProfileBuilder {
-            name,
-            pipeline: DynProcess::new(),
-        }
-    }
-}
-
-pub struct DynProfileBuilder {
-    name: &'static str,
-    pipeline: DynProcess,
-}
-
-impl DynProfileBuilder {
-    pub fn add_stage<T: Stage + Send + Sync + 'static>(self, stage: T) -> Self {
-        Self {
-            pipeline: self.pipeline.push(stage),
-            ..self
-        }
-    }
-
-    pub fn build(self) -> Profile<DynProcess> {
-        Profile {
-            name: self.name,
-            pipeline: self.pipeline,
         }
     }
 }

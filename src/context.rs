@@ -2,7 +2,7 @@
 // This file is the single source of truth for language configuration in hot paths.
 // It is deliberately tiny, Copy, and contains only 'static data.
 
-use crate::lang::{Lang, LangEntry, data::LANG_TABLE};
+use crate::lang::{DEFAULT_LANG, Lang, LangEntry, data::LANG_TABLE};
 
 /// Runtime context passed to every normalization stage.
 ///
@@ -13,6 +13,13 @@ use crate::lang::{Lang, LangEntry, data::LANG_TABLE};
 pub struct Context {
     pub lang: Lang,
     pub lang_entry: LangEntry,
+}
+
+impl Default for Context {
+    #[inline(always)]
+    fn default() -> Self {
+        Self::new(DEFAULT_LANG)
+    }
 }
 
 impl Context {

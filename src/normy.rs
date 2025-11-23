@@ -5,7 +5,8 @@ use crate::{
     profile::{Profile, ProfileError},
     stage::{Stage, StageError},
 };
-use std::borrow::Cow;
+use smallvec::SmallVec;
+use std::{borrow::Cow, sync::Arc};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -111,22 +112,22 @@ impl Normy<EmptyProcess> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Dynamic plugin path – unchanged except ctx construction
 // ─────────────────────────────────────────────────────────────────────────────
-pub struct DynNormyBuilder {
+pub struct DynamicNormyBuilder {
     ctx: Context,
-    pipeline: DynProcess,
+    stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,
 }
 
-impl Default for DynNormyBuilder {
+impl Default for DynamicNormyBuilder {
     #[inline(always)]
     fn default() -> Self {
         Self {
             ctx: Context::new(DEFAULT_LANG),
-            pipeline: DynProcess::new(),
+            stages: SmallVec::new(),
         }
     }
 }
 
-impl DynNormyBuilder {
+impl DynamicNormyBuilder {
     #[inline(always)]
     pub fn lang(mut self, lang: Lang) -> Self {
         self.ctx = Context::new(lang);
@@ -139,26 +140,41 @@ impl DynNormyBuilder {
         self
     }
 
+    /// Add a concrete stage — zero extra allocation
     #[inline(always)]
     pub fn add_stage<T: Stage + Send + Sync + 'static>(self, stage: T) -> Self {
-        Self {
-            pipeline: self.pipeline.push(stage),
-            ..self
-        }
+        self.add_arc_stage(Arc::new(stage))
+    }
+
+    /// Add a stage that is already a trait object (plugins, config, etc.)
+    #[inline(always)]
+    pub fn add_arc_stage(mut self, stage: Arc<dyn Stage + Send + Sync>) -> Self {
+        self.stages.push(stage);
+        self
+    }
+
+    /// Convenience: accept Box<> too
+    #[inline(always)]
+    pub fn add_boxed_stage(mut self, stage: Box<dyn Stage + Send + Sync>) -> Self {
+        self.stages.push(stage.into()); // ← Box → Arc conversion
+        self
     }
 
     #[inline(always)]
     pub fn build(self) -> Normy<DynProcess> {
         Normy {
             ctx: self.ctx,
-            pipeline: self.pipeline,
+            pipeline: DynProcess {
+                stages: self.stages,
+            },
         }
     }
 }
 
 impl Normy<DynProcess> {
+    /// Clear, unambiguous name
     #[inline(always)]
-    pub fn plugin_builder() -> DynNormyBuilder {
-        DynNormyBuilder::default()
+    pub fn dynamic_builder() -> DynamicNormyBuilder {
+        DynamicNormyBuilder::default()
     }
 }

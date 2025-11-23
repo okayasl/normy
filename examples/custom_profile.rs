@@ -1,10 +1,83 @@
+use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
+
 use normy::{
-    ENG, JPN, NormyBuilder, TUR, ZHO,
-    profile::preset::{
-        ascii_fast, cjk_search, machine_translation, markdown_processing, maximum, minimum, search,
-        social_media, web_scraping,
+    ENG, FoldCase, JPN, LowerCase, NFKC, NormalizePunctuation, NormalizeWhitespace, NormyBuilder,
+    RemoveControlChars, RemoveDiacritics, RemoveFormatControls, ReplaceFullwidth, StripHtml,
+    StripMarkdown, TUR, ZHO,
+    context::Context,
+    process::Process,
+    profile::{
+        Profile,
+        preset::{
+            ascii_fast, cjk_search, machine_translation, markdown_processing, maximum, minimum,
+            search, social_media, web_scraping,
+        },
     },
+    stage::{CharMapper, Stage, StageError},
 };
+
+// ————————————————————————————————
+// 1. CUSTOM STAGE: StripEmoji (perfect, clippy-clean, fused)
+// ————————————————————————————————
+fn is_emoji(c: char) -> bool {
+    matches!(
+        c,
+        '\u{1F300}'..='\u{1F5FF}'
+            | '\u{1F600}'..='\u{1F64F}'
+            | '\u{1F680}'..='\u{1F6FF}'
+            | '\u{1F900}'..='\u{1F9FF}'
+            | '\u{2600}'..='\u{26FF}'
+            | '\u{2700}'..='\u{27BF}'
+            | '\u{FE0E}' | '\u{FE0F}'
+    )
+}
+
+#[derive(Default)]
+pub struct StripEmoji;
+
+impl Stage for StripEmoji {
+    fn name(&self) -> &'static str {
+        "strip_emoji"
+    }
+    fn needs_apply(&self, text: &str, _: &Context) -> Result<bool, StageError> {
+        Ok(text.chars().any(is_emoji))
+    }
+    fn apply<'a>(&self, text: Cow<'a, str>, _: &Context) -> Result<Cow<'a, str>, StageError> {
+        Ok(Cow::Owned(text.chars().filter(|&c| !is_emoji(c)).collect()))
+    }
+    fn as_char_mapper(&self, _: &Context) -> Option<&dyn CharMapper> {
+        Some(self)
+    }
+    fn into_dyn_char_mapper(self: Arc<Self>, _: &Context) -> Option<Arc<dyn CharMapper>> {
+        Some(self)
+    }
+}
+
+impl CharMapper for StripEmoji {
+    fn map(&self, c: char, _: &Context) -> Option<char> {
+        (!is_emoji(c)).then_some(c)
+    }
+    fn bind<'a>(&self, text: &'a str, _: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(text.chars().filter(|&c| !is_emoji(c)))
+    }
+}
+
+pub fn custom_social_media() -> Profile<impl Process> {
+    Profile::builder("social_media")
+        .add_stage(NFKC)
+        .add_stage(StripHtml)
+        .add_stage(StripMarkdown)
+        .add_stage(LowerCase)
+        .add_stage(FoldCase)
+        .add_stage(RemoveDiacritics)
+        .add_stage(ReplaceFullwidth)
+        .add_stage(RemoveControlChars)
+        .add_stage(RemoveFormatControls)
+        .add_stage(StripEmoji)
+        .add_stage(NormalizePunctuation)
+        .add_stage(NormalizeWhitespace::default())
+        .build()
+}
 
 fn main() {
     println!("=== NORMY PROFILE EXAMPLES ===\n");
@@ -178,17 +251,24 @@ Visit: https://example.com
 "#;
     println!("   Input: {}", text.trim());
     println!(
-        "   Output: {}\n",
+        "Preset(without StripEmoji stage)   Output: {}\n",
         en.normalize_with_profile(&social_media(), text).unwrap()
     );
     // → "omg!!! check this cafe ☕️ so excited about #ai2024 visit: https://example.com"
     // Note: Aggressive cleaning while preserving emoji
+    println!(
+        "Custom (with custom StripEmoji stage)   Output: {}\n",
+        en.normalize_with_profile(&custom_social_media(), text)
+            .unwrap()
+    );
+    // → "omg!!! check this cafe so excited about #ai2024 visit: https://example.com"
+    // Note: Aggressive cleaning and striping emoji
 
     // ========================================
     // COMPARISON: Same text, different profiles
     // ========================================
     println!("\n=== PROFILE COMPARISON ===");
-    let sample = "Café \"Naïve\" İstanbul 東京 <b>Bold</b>";
+    let sample = "Café \"Naïve\" İstanbul ❤️ 東京 <b>Bold</b>";
     println!("Input: {}\n", sample);
 
     println!(
@@ -220,6 +300,12 @@ Visit: https://example.com
     println!(
         "social_media:        {}",
         en.normalize_with_profile(&social_media(), sample).unwrap()
+    );
+
+    println!(
+        "custom_social_media: {}",
+        en.normalize_with_profile(&custom_social_media(), sample)
+            .unwrap()
     );
 
     println!(
@@ -273,4 +359,49 @@ Visit: https://example.com
         zh.normalize_with_profile(&minimum(), cjk_text).unwrap()
     );
     // → "東京都渋谷区" (no segmentation)
+
+    println!("\n=== FINAL COMPARISON TABLE ===");
+    let input = "Café naïve İstanbul ❤️ 東京 <b>Bold</b> １２３";
+    println!(
+        "{:20} → {}",
+        "ascii_fast",
+        en.normalize_with_profile(&ascii_fast(), input).unwrap()
+    );
+    println!(
+        "{:20} → {}",
+        "minimum",
+        en.normalize_with_profile(&minimum(), input).unwrap()
+    );
+    println!(
+        "{:20} → {}",
+        "machine_translation",
+        en.normalize_with_profile(&machine_translation(), input)
+            .unwrap()
+    );
+    println!(
+        "{:20} → {}",
+        "web_scraping",
+        en.normalize_with_profile(&web_scraping(), input).unwrap()
+    );
+    println!(
+        "{:20} → {}",
+        "search",
+        en.normalize_with_profile(&search(), input).unwrap()
+    );
+    println!(
+        "{:20} → {}",
+        "social_media",
+        en.normalize_with_profile(&social_media(), input).unwrap()
+    );
+    println!(
+        "{:20} → {}",
+        "custom_social_media",
+        en.normalize_with_profile(&custom_social_media(), input)
+            .unwrap()
+    );
+    println!(
+        "{:20} → {}",
+        "maximum",
+        en.normalize_with_profile(&maximum(), input).unwrap()
+    );
 }

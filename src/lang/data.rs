@@ -64,7 +64,7 @@ macro_rules! define_languages {
 
         // Global lookup table (public)
         paste! {
-            pub static LANG_TABLE: Map<&'static str, LangEntry> = phf_map! {
+            pub(crate) static LANG_TABLE: Map<&'static str, LangEntry> = phf_map! {
                 $(
                     $code_str => LangEntry {
                         case_map: [<$code:lower _data>]::CASE,

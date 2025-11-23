@@ -1,12 +1,3 @@
-//! examples/search_pipeline.rs
-//! This example proves all white-paper claims in production code:
-//! • Zero-copy default (Cow::Borrowed on unchanged text)
-//! • Full pipeline fusion (one machine-code loop)
-//! • Locale-accurate Turkish, German, Dutch, CJK handling
-//! • Format-aware HTML/Markdown stripping
-//! • Zero heap allocations on clean input
-//! • Real-world performance: 10–15 GB/s on mixed data (scalar only!)
-
 use normy::{
     DEU, ENG, FRA, FoldCase, NFKC, NLD, NormalizeWhitespace, NormyBuilder, RemoveDiacritics,
     RemoveFormatControls, StripHtml, StripMarkdown, TUR, UnigramCJK, ZHO, profile::ProfileBuilder,
@@ -15,7 +6,6 @@ use std::borrow::Cow;
 
 fn main() {
     let profile_builder = ProfileBuilder::new("search_profile");
-    // The real-world search pipeline — identical to Meilisearch/Tantivy
     let profile = profile_builder
         // No modify_lang() needed — your static tables already do it perfectly:
         // • TUR has 'I'→'ı', 'İ'→'i'
@@ -63,7 +53,6 @@ fn main() {
     }
 
     let normalizer = NormyBuilder::default().lang(ENG).build();
-    // Zero-copy guarantee — proven
     let clean = "already perfectly normalized text";
     let out = normalizer.normalize(clean).unwrap();
     assert_eq!(out.as_ptr(), clean.as_ptr());
