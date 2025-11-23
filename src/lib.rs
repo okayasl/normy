@@ -11,6 +11,7 @@ pub mod stage;
 pub use lang::data::*;
 pub use normy::{DynamicNormyBuilder, Normy, NormyBuilder}; // All languages auto-exported
 
+// All stages — flat, zero nesting
 pub use stage::fold_case::FoldCase;
 pub use stage::lower_case::LowerCase;
 pub use stage::normalization::{NFC, NFD, NFKC, NFKD};

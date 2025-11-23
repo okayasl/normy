@@ -21,12 +21,15 @@ macro_rules! define_languages {
     ),* $(,)?) => {
         $(
             #[doc = concat!(
-                "Language ", stringify!($code), " — ", $name, "\n\n",
-                "- **Case map:** ", _fmt_list!($($cfrom => $cto),*), "\n",
-                "- **Fold map:** ", _fmt_list!($($ffrom => $fto),*), "\n",
-                "- **Transliterate:** ", _fmt_list!($($tfrom => $tto),*), "\n",
-                "- **Peek ahead:** ", stringify!($peek), "\n",
-                "- **CJK unigram:** ", stringify!($unigram), "\n",
+                "Language **", stringify!($code), "** — ", $name, "\n\n",
+                "- **Case map:** [", stringify!($($cfrom => $cto),*), "]\n",
+                "- **Fold map:** [", stringify!($($ffrom => $fto),*), "]\n",
+                "- **Transliterate:** [", stringify!($($tfrom => $tto),*), "]\n",
+                "- **Diacritics:** [", stringify!($($d),*), "]\n",
+                "- **Peek pairs:** [", stringify!($( ($pa, $pb => $pto) ),*), "]\n",
+                "- **Segment rules:** [", stringify!($($sr),*), "]\n",
+                "- **Peek ahead:** `", stringify!($peek), "`\n",
+                "- **CJK unigram:** `", stringify!($unigram), "`\n",
             )]
             pub const $code: Lang = Lang { code: $code_str, name: $name };
         )*
@@ -103,13 +106,6 @@ macro_rules! define_languages {
                 _ => None,
             }
         }
-    };
-}
-
-macro_rules! _fmt_list {
-    () => { "[]" };
-    ($($from:literal => $to:literal),+) => {
-        stringify!($($from => $to),+)
     };
 }
 

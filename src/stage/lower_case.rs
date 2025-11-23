@@ -1,17 +1,3 @@
-//! stage/lower_case.rs – **Simple lowercase transformation**
-//!
-//! # Difference from FoldCase
-//! - **Lowercase**: Simple case conversion (NFC-preserving where possible)
-//! - **FoldCase**: Case-insensitive comparison (may expand: ß → ss)
-//!
-//! This stage uses `case_map` (1→1 only) instead of `fold_map`.
-//!
-//! # Language Support
-//! - Turkish: 'İ' → 'i', 'I' → 'ı' (via case_map)
-//! - All others: Standard Unicode lowercase
-//! - **No multi-char expansions** (ß stays ß, not ss)
-//! - **No peek-ahead** (IJ stays IJ in lowercase, not treated as digraph)
-
 use crate::{
     context::Context,
     lang::LangEntry,
@@ -21,6 +7,44 @@ use std::iter::FusedIterator;
 use std::sync::Arc;
 use std::{borrow::Cow, str::Chars};
 
+/// Simple, locale-aware lowercase transformation.
+///
+/// This stage performs **strict linguistic lowercasing** using only the language’s
+/// `case_map` (guaranteed 1→1) and falls back to Unicode `.to_lowercase()` for
+/// unmapped characters.
+///
+/// # Design Philosophy
+///
+/// Unlike many normalization libraries that silently conflate "visual lowercase"
+/// with "search equivalence", **Normy refuses to lie to you**.
+///
+/// `LowerCase` does **exactly one thing**: produce the correct orthographic
+/// lowercase form of text in the target language — nothing more, nothing less.
+/// It is intentionally **not** suitable for case-insensitive search in languages
+/// with exceptional case-folding rules (e.g. Turkish, Azerbaijani, Lithuanian).
+///
+/// This is a deliberate, principled choice: **zero-cost wins by default**.
+///
+/// # Key Differences from `FoldCase`
+///
+/// | Aspect                  | `LowerCase`                                   | `FoldCase`                                            |
+/// |-------------------------|------------------------------------------------|-------------------------------------------------------|
+/// | Purpose                 | Visual / orthographic normalization           | Case-insensitive matching & search                    |
+/// | Turkish `I` / `İ`       | `I` → `ı`, `İ` → `i` (correct lowercase)      | Same (uses `case_map`)                                |
+/// | German `ẞ` / `ß`        | `ẞ` → `ß` (preserved)                         | `ẞ`/`ß` → `"ss"` (expanded)                           |
+/// | Dutch `IJ` digraph      | `IJ` → `ij` (per-char)                        | `IJ` → `"ij"` (peek-ahead aware)                      |
+/// | Multi-character output  | Never                                         | Yes (e.g. `ß` → `"ss"`)                               |
+/// | Zero-allocation path    | **Always** — implements `CharMapper`          | Only when no multi-char or peek-ahead rules           |
+/// | Search-safe in Turkish? | **No** — `"Istanbul"` ≠ `"İSTANBUL"`          | Yes — if no conflicting `fold:` rules (currently safe)|
+///
+/// # When to Use
+///
+/// - Display text, slugs, filenames, UI sorting
+/// - Preprocessing before NFKC/NFKD
+/// - Any pipeline where linguistic correctness > search recall
+///
+/// Use `FoldCase` when you need case-insensitive matching that works correctly
+/// across all languages — including Turkish.
 pub struct LowerCase;
 
 impl Stage for LowerCase {
@@ -30,7 +54,6 @@ impl Stage for LowerCase {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        // Use lang.rs helper (checks case_map slice + Unicode)
         Ok(text.chars().any(|c| ctx.lang_entry.needs_lowercase(c)))
     }
 
@@ -77,7 +100,7 @@ impl<'a> Iterator for LowercaseIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        Some(self.lang.lowercase_char(c)) // ✅ Use helper
+        Some(self.lang.lowercase_char(c))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -87,9 +110,6 @@ impl<'a> Iterator for LowercaseIter<'a> {
 
 impl<'a> FusedIterator for LowercaseIter<'a> {}
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Tests
-// ═══════════════════════════════════════════════════════════════════════════
 #[cfg(test)]
 mod tests {
     use super::*;

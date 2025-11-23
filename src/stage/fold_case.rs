@@ -1,17 +1,3 @@
-//! Final, production-grade FoldCase stage
-//!
-//! This implementation represents the culmination of rigorous engineering
-//! and deep Unicode compliance. It is the only known implementation that:
-//! • Correctly folds Turkish dotted/undotted I (İ→i, I→ı)
-//! • Correctly expands German eszett (ß→ss)
-//! • Correctly handles Dutch IJ digraph
-//! • Achieves zero-copy when possible
-//! • Fuses into a single machine-code loop
-//! • Has a single source of truth (`fold_char`)
-//! • Is white-paper §5.1–§5.2 compliant
-//!
-//! This is the new standard.
-
 use crate::{
     context::Context,
     lang::LangEntry,
@@ -20,13 +6,28 @@ use crate::{
 use std::borrow::Cow;
 use std::sync::Arc;
 
-/// Public stage – zero-sized, stateless.
+/// Locale-sensitive case folding for search and comparison.
+///
+/// `FoldCase` performs full Unicode case folding with language-specific rules,
+/// including:
+/// - Multi-character expansions (e.g. German `ß` → `"ss"`, `ẞ` → `"ss"`)
+/// - Context-sensitive mappings via peek-ahead (e.g. Dutch `IJ` → `"ij"`)
+/// - Locale-aware lowercase mapping using `case_map` (e.g. Turkish `İ` → `i`, `I` → `ı`)
+/// - Fallback to Unicode full case folding (`.to_lowercase()` + compatibility mappings)
+///
+/// This stage is intended for information retrieval, search indexing, and any
+/// scenario requiring case-insensitive matching that respects linguistic norms.
+/// It is stronger than simple lowercasing but weaker than NFKC/NFKD.
+///
+/// When the target language has only one-to-one mappings and no peek-ahead rules,
+/// this stage implements `CharMapper`, enabling zero-allocation pipeline fusion.
 pub struct FoldCase;
 
 impl Stage for FoldCase {
     fn name(&self) -> &'static str {
         "case_fold"
     }
+
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
         if text.chars().any(|c| ctx.lang_entry.needs_case_fold(c)) {
@@ -51,10 +52,8 @@ impl Stage for FoldCase {
         if ctx.lang_entry.requires_peek_ahead() {
             return apply_with_peek_ahead(text, ctx);
         }
-
         let (_foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
         let mut out = String::with_capacity(text.len() + extra_bytes);
-
         for c in text.chars() {
             match ctx.lang_entry.fold_char(c) {
                 Some(ch) => out.push(ch),
@@ -70,7 +69,6 @@ impl Stage for FoldCase {
                 }
             }
         }
-
         Ok(Cow::Owned(out))
     }
 
@@ -94,9 +92,6 @@ impl Stage for FoldCase {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Peek-ahead implementation for Dutch IJ and similar sequences
-// ═══════════════════════════════════════════════════════════════════════════
 fn apply_with_peek_ahead<'a>(
     text: Cow<'a, str>,
     ctx: &Context,
@@ -111,7 +106,7 @@ fn apply_with_peek_ahead<'a>(
             } else {
                 0
             },
-    ); // Rough peek adjustment
+    );
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {
         if let Some(target) = ctx.lang_entry.peek_ahead_fold(c, chars.peek().copied()) {
@@ -128,21 +123,13 @@ fn apply_with_peek_ahead<'a>(
     Ok(Cow::Owned(out))
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CharMapper implementation (zero-copy path)
-// ═══════════════════════════════════════════════════════════════════════════
 impl CharMapper for FoldCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        // Use lang.rs helper for 1→1 folding
         ctx.lang_entry.fold_char(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        // This path is only taken when the compiler can prove:
-        // - Every mapping is 1→1
-        // - No peek-ahead needed
-        // - fold_char is total and fast
         Box::new(FoldCaseIter {
             chars: text.chars(),
             lang: ctx.lang_entry,
@@ -161,7 +148,6 @@ impl<'a> Iterator for FoldCaseIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        // Use lang.rs helper for 1→1 folding
         self.lang.fold_char(c)
     }
 
@@ -172,25 +158,17 @@ impl<'a> Iterator for FoldCaseIter<'a> {
 
 impl<'a> FusedIterator for FoldCaseIter<'a> {}
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Tests
-// ═══════════════════════════════════════════════════════════════════════════
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        FRA,
-        lang::data::{DEU, ENG, NLD, TUR},
-    };
+    use crate::lang::data::{DEU, ENG, FRA, NLD, TUR};
 
     #[test]
     fn test_english_basic() {
         let stage = FoldCase;
         let ctx = Context::new(ENG);
-
         assert!(stage.needs_apply("HELLO", &ctx).unwrap());
         assert!(!stage.needs_apply("hello", &ctx).unwrap());
-
         let result = stage.apply(Cow::Borrowed("HELLO"), &ctx).unwrap();
         assert_eq!(result, "hello");
     }
@@ -199,9 +177,7 @@ mod tests {
     fn test_french_basic() {
         let stage = FoldCase;
         let ctx = Context::new(FRA);
-
         assert!(stage.needs_apply("Café", &ctx).unwrap());
-
         let result = stage.apply(Cow::Borrowed("Café"), &ctx).unwrap();
         assert_eq!(result, "café");
     }
@@ -210,10 +186,8 @@ mod tests {
     fn test_german_eszett() {
         let stage = FoldCase;
         let ctx = Context::new(DEU);
-
         let result = stage.apply(Cow::Borrowed("Straße"), &ctx).unwrap();
         assert_eq!(result, "strasse");
-
         let result = stage.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap();
         assert_eq!(result, "gross");
     }
@@ -222,11 +196,9 @@ mod tests {
     fn test_dutch_ij_uppercase() {
         let stage = FoldCase;
         let ctx = Context::new(NLD);
-
         // Two-char sequence "IJ"
         let result = stage.apply(Cow::Borrowed("IJssel"), &ctx).unwrap();
         assert_eq!(result, "ijssel");
-
         let result = stage.apply(Cow::Borrowed("IJZER"), &ctx).unwrap();
         assert_eq!(result, "ijzer");
     }
@@ -235,7 +207,6 @@ mod tests {
     fn test_dutch_ij_lowercase() {
         let stage = FoldCase;
         let ctx = Context::new(NLD);
-
         // Already lowercase
         let result = stage.apply(Cow::Borrowed("ijssel"), &ctx).unwrap();
         assert_eq!(result, "ijssel");
@@ -245,7 +216,6 @@ mod tests {
     fn test_dutch_ij_ligature() {
         let stage = FoldCase;
         let ctx = Context::new(NLD);
-
         // Ligature 'Ĳ' (U+0132)
         let result = stage.apply(Cow::Borrowed("Ĳssel"), &ctx).unwrap();
         assert_eq!(result, "ijssel");
@@ -255,7 +225,6 @@ mod tests {
     fn test_dutch_ij_not_sequence() {
         let stage = FoldCase;
         let ctx = Context::new(NLD);
-
         // "IK" should not trigger peek-ahead
         let result = stage.apply(Cow::Borrowed("IK"), &ctx).unwrap();
         assert_eq!(result, "ik");
@@ -265,11 +234,9 @@ mod tests {
     fn test_dutch_ij_idempotency() {
         let stage = FoldCase;
         let ctx = Context::new(NLD);
-
         let text = "IJssel";
         let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
         let second = stage.apply(Cow::Borrowed(&first), &ctx).unwrap();
-
         assert_eq!(first, "ijssel");
         assert_eq!(first, second, "Should be idempotent");
     }
@@ -277,19 +244,15 @@ mod tests {
     #[test]
     fn test_char_mapper_eligibility() {
         let stage = FoldCase;
-
         // English: 1→1, no peek-ahead → CharMapper eligible
         let ctx = Context::new(ENG);
         assert!(stage.as_char_mapper(&ctx).is_some());
-
         // Turkish: 1→1, no peek-ahead → CharMapper eligible
         let ctx = Context::new(TUR);
         assert!(stage.as_char_mapper(&ctx).is_some());
-
         // German: multi-char (ß→ss) → NOT eligible
         let ctx = Context::new(DEU);
         assert!(stage.as_char_mapper(&ctx).is_none());
-
         // Dutch: peek-ahead required → NOT eligible
         let ctx = Context::new(NLD);
         assert!(stage.as_char_mapper(&ctx).is_none());
@@ -299,7 +262,6 @@ mod tests {
     fn test_dutch_ij_uppercase_needs_apply() {
         let stage = FoldCase;
         let ctx = Context::new(NLD); // Dutch requires peek-ahead for "IJ"
-
         // "IJ" is a two-character sequence that must be folded to "ij"
         let text = "IJssel";
         assert!(
@@ -342,13 +304,11 @@ mod tests {
     fn test_dutch_german_charmapper_contract() {
         let ctx_nld = Context::new(NLD);
         let ctx_deu = Context::new(DEU);
-
         // These MUST be None or CharMapper will break
         assert!(
             FoldCase.as_char_mapper(&ctx_nld).is_none(),
             "CRITICAL: Dutch needs peek-ahead, cannot use CharMapper"
         );
-
         assert!(
             FoldCase.as_char_mapper(&ctx_deu).is_none(),
             "CRITICAL: German has multi-char folds, cannot use CharMapper"

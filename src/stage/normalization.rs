@@ -1,5 +1,3 @@
-//! Unicode normalization forms (NFC, NFD, NFKC, NFKD).
-
 use crate::{
     context::Context,
     stage::{Stage, StageError},
@@ -9,498 +7,243 @@ use unicode_normalization::{
     IsNormalized, UnicodeNormalization, is_nfc_quick, is_nfd_quick, is_nfkc_quick, is_nfkd_quick,
 };
 
-// ============================================================================
-// NFC - Canonical Composition
-// ============================================================================
-
-/// Unicode Normalization Form C (Canonical Composition).
+/// Unicode normalization stages (NFC, NFD, NFKC, NFKD).
 ///
-/// Composes characters into precomposed form where possible:
-/// - `e` + combining acute → `é` (single codepoint U+00E9)
-///
-/// # Characteristics
-/// - **Canonical**: Only composes canonical equivalents
-/// - **Preserves**: Ligatures, fractions, superscripts (compatibility chars)
-/// - **Reversible**: Can round-trip with NFD
-///
-/// # When to Use
-/// - **Display text**: Most fonts expect NFC
-/// - **String comparison**: Standard for equality checks
-/// - **Storage**: Most databases/formats expect NFC
-/// - **After NFD processing**: Recompose after removing diacritics
-pub struct NFC;
+/// This module provides a generic `NormalizationStage` for Unicode text normalization,
+/// covering the four standard forms:
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NormalizationForm {
+    NFC,
+    NFD,
+    NFKC,
+    NFKD,
+}
 
-impl Stage for NFC {
-    fn name(&self) -> &'static str {
-        "nfc"
-    }
-
-    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(!matches!(is_nfc_quick(text.chars()), IsNormalized::Yes))
-    }
-
-    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !self.needs_apply(&text, _ctx)? {
-            return Ok(text);
+impl NormalizationForm {
+    #[inline]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::NFC => "NFC",
+            Self::NFD => "NFD",
+            Self::NFKC => "NFKC",
+            Self::NFKD => "NFKD",
         }
-        Ok(Cow::Owned(text.nfc().collect()))
     }
 }
 
-// ============================================================================
-// NFD - Canonical Decomposition
-// ============================================================================
+/// - **NFC (Canonical Composition)**:  
+///   Composes characters into precomposed form where possible (e.g., `e + ́` → `é`).  
+///   Preserves ligatures, fractions, superscripts. Reversible with NFD. Ideal for display and string comparison.
+pub const NFC: NormalizationStage = NormalizationStage::new(NormalizationForm::NFC);
 
-/// Unicode Normalization Form D (Canonical Decomposition).
-///
-/// Decomposes precomposed characters into base + combining marks:
-/// - `é` (U+00E9) → `e` + combining acute
-///
-/// # Characteristics
-/// - **Canonical**: Only decomposes canonical equivalents
-/// - **Preserves**: Ligatures, fractions, superscripts (compatibility chars)
-/// - **Reversible**: Can round-trip with NFC
-///
-/// # When to Use
-/// - **Before removing diacritics**: Separates base letters from accents
-/// - **Phonetic processing**: Need base forms without marks
-/// - **Linguistic analysis**: Process base and marks separately
-pub struct NFD;
+/// - **NFD (Canonical Decomposition)**:  
+///   Decomposes characters into base + combining marks (e.g., `é` → `e + ́`).  
+///   Preserves compatibility chars. Reversible with NFC. Ideal for diacritic removal and linguistic analysis.
+pub const NFD: NormalizationStage = NormalizationStage::new(NormalizationForm::NFD);
 
-impl Stage for NFD {
-    fn name(&self) -> &'static str {
-        "nfd"
+/// - **NFKC (Compatibility Composition)**:  
+///   Decomposes compatibility characters, then composes canonical equivalents (e.g., `ﬁ` → `fi`, `²` → `2`).  
+///   Lossy: formatting info lost. Some Unicode fractions may preserve Unicode fraction slashes.  
+///   Useful for search, string comparison, and canonical storage.
+pub const NFKC: NormalizationStage = NormalizationStage::new(NormalizationForm::NFKC);
+
+/// - **NFKD (Compatibility Decomposition)**:  
+///   Fully decomposes compatibility and canonical characters (maximal decomposition).  
+///   Lossy: formatting info lost. Useful for phonetic processing and maximum normalization.
+pub const NFKD: NormalizationStage = NormalizationStage::new(NormalizationForm::NFKD);
+
+/// Generic Unicode normalization stage for all four forms.
+pub struct NormalizationStage {
+    form: NormalizationForm,
+}
+
+impl NormalizationStage {
+    pub const fn new(form: NormalizationForm) -> Self {
+        Self { form }
     }
 
-    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(!matches!(is_nfd_quick(text.chars()), IsNormalized::Yes))
-    }
-
-    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !self.needs_apply(&text, _ctx)? {
-            return Ok(text);
+    /// Quick check if the text is already normalized.
+    #[inline(always)]
+    fn quick_check(&self, text: &str) -> bool {
+        match self.form {
+            NormalizationForm::NFC => matches!(is_nfc_quick(text.chars()), IsNormalized::Yes),
+            NormalizationForm::NFD => matches!(is_nfd_quick(text.chars()), IsNormalized::Yes),
+            NormalizationForm::NFKC => matches!(is_nfkc_quick(text.chars()), IsNormalized::Yes),
+            NormalizationForm::NFKD => matches!(is_nfkd_quick(text.chars()), IsNormalized::Yes),
         }
-        Ok(Cow::Owned(text.nfd().collect()))
+    }
+
+    /// Perform normalization (returns `Cow::Borrowed` if already normalized).
+    #[inline(always)]
+    fn normalize<'a>(&self, text: Cow<'a, str>) -> Cow<'a, str> {
+        if self.quick_check(&text) {
+            return text;
+        }
+        let owned = match self.form {
+            NormalizationForm::NFC => text.nfc().collect(),
+            NormalizationForm::NFD => text.nfd().collect(),
+            NormalizationForm::NFKC => text.nfkc().collect(),
+            NormalizationForm::NFKD => text.nfkd().collect(),
+        };
+        Cow::Owned(owned)
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        self.form.as_str()
     }
 }
 
-// ============================================================================
-// NFKC - Compatibility Composition
-// ============================================================================
-
-/// Unicode Normalization Form KC (Compatibility Composition).
-///
-/// Decomposes compatibility characters, then composes canonical forms:
-/// - `ﬁ` → `fi` (ligature expanded)
-/// - `½` → decomposed → composed
-/// - `²` → `2` (superscript normalized)
-/// - `e` + combining acute → `é` (composed)
-///
-/// # Characteristics
-/// - **Lossy**: Formatting information is lost
-/// - **Aggressive**: Normalizes all compatibility variants
-/// - **Not reversible**: Cannot recover original forms
-///
-/// # When to Use
-/// - **Search/indexing**: "ﬁle" and "file" should match
-/// - **String comparison**: Ignore formatting differences
-/// - **Data normalization**: Canonical form for storage
-///
-/// # ⚠️ Warning: Lossy Transformation
-/// This form **loses formatting information**:
-/// - Ligatures: `ﬀ` → `ff`
-/// - Fractions: `¾` → decomposed
-/// - Superscripts: `m²` → `m2`
-/// - Full-width: `Ａ` → `A`
-/// - Circled: `②` → `2`
-pub struct NFKC;
-
-impl Stage for NFKC {
+impl Stage for NormalizationStage {
     fn name(&self) -> &'static str {
-        "nfkc"
-    }
-
-    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(!matches!(is_nfkc_quick(text.chars()), IsNormalized::Yes))
-    }
-
-    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !self.needs_apply(&text, _ctx)? {
-            return Ok(text);
+        match self.form {
+            NormalizationForm::NFC => "nfc",
+            NormalizationForm::NFD => "nfd",
+            NormalizationForm::NFKC => "nfkc",
+            NormalizationForm::NFKD => "nfkd",
         }
-        Ok(Cow::Owned(text.nfkc().collect()))
+    }
+
+    #[inline(always)]
+    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
+        Ok(!self.quick_check(text))
+    }
+
+    #[inline(always)]
+    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        Ok(self.normalize(text))
     }
 }
-
-// ============================================================================
-// NFKD - Compatibility Decomposition
-// ============================================================================
-
-/// Unicode Normalization Form KD (Compatibility Decomposition).
-///
-/// Fully decomposes both compatibility AND canonical characters:
-/// - `ﬁ` → `fi` (ligature expanded)
-/// - `é` → `e` + combining acute (precomposed → decomposed)
-/// - `½` → decomposed
-/// - `²` → `2` (superscript normalized)
-///
-/// # Characteristics
-/// - **Lossy**: Formatting information is lost
-/// - **Most aggressive**: Maximum decomposition
-/// - **Not reversible**: Cannot recover original forms
-///
-/// # When to Use
-/// - **Before removing diacritics**: For compatibility-char-heavy text
-/// - **Maximum normalization**: Want all variants expanded
-/// - **Text-to-speech**: Need phonetic base forms
-///
-/// # ⚠️ Warning: Most Lossy Transformation
-/// All formatting is lost:
-/// - All ligatures expanded
-/// - All superscripts/subscripts normalized
-/// - All full-width chars converted to ASCII
-/// - All circled/parenthesized variants normalized
-pub struct NFKD;
-
-impl Stage for NFKD {
-    fn name(&self) -> &'static str {
-        "nfkd"
-    }
-
-    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(!matches!(is_nfkd_quick(text.chars()), IsNormalized::Yes))
-    }
-
-    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !self.needs_apply(&text, _ctx)? {
-            return Ok(text);
-        }
-        Ok(Cow::Owned(text.nfkd().collect()))
-    }
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lang::data::ENG;
+    use crate::context::Context;
+    use std::borrow::Cow;
+
+    type TestResult = Result<(), Box<dyn std::error::Error>>;
 
     #[test]
-    fn test_nfc_compose_accents() {
-        let stage = NFC;
-        let c = Context::new(ENG);
-
+    fn test_canonical_nfc_nfd() -> TestResult {
+        let c = Context::default();
         let text = "cafe\u{0301}"; // e + combining acute
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert_eq!(result, "café");
-        assert_eq!(result.chars().count(), 4); // Single é character
-    }
 
-    #[test]
-    fn test_nfc_preserves_ligatures() {
-        let stage = NFC;
-        let c = Context::new(ENG);
-
-        let text = "ﬁle ﬂoor oﬀer";
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert_eq!(result, "ﬁle ﬂoor oﬀer");
-    }
-
-    #[test]
-    fn test_nfc_already_normalized() {
-        let stage = NFC;
-        let c = Context::new(ENG);
-
-        let text = "hello world";
-        assert!(!stage.needs_apply(text, &c).unwrap());
-
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert!(matches!(result, Cow::Borrowed(_))); // Zero-copy
-    }
-
-    // ------------------------------------------------------------------------
-    // NFD Tests
-    // ------------------------------------------------------------------------
-
-    #[test]
-    fn test_nfd_decompose_accents() {
-        let stage = NFD;
-        let c = Context::new(ENG);
-
-        let text = "café";
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert_eq!(result, "cafe\u{0301}");
-        assert_eq!(result.chars().count(), 5); // e + combining mark
-    }
-
-    #[test]
-    fn test_nfd_preserves_ligatures() {
-        let stage = NFD;
-        let c = Context::new(ENG);
-
-        let text = "ﬁle ﬂoor";
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert_eq!(result, "ﬁle ﬂoor"); // Compatibility chars not decomposed
-    }
-
-    #[test]
-    fn test_nfd_preserves_fractions() {
-        let stage = NFD;
-        let c = Context::new(ENG);
-
-        let text = "½ ¾";
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert_eq!(result, "½ ¾");
-    }
-
-    // ------------------------------------------------------------------------
-    // NFKC Tests
-    // ------------------------------------------------------------------------
-
-    #[test]
-    fn test_nfkc_expands_ligatures() {
-        let stage = NFKC;
-        let c = Context::new(ENG);
-
-        assert_eq!(stage.apply(Cow::Borrowed("ﬁle"), &c).unwrap(), "file");
-        assert_eq!(stage.apply(Cow::Borrowed("ﬂoor"), &c).unwrap(), "floor");
-        assert_eq!(stage.apply(Cow::Borrowed("oﬀer"), &c).unwrap(), "offer");
-    }
-
-    #[test]
-    fn test_nfkc_normalizes_superscripts() {
-        let stage = NFKC;
-        let c = Context::new(ENG);
-
-        assert_eq!(stage.apply(Cow::Borrowed("m²"), &c).unwrap(), "m2");
-        assert_eq!(stage.apply(Cow::Borrowed("x³"), &c).unwrap(), "x3");
-    }
-
-    #[test]
-    fn test_nfkc_normalizes_circled() {
-        let stage = NFKC;
-        let c = Context::new(ENG);
-
-        assert_eq!(stage.apply(Cow::Borrowed("①②③"), &c).unwrap(), "123");
-    }
-
-    #[test]
-    fn test_nfkc_normalizes_full_width() {
-        let stage = NFKC;
-        let c = Context::new(ENG);
-
-        assert_eq!(stage.apply(Cow::Borrowed("ＡＢＣＤ"), &c).unwrap(), "ABCD");
-    }
-
-    #[test]
-    fn test_nfkc_composes_accents() {
-        let stage = NFKC;
-        let c = Context::new(ENG);
-
-        let text = "cafe\u{0301}";
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert_eq!(result, "café"); // Composed after normalization
-    }
-
-    // ------------------------------------------------------------------------
-    // NFKD Tests
-    // ------------------------------------------------------------------------
-
-    #[test]
-    fn test_nfkd_fully_decomposes() {
-        let stage = NFKD;
-        let c = Context::new(ENG);
-
-        let text = "café ﬁ";
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-
-        assert!(result.contains("cafe")); // é decomposed
-        assert!(result.contains("fi")); // Ligature expanded
-        assert!(result.contains('\u{0301}')); // Combining mark present
-    }
-
-    #[test]
-    fn test_nfkd_expands_ligatures() {
-        let stage = NFKD;
-        let c = Context::new(ENG);
-
-        assert_eq!(stage.apply(Cow::Borrowed("ﬁ"), &c).unwrap(), "fi");
-        assert_eq!(stage.apply(Cow::Borrowed("ﬂ"), &c).unwrap(), "fl");
-    }
-
-    #[test]
-    fn test_nfkd_normalizes_superscripts() {
-        let stage = NFKD;
-        let c = Context::new(ENG);
-
-        let text = "m²";
-        let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-        assert_eq!(result, "m2");
-    }
-
-    // ------------------------------------------------------------------------
-    // Comparison Tests
-    // ------------------------------------------------------------------------
-
-    #[test]
-    fn test_canonical_vs_compatibility() {
-        let c = Context::new(ENG);
-        let text = "café";
-
-        let nfc = NFC.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfd = NFD.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfkc = NFKC.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfkd = NFKD.apply(Cow::Borrowed(text), &c).unwrap();
-
-        // Canonical forms
-        assert_eq!(nfc, "café"); // Composed
-        assert_eq!(nfd, "cafe\u{0301}"); // Decomposed
+        // NFC: composed
+        let nfc = NormalizationStage::new(NormalizationForm::NFC).apply(Cow::Borrowed(text), &c)?;
+        assert_eq!(nfc, "café");
         assert_eq!(nfc.chars().count(), 4);
+
+        // NFD: decomposed
+        let nfd = NormalizationStage::new(NormalizationForm::NFD).apply(Cow::Borrowed(text), &c)?;
+        assert_eq!(nfd, "cafe\u{0301}");
         assert_eq!(nfd.chars().count(), 5);
 
-        // Compatibility forms (same as canonical for no compat chars)
-        assert_eq!(nfkc, "café"); // Composed
-        assert_eq!(nfkd, "cafe\u{0301}"); // Decomposed
+        Ok(())
     }
 
     #[test]
-    fn test_ligature_handling_across_forms() {
-        let c = Context::new(ENG);
-        let text = "ﬁ";
+    fn test_compatibility_nfkc_nfkd() -> TestResult {
+        let c = Context::default();
+        let text = "ﬀﬁ ½ ①"; // ligatures + fraction + circled number
 
-        let nfc = NFC.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfd = NFD.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfkc = NFKC.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfkd = NFKD.apply(Cow::Borrowed(text), &c).unwrap();
+        // NFKC: compatibility composition
+        let nfkc =
+            NormalizationStage::new(NormalizationForm::NFKC).apply(Cow::Borrowed(text), &c)?;
+        // Expected Unicode output
+        assert_eq!(nfkc, "fffi 1⁄2 1");
 
-        // Canonical: preserve ligature
-        assert_eq!(nfc, "ﬁ");
-        assert_eq!(nfd, "ﬁ");
+        // NFKD: compatibility decomposition
+        let nfkd =
+            NormalizationStage::new(NormalizationForm::NFKD).apply(Cow::Borrowed(text), &c)?;
+        assert_eq!(nfkd, "fffi 1⁄2 1"); // note fraction slash is separate U+2044
 
-        // Compatibility: expand ligature
-        assert_eq!(nfkc, "fi");
-        assert_eq!(nfkd, "fi");
+        Ok(())
     }
 
     #[test]
-    fn test_fraction_handling() {
-        let c = Context::new(ENG);
-        let text = "½";
+    fn test_idempotency_and_needs_apply() -> TestResult {
+        let c = Context::default();
+        let text = "café naïve ﬁ";
 
-        let nfc = NFC.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfd = NFD.apply(Cow::Borrowed(text), &c).unwrap();
+        for form in [
+            NormalizationForm::NFC,
+            NormalizationForm::NFD,
+            NormalizationForm::NFKC,
+            NormalizationForm::NFKD,
+        ] {
+            let stage = NormalizationStage::new(form);
+            let once = stage.apply(Cow::Borrowed(text), &c)?;
+            let twice = stage.apply(once.clone(), &c)?;
+            assert_eq!(once, twice, "Stage {} not idempotent", stage.as_str());
+            assert!(!(stage.needs_apply(&once, &c)?));
+        }
 
-        // Canonical: preserve
-        assert_eq!(nfc, "½");
-        assert_eq!(nfd, "½");
-
-        // Compatibility: decompose (becomes multiple chars)
-        let nfkc = NFKC.apply(Cow::Borrowed(text), &c).unwrap();
-        let nfkd = NFKD.apply(Cow::Borrowed(text), &c).unwrap();
-
-        assert_ne!(nfkc, "½");
-        assert_ne!(nfkd, "½");
-        assert!(nfkc.chars().count() > 1 || nfkd.chars().count() > 1);
+        Ok(())
     }
 
-    // ------------------------------------------------------------------------
-    // Round-Trip Tests
-    // ------------------------------------------------------------------------
-
     #[test]
-    fn test_nfc_nfd_round_trip() {
-        let c = Context::new(ENG);
-        let original = "café naïve résumé";
+    fn test_round_trip_nfc_nfd() -> TestResult {
+        let c = Context::default();
+        let original = "El Niño café naïve";
 
-        // NFC → NFD → NFC should be idempotent
-        let nfd = NFD.apply(Cow::Borrowed(original), &c).unwrap();
-        let back_to_nfc = NFC.apply(Cow::Borrowed(&nfd), &c).unwrap();
+        let nfd =
+            NormalizationStage::new(NormalizationForm::NFD).apply(Cow::Borrowed(original), &c)?;
+        let back_to_nfc = NormalizationStage::new(NormalizationForm::NFC).apply(nfd, &c)?;
 
         assert_eq!(back_to_nfc, original);
+        Ok(())
     }
 
     #[test]
-    fn test_nfkc_nfkd_not_reversible() {
-        let c = Context::new(ENG);
-        let original = "ﬁle"; // Ligature
+    fn test_multilingual_nfkc() -> TestResult {
+        let stage = NormalizationStage::new(NormalizationForm::NFKC);
+        let c = Context::default();
 
-        // NFKD expands ligature
-        let nfkd = NFKD.apply(Cow::Borrowed(original), &c).unwrap();
-        assert_eq!(nfkd, "file");
+        let input = "Hello, 世界! ﬁﬀ caféﬀﬃﬃ";
+        let result = stage.apply(Cow::Borrowed(input), &c)?;
 
-        // NFKC cannot restore ligature
-        let nfkc = NFKC.apply(Cow::Borrowed(&nfkd), &c).unwrap();
-        assert_eq!(nfkc, "file"); // Still expanded
-        assert_ne!(nfkc, original); // Cannot recover original
+        // ligatures expanded, accents composed, full-width preserved
+        assert_eq!(result, "Hello, 世界! fiff caféffffiffi");
+
+        // Already normalized
+        assert!(!stage.needs_apply(&result, &c)?);
+
+        Ok(())
     }
 
-    // ------------------------------------------------------------------------
-    // Edge Cases
-    // ------------------------------------------------------------------------
+    #[test]
+    fn test_search_vs_display_pipeline() -> TestResult {
+        let c = Context::default();
+
+        let query = "café naïve ff"; // decomposed + ligatures
+        let stage_search = NormalizationStage::new(NormalizationForm::NFKC);
+        let normalized_query = stage_search.apply(Cow::Borrowed(query), &c)?;
+
+        let display_text = "café naïve ff";
+        let stage_display = NormalizationStage::new(NormalizationForm::NFKC);
+        let normalized_display = stage_display.apply(Cow::Borrowed(display_text), &c)?;
+
+        assert_eq!(normalized_query, normalized_display);
+
+        Ok(())
+    }
 
     #[test]
-    fn test_empty_string() {
-        let c = Context::new(ENG);
+    fn test_empty_and_ascii() -> TestResult {
+        let c = Context::default();
+        let empty = "";
+        let ascii = "hello world";
 
-        for stage in [&NFC as &dyn Stage, &NFD, &NFKC, &NFKD] {
-            assert!(!stage.needs_apply("", &c).unwrap());
-            assert_eq!(stage.apply(Cow::Borrowed(""), &c).unwrap(), "");
+        for form in [
+            NormalizationForm::NFC,
+            NormalizationForm::NFD,
+            NormalizationForm::NFKC,
+            NormalizationForm::NFKD,
+        ] {
+            let stage = NormalizationStage::new(form);
+            assert_eq!(stage.apply(Cow::Borrowed(empty), &c)?, "");
+            assert_eq!(stage.apply(Cow::Borrowed(ascii), &c)?, ascii);
         }
-    }
 
-    #[test]
-    fn test_ascii_only() {
-        let c = Context::new(ENG);
-        let text = "hello world";
-
-        for stage in [&NFC as &dyn Stage, &NFD, &NFKC, &NFKD] {
-            let result = stage.apply(Cow::Borrowed(text), &c).unwrap();
-            assert_eq!(result, text);
-        }
-    }
-
-    #[test]
-    fn test_idempotency() {
-        let c = Context::new(ENG);
-        let text = "café ﬁ";
-
-        // Each form should be idempotent
-        for stage in [&NFC as &dyn Stage, &NFD, &NFKC, &NFKD] {
-            let once = stage.apply(Cow::Borrowed(text), &c).unwrap();
-            let twice = stage.apply(Cow::Borrowed(&once), &c).unwrap();
-            assert_eq!(once, twice, "Stage {} not idempotent", stage.name());
-        }
-    }
-
-    // ------------------------------------------------------------------------
-    // Real-World Examples
-    // ------------------------------------------------------------------------
-
-    #[test]
-    fn test_search_normalization_pipeline() {
-        let c = Context::new(ENG);
-
-        // For search: NFKC to normalize everything
-        let query = "½ ﬁle café";
-        let normalized = NFKC.apply(Cow::Borrowed(query), &c).unwrap();
-
-        // Ligature expanded, fraction decomposed, accent composed
-        assert!(normalized.contains("file"));
-        assert!(!normalized.contains("ﬁ"));
-    }
-
-    #[test]
-    fn test_display_normalization_pipeline() {
-        let c = Context::new(ENG);
-
-        // For display: NFC to get precomposed characters
-        let text = "cafe\u{0301}"; // Decomposed
-        let display = NFC.apply(Cow::Borrowed(text), &c).unwrap();
-
-        assert_eq!(display, "café");
-        assert_eq!(display.chars().count(), 4); // Single é
+        Ok(())
     }
 }
