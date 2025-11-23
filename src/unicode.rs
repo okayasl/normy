@@ -119,9 +119,16 @@ pub fn is_ideographic(c: char) -> bool {
     )
 }
 
-/// Convenience function used in benchmarks and utilities.
-pub fn strip_format_controls(text: &str) -> String {
-    text.chars().filter(|&c| !is_format_control(c)).collect()
+/// Convenience: Japanese Kana (hiragana or katakana)
+#[inline(always)]
+pub fn is_japanese_kana(c: char) -> bool {
+    is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
+}
+
+/// Small helper: is char considered "Script" for segmentation (Han/Kana/Hangul/SE-Asian)
+#[inline(always)]
+pub fn is_segmentation_script_char(c: char) -> bool {
+    is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
 }
 
 /// Returns `true` for control characters (General Category = Cc).
@@ -268,46 +275,6 @@ pub fn is_ascii_letter(c: char) -> bool {
         0x0041..=0x005A | // A-Z
         0x0061..=0x007A   // a-z
     )
-}
-
-/// Convenience: Japanese Kana (hiragana or katakana)
-#[inline(always)]
-pub fn is_japanese_kana(c: char) -> bool {
-    is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
-}
-/// ASCII digits 0-9
-#[inline(always)]
-pub fn is_ascii_digit(c: char) -> bool {
-    matches!(c as u32, 0x0030..=0x0039)
-}
-
-/// ASCII punctuation (common ranges). Treat as Western for segmentation purposes.
-#[inline(always)]
-pub fn is_ascii_punct(c: char) -> bool {
-    matches!(c as u32,
-        0x0021..=0x002F | // !"#$%&'()*+,-./
-        0x003A..=0x0040 | // : ; < = > ? @
-        0x005B..=0x0060 | // [ \ ] ^ _ `
-        0x007B..=0x007E   // { | } ~
-    )
-}
-
-/// Western classification: letters, digits, punctuation (ASCII-only fast path)
-#[inline(always)]
-pub fn is_western_ascii(c: char) -> bool {
-    is_ascii_letter(c) || is_ascii_digit(c) || is_ascii_punct(c)
-}
-
-/// Digits or punctuation regarded as Western for boundary rules.
-#[inline(always)]
-pub fn is_ascii_digit_or_punct(c: char) -> bool {
-    is_ascii_digit(c) || is_ascii_punct(c)
-}
-
-/// Small helper: is char considered "Script" for segmentation (Han/Kana/Hangul/SE-Asian)
-#[inline(always)]
-pub fn is_segmentation_script_char(c: char) -> bool {
-    is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
 }
 
 /// Determine whether two characters belong to the same script cluster (no-break).

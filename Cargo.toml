@@ -18,7 +18,7 @@ unicode-normalization = "0.1.25"
 proptest = "1.9.0"
 
 [features]
-default = ["simd", "ascii-fast"]
+default = ["simd"]
 simd = ["simdutf8"]
 ascii-fast = []
 

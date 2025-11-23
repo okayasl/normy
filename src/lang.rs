@@ -189,10 +189,6 @@ impl LangEntry {
         if let Some(m) = self.case_map().iter().find(|m| m.from == c) {
             m.to
         } else {
-            #[cfg(feature = "ascii-fast")]
-            if c.is_ascii() {
-                return c.to_ascii_lowercase();
-            }
             c.to_lowercase().next().unwrap_or(c)
         }
     }

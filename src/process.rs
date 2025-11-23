@@ -1,14 +1,10 @@
-//! Process abstraction – monomorphised pipelines fuse into a single loop.
-//!
-//! `ChainedProcess` is **monomorphised** – the compiler knows the concrete
+//! Process abstraction
+//! ChainedProcess is monomorphised – the compiler knows the concrete
 //! type of every stage.  When a stage returns `Some(&dyn CharMapper)` we
-//! call `bind` **once** and hand the resulting `FusedIterator` to the next
+//! call bind once and hand the resulting `FusedIterator` to the next
 //! stage.  The Rust compiler inlines every `Iterator::next` and fuses the
-//! whole chain into **one machine-code loop** – **zero heap, zero bounds
-//! checks** (thanks to `FusedIterator`).
-//!
-//! `DynProcess` stays exactly the same – it is the *dynamic* fallback.
-
+//! whole chain into one machine-code loop – zero heap, zero bounds checks.
+//! DynamicProcess  is the dynamic fallback.
 use crate::{
     context::Context,
     stage::{Stage, StageError},
@@ -51,11 +47,11 @@ impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
     }
 }
 #[derive(Default)]
-pub struct DynProcess {
+pub struct DynamicProcess {
     pub(crate) stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,
 }
 
-impl DynProcess {
+impl DynamicProcess {
     #[inline(always)]
     pub fn new() -> Self {
         Self::default()
@@ -67,7 +63,7 @@ impl DynProcess {
     }
 }
 
-impl Process for DynProcess {
+impl Process for DynamicProcess {
     #[inline(always)]
     fn process<'a>(
         &self,

@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::{DEFAULT_LANG, Lang},
-    process::{ChainedProcess, DynProcess, EmptyProcess, Process},
+    process::{ChainedProcess, DynamicProcess, EmptyProcess, Process},
     profile::{Profile, ProfileError},
     stage::{Stage, StageError},
 };
@@ -140,20 +140,17 @@ impl DynamicNormyBuilder {
         self
     }
 
-    /// Add a concrete stage — zero extra allocation
     #[inline(always)]
     pub fn add_stage<T: Stage + Send + Sync + 'static>(self, stage: T) -> Self {
         self.add_arc_stage(Arc::new(stage))
     }
 
-    /// Add a stage that is already a trait object (plugins, config, etc.)
     #[inline(always)]
     pub fn add_arc_stage(mut self, stage: Arc<dyn Stage + Send + Sync>) -> Self {
         self.stages.push(stage);
         self
     }
 
-    /// Convenience: accept Box<> too
     #[inline(always)]
     pub fn add_boxed_stage(mut self, stage: Box<dyn Stage + Send + Sync>) -> Self {
         self.stages.push(stage.into()); // ← Box → Arc conversion
@@ -161,18 +158,17 @@ impl DynamicNormyBuilder {
     }
 
     #[inline(always)]
-    pub fn build(self) -> Normy<DynProcess> {
+    pub fn build(self) -> Normy<DynamicProcess> {
         Normy {
             ctx: self.ctx,
-            pipeline: DynProcess {
+            pipeline: DynamicProcess {
                 stages: self.stages,
             },
         }
     }
 }
 
-impl Normy<DynProcess> {
-    /// Clear, unambiguous name
+impl Normy<DynamicProcess> {
     #[inline(always)]
     pub fn dynamic_builder() -> DynamicNormyBuilder {
         DynamicNormyBuilder::default()

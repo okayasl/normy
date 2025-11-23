@@ -35,44 +35,20 @@ impl Stage for LowerCase {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let case_map = ctx.lang_entry.case_map();
-        if case_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if text.is_ascii() {
-                // In-place, safe, zero-copy
-                let mut owned = text.into_owned();
-                owned.make_ascii_lowercase();
-                return Ok(Cow::Owned(owned));
-            }
-            // Optional: avoid flat_map if no change
-            if text.chars().all(|c| c.is_lowercase()) {
-                return Ok(text);
-            }
-            return Ok(Cow::Owned(
-                text.chars().flat_map(|c| c.to_lowercase()).collect(),
-            ));
-        }
-        // Always 1→1 or shrink → reserve input len
         let mut out = String::with_capacity(text.len());
         for c in text.chars() {
-            if let Some(map) = case_map.iter().find(|m| m.from == c) {
-                out.push(map.to); // Always 1→1 (CaseMap is char → char)
-            } else {
-                out.extend(c.to_lowercase());
-            }
+            out.push(ctx.lang_entry.lowercase_char(c));
         }
         Ok(Cow::Owned(out))
     }
 
     #[inline]
     fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        // Lowercase is always 1→1
         Some(self)
     }
 
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        // Always eligible for CharMapper (1→1 by definition)
         Some(self)
     }
 }
@@ -84,57 +60,12 @@ impl CharMapper for LowerCase {
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        let case_map = ctx.lang_entry.case_map();
-        if case_map.is_empty() {
-            #[cfg(feature = "ascii-fast")]
-            if text.is_ascii() {
-                return Box::new(AsciiLowercaseIter {
-                    bytes: text.as_bytes(),
-                });
-            }
-            // Use map instead of flat_map (since to_lowercase is 1→1 for most)
-            return Box::new(
-                text.chars()
-                    .map(move |c| c.to_lowercase().next().unwrap_or(c)),
-            );
-        }
         Box::new(LowercaseIter {
             chars: text.chars(),
             lang: ctx.lang_entry,
         })
     }
 }
-
-// ────── ASCII FAST PATH ITERATOR ──────
-#[cfg(feature = "ascii-fast")]
-struct AsciiLowercaseIter<'a> {
-    bytes: &'a [u8],
-}
-
-#[cfg(feature = "ascii-fast")]
-impl<'a> Iterator for AsciiLowercaseIter<'a> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        let (&b, rest) = self.bytes.split_first()?;
-        self.bytes = rest;
-        Some(if b.is_ascii_uppercase() {
-            b.to_ascii_lowercase() as char
-        } else {
-            b as char
-        })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.bytes.len(), Some(self.bytes.len()))
-    }
-}
-
-#[cfg(feature = "ascii-fast")]
-impl<'a> FusedIterator for AsciiLowercaseIter<'a> {}
-
-// ────── UNICODE / LANGUAGE-SPECIFIC LOWERCASE ITERATOR ──────
 struct LowercaseIter<'a> {
     chars: Chars<'a>,
     lang: LangEntry,
@@ -237,16 +168,6 @@ mod tests {
 
         assert_eq!(first, "istanbul");
         assert_eq!(first, second, "Should be idempotent");
-    }
-
-    #[test]
-    #[cfg(feature = "ascii-fast")]
-    fn test_ascii_fast_path() {
-        let stage = LowerCase;
-        let ctx = Context::new(ENG);
-
-        let result = stage.apply(Cow::Borrowed("HELLO123"), &ctx).unwrap();
-        assert_eq!(result, "hello123");
     }
 
     #[test]
