@@ -19,12 +19,17 @@ macro_rules! define_languages {
         segment_rules: [ $($sr:expr),* $(,)? ],
         unigram_cjk: $unigram:expr
     ),* $(,)?) => {
-        // Public `Lang` constants
         $(
+            #[doc = concat!(
+                "Language ", stringify!($code), " — ", $name, "\n\n",
+                "- **Case map:** ", _fmt_list!($($cfrom => $cto),*), "\n",
+                "- **Fold map:** ", _fmt_list!($($ffrom => $fto),*), "\n",
+                "- **Transliterate:** ", _fmt_list!($($tfrom => $tto),*), "\n",
+                "- **Peek ahead:** ", stringify!($peek), "\n",
+                "- **CJK unigram:** ", stringify!($unigram), "\n",
+            )]
             pub const $code: Lang = Lang { code: $code_str, name: $name };
         )*
-
-        //Per-language static data modules
         $(
             paste! {
                 mod [<$code:lower _data>] {
@@ -61,8 +66,6 @@ macro_rules! define_languages {
                 }
             }
         )*
-
-        // Global lookup table (public)
         paste! {
             pub(crate) static LANG_TABLE: Map<&'static str, LangEntry> = phf_map! {
                 $(
@@ -91,7 +94,6 @@ macro_rules! define_languages {
                 ),*
             };
         }
-        // Helper: `Lang::from_code`
         pub fn from_code(code: &str) -> Option<Lang> {
             let upper = code.to_uppercase();
             match upper.as_str() {
@@ -104,52 +106,58 @@ macro_rules! define_languages {
     };
 }
 
+macro_rules! _fmt_list {
+    () => { "[]" };
+    ($($from:literal => $to:literal),+) => {
+        stringify!($($from => $to),+)
+    };
+}
+
 // ---------------------------------------------------------------------------
-//    Language definitions (single source of truth)
+// Language definitions — single source of truth
 // ---------------------------------------------------------------------------
+//
 // ─────────────────────────────────────────────────────────────────────────────
-// LANGUAGE NORMALIZATION STRATEGY — Normy's Design Philosophy
+// NORMALIZATION STRATEGY — Normy Design Philosophy
 // ─────────────────────────────────────────────────────────────────────────────
-// Three distinct operations are provided:
 //
-// 1. case_map: Locale-specific case conversions TO lowercase
-//    - Turkish: İ→i, I→ı (linguistic correctness)
-//    - Applied automatically during normalization
+// Normy separates three independent operations:
 //
-// 2. fold: Character folding for search (one-to-many expansions)
-//    - German: ß→"ss", ẞ→"ss"
-//    - Dutch: Ĳ→"ij", via peek-ahead I+J→"ij"
-//    - Applied automatically for search normalization
+// 1. case_map — locale-aware lowercase conversion
+//    • Turkish: İ→i, I→ı (linguistically correct)
+//    • Always applied during normalization
 //
-// 3. transliterate: Optional ASCII transliteration (lossy, explicit opt-in)
-//    - French: Œ→"oe", Æ→"ae"
-//    - Spanish: Ñ→"n" (destroys linguistic meaning!)
-//    - Czech: Ď→"d", Ť→"t", Ň→"n"
-//    - Scandinavian: Å→"aa", Ä→"ae", Ö→"oe"
-//    - User must explicitly enable this (not applied by default)
+// 2. fold — search-oriented character folding (one-to-many allowed)
+//    • German: ß / ẞ → "ss"
+//    • Dutch: Ĳ→"ij" via peek-ahead I+J
+//    • Applied automatically for search normalization
+//
+// 3. transliterate — optional ASCII fallback (lossy, opt-in)
+//    • French: Œ→"oe", Æ→"ae"
+//    • Spanish: Ñ→"n" (loss of semantic distinction)
+//    • Scandinavian: Å→"aa", Ä→"ae", Ö→"oe"
+//    • Not applied by default to preserve linguistic integrity
 //
 // Why separate transliteration?
-// - Preserves linguistic correctness by default
-// - Ñ, Œ, Å, Ő are distinct letters, not variants
-// - Transliteration is for international/cross-language search only
-// - Follows CLDR/ICU philosophy: complete > predictable > lossy
-// ─────────────────────────────────────────────────────────────────────────────
-// CJK Segmentation Strategy — Normy's Official Position (2025-11-20)
-// ─────────────────────────────────────────────────────────────────────────────
-// • Chinese (ZHO): CJKIdeographUnigram = true
-//   → Matches Google, Baidu, Lucene, Elastic, Meilisearch, ICU tokenizer defaults
-//   → Maximizes recall for single-character queries ("北" finds "北京")
-//   → Expected by virtually all Chinese search/indexing systems
+// • Maintains correct per-language letter identity by default
+// • Lossy conversions are only used for international search
+// • Follows CLDR/ICU philosophy: correctness > predictability > ASCII fallbacks
 //
-// • Japanese (JPN): CJKIdeographUnigram = false
-//   → Matches linguistic reality and UAX#29 default (no break in ALetter runs)
-//   → Avoids pathological tokens like 最 高
-//   → Users wanting unigram Japanese for IR must opt-in via explicit stage
-//
-// • This asymmetry is intentional and correct.
-//   Normalization ≠ tokenization. We give each language its expected default.
 // ─────────────────────────────────────────────────────────────────────────────
-
+// CJK SEGMENTATION POLICY
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// • Chinese (ZHO): unigram = true
+//   Matches Google/Baidu/Lucene/ICU default tokenization
+//   Helps recall in single-character queries ("北" → "北京")
+//
+// • Japanese (JPN): unigram = false
+//   Matches UAX #29 (no breaks in ALetter sequences)
+//   Avoids unnatural tokens like “最 高”
+//
+// This asymmetry is intentional:
+// Normalization ≠ tokenization, and defaults match native expectations.
+// ---------------------------------------------------------------------------
 define_languages! {
     TUR,  "TUR", "Turkish",
         case: [ 'I' => 'ı', 'İ' => 'i' ],
