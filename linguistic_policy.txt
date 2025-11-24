@@ -1,247 +1,147 @@
-// ═════════════════════════════════════════════════════════════════════════════
-// NORMY LANGUAGE PROPERTY RULES — Linguistic Truth, Not Technical Convenience
-// ═════════════════════════════════════════════════════════════════════════════
-//
-// These rules define when each field should be populated, based on LINGUISTIC
-// properties of the language, NOT on technical ASCII limitations or search
-// convenience. Normy respects languages as they are.
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// RULE 1: case_map — LOCALE-SPECIFIC CASE CONVERSIONS
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Populate ONLY when:
-// ✓ Language has case rules that DIFFER from Unicode default
-// ✓ Linguistically incorrect to use standard to_lowercase()
-//
-// Examples:
-// ✓ Turkish: İ→i, I→ı (dotted/dotless distinction)
-// ✓ Catalan: L·L→l·l (geminate L with middot)
-// ✗ English: EMPTY (Unicode default is correct)
-// ✗ German: EMPTY (ß lowercase is handled by Unicode)
-//
-// Test: "Would a native speaker say Unicode's to_lowercase() is WRONG?"
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// RULE 2: fold — SEARCH-EQUIVALENCE FOLDING (LINGUISTIC)
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Populate ONLY when:
-// ✓ Language has OFFICIAL search equivalence rules (one-to-many)
-// ✓ Native speakers consider two forms "the same for search"
-// ✓ The expansion is LINGUISTIC, not ASCII fallback
-//
-// Examples:
-// ✓ German: ß→"ss", ẞ→"ss" (official spelling rule: Straße = Strasse in search)
-// ✓ Dutch: Ĳ→"ij" (ligature expands to digraph, IJ = ij for search)
-// ✗ French: Œ→"oe" (NOT fold! œ ≠ oe for search. Goes in transliterate)
-// ✗ Spanish: Ñ→"n" (NOT fold! ñ ≠ n. This is ASCII fallback)
-//
-// Test: "Do native speakers use this expansion IN THEIR LANGUAGE?"
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// RULE 3: transliterate — HISTORICAL/OFFICIAL ASCII CONVENTIONS
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Populate ONLY when:
-// ✓ Language has DOCUMENTED historical transliteration convention
-// ✓ Used in official contexts (postal, telegraph, international)
-// ✓ Convention exists BEFORE computers (not invented for ASCII)
-//
-// Examples:
-// ✓ German: Ä→"ae", Ö→"oe", Ü→"ue" (railway timetables, Goethe historical)
-// ✓ Scandinavian: Å→"aa", Ä→"ae", Ö→"oe" (postal addressing)
-// ✓ Icelandic: Þ→"th", Ð→"d" (international convention, Reykjavik → Reykjavik)
-// ✗ Turkish: Ğ→"g", Ş→"s" (NO tradition! Pure ASCII workaround)
-// ✗ Czech: Č→"c", Ř→"r" (NO tradition! Pure ASCII workaround)
-// ✗ Polish: Ł→"l", Ż→"z" (NO tradition! Pure ASCII workaround)
-//
-// Test: "Did this convention exist in the telegraph/postal era?"
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// RULE 4: strip — ACCENT-INSENSITIVE SEARCH (USER INTENT)
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Populate when:
-// ✓ Accents mark PRONUNCIATION, not distinct phonemes
-// ✓ Native speakers commonly omit accents in informal writing
-// ✓ Accent-insensitive search is culturally expected
-//
-// Examples:
-// ✓ French: é→e, è→e (informal writing drops accents, search expects it)
-// ✓ Spanish: á→a, ñ→n (SMS/informal commonly omits accents)
-// ✓ Vietnamese: ạ→a, ặ→a (tone marks, but "Viet Nam" vs "Việt Nam" both used)
-// ✓ Czech/Polish: ď→d, ł→l (international search use case)
-// ✗ German: Ä→A (WRONG! ä is distinct letter, not "a with accent")
-// ✗ Turkish: Ğ→G (WRONG! ğ is distinct phoneme, not "g with accent")
-//
-// Test: "Do informal writers (SMS/chat) commonly drop this mark?"
-//
-// Note: strip is OPT-IN. Users must explicitly request accent-insensitive search.
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// RULE 5: diac — TRUE SPACING/COMBINING MARKS
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Populate ONLY when:
-// ✓ Marks that NEVER form precomposed letters in NFC
-// ✓ Optional decorative marks (harakat, nikkud, tone marks)
-// ✓ Safe to strip without destroying base letters
-//
-// Examples:
-// ✓ Arabic: harakat (tashkīl) — optional vowel marks
-// ✓ Hebrew: nikkud — optional vowel points
-// ✓ Thai: tone marks above/below consonants
-// ✗ Czech: U+030C caron (WRONG! forms ď, ť, ň as precomposed)
-// ✗ French: U+0301 acute (WRONG! forms é as precomposed)
-//
-// Test: "Is this mark used standalone in real text (NFC)?"
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// RULE 6: segment — SCRIPT BOUNDARY RULES
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Set to true ONLY when:
-// ✓ Language uses script that REQUIRES segmentation (CJK, Thai, Lao, etc.)
-// ✓ No spaces between words in standard writing
-//
-// segment_rules:
-// - WesternToScript: Insert boundary when Latin→CJK/Thai/etc
-// - ScriptToWestern: Insert boundary when CJK/Thai→Latin
-// - CJKIdeographUnigram: Break every CJK character (Chinese only, NOT Japanese)
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// RULE 7: peek_ahead — CONTEXT-SENSITIVE FOLDING
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Set to true ONLY when:
-// ✓ Language has multi-character sequences that fold as a unit
-// ✓ Cannot be represented as single character fold
-//
-// Example:
-// ✓ Dutch: I+J → "ij" (two separate chars become digraph)
-// ✗ German: ß→"ss" (single char, use fold not peek_ahead)
-//
-// ═════════════════════════════════════════════════════════════════════════════
+# NORMY LANGUAGE PROPERTY RULES
 
+## The Normative Authority on Language Behavior in Normy
 
+> These rules are based exclusively on **linguistic, orthographic, and historical reality** — never on modern ASCII convenience, keyboard limitations, or search-engine compatibility inventions.
 
-// ---------------------------------------------------------------------------
-// Language definitions — single source of truth
-// ---------------------------------------------------------------------------
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// NORMALIZATION STRATEGY — Normy Design Philosophy
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// Normy separates FOUR independent operations:
-//
-// 1. case_map — locale-aware lowercase conversion
-//    • Turkish: İ→i, I→ı (linguistically correct)
-//    • Always applied during normalization
-//
-// 2. fold — search-oriented character folding (one-to-many allowed)
-//    • German: ß / ẞ → "ss"
-//    • Dutch: Ĳ→"ij" via peek-ahead I+J
-//    • Applied automatically for search normalization
-//
-// 3. transliterate — optional ASCII fallback (lossy, opt-in)
-//    • French: Œ→"oe", Æ→"ae"
-//    • Spanish: Ñ→"n" (loss of semantic distinction)
-//    • Scandinavian: Å→"aa", Ä→"ae", Ö→"oe"
-//    • Not applied by default to preserve linguistic integrity
-//
-// 4. strip — precomposed letter → base letter mapping (NEW!)
-//    • Czech: ď→d, ť→t, ň→n (removes caron WITHOUT decomposition)
-//    • Polish: ł→l, ż→z, ą→a (removes stroke/dot/ogonek directly)
-//    • Spanish: ñ→n (when used for diacritic removal, not transliteration)
-//    • CRITICAL: This is the ONLY correct way to remove diacritics
-//    • Never uses NFD/NFC - direct character mapping only
-//
-// Why separate strip from transliterate?
-// • strip: linguistic operation (ď is "d with caron", strip → "d")
-// • transliterate: internationalization (Ñ is its own letter, but → "n" for ASCII)
-// • Some letters appear in both (ñ→n) but serve different semantic purposes
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// DIACRITICS FIELD — CRITICAL DEFINITION
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// The `diac:` field contains ONLY:
-// • True spacing/combining diacritics that NEVER form precomposed letters
-// • Marks that can be safely stripped without destroying base letters
-// • Examples: Arabic harakat, Hebrew nikkud, Vietnamese tone marks (when not precomposed)
-//
-// The `diac:` field MUST NOT contain:
-// • U+030C (caron) - forms ď, ť, ň, č, š, ž, ř, ľ, etc.
-// • U+0307 (dot above) - forms ż, ė, ċ, etc.
-// • U+0328 (ogonek) - forms ą, ę, į, ų, etc.
-// • U+0301 (acute) - forms á, é, í, ó, ú, ý, ć, ń, ś, ź, etc.
-// • Any combining mark that is part of standard orthography as precomposed
-//
-// Why this is mandatory:
-// • NFD decomposes "ď" → "d" + U+030C
-// • If U+030C is in diac: list, stripping it destroys the letter
-// • This violates typographic fidelity and locale-accuracy
-// • Real-world text uses precomposed forms (NFC), not decomposed
-//
-// Correct approach:
-// • Use `strip:` mapping for precomposed letters (ď→d, direct lookup)
-// • Use `diac:` only for marks that are purely decorative in that language
-// • Never rely on NFD/NFC for diacritic removal
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// STRIP FIELD PHILOSOPHY
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// The `strip:` field maps precomposed letters → base letters, but should ONLY
-// be populated when this is linguistically appropriate for search/matching.
-//
-// WHEN TO POPULATE strip::
-// ✓ Romance languages (French, Spanish, Portuguese, Italian, Romanian, Catalan)
-//   - Accents mark pronunciation but same underlying letter
-//   - Common to search "resume" to find "résumé"
-//   - Informal writing often omits accents (especially on capital letters)
-//
-// ✓ Slavic languages with diacritics on Latin script (Czech, Slovak, Polish, Croatian, etc.)
-//   - Common international use case: strip for ASCII-only search
-//   - But preserve by default (only strip when user explicitly requests)
-//
-// ✓ Vietnamese
-//   - Tone marks are essential for meaning, but "Viet Nam" vs "Việt Nam" both used
-//   - Strip enables international search
-//
-// ✓ Baltic languages (Lithuanian, Latvian)
-//   - Similar to Slavic - international ASCII fallback use case
-//
-// ✗ WHEN NOT TO POPULATE strip::
-// ✗ Germanic languages (German Ä/Ö/Ü, Dutch Ĳ, Scandinavian Å/Ä/Ö/Æ/Ø)
-//   - These are DISTINCT LETTERS in the alphabet, not "decorations"
-//   - Å comes after Z in Swedish/Norwegian/Danish alphabets
-//   - Ä/Ö/Ü are separate letters in German (not variants of A/O/U)
-//   - Use transliterate: instead (Ä→"ae", not strip Ä→A)
-//
-// ✗ Turkish (Ğ/Ş/Ç), Icelandic (Þ/Ð)
-//   - Completely distinct phonemes, not base+diacritic
-//   - Use transliterate: for ASCII fallback
-//
-// ✗ Greek, Cyrillic, Arabic, Hebrew, CJK, Indic
-//   - Different script families - stripping doesn't make sense
-//
-// The golden rule: If the language's alphabet includes it as a distinct letter
-// (not a variant), it goes in transliterate:, NOT strip:
-//
-// ---------------------------------------------------------------------------
-// ─────────────────────────────────────────────────────────────────────────────
-//
-// • Chinese (ZHO): unigram = true
-//   Matches Google/Baidu/Lucene/ICU default tokenization
-//   Helps recall in single-character queries ("北" → "北京")
-//
-// • Japanese (JPN): unigram = false
-//   Matches UAX #29 (no breaks in ALetter sequences)
-//   Avoids unnatural tokens like "最 高"
-//
-// This asymmetry is intentional:
-// Normalization ≠ tokenization, and defaults match native expectations.
-// ---------------------------------------------------------------------------
+---
+
+## RULE 1: `case_map` — Locale-Specific Case Conversions
+
+Populate **only** when Unicode default case mapping is **linguistically incorrect**.
+
+| Language             | Include? | Examples                     | Reason |
+|----------------------|----------|------------------------------|--------|
+| Turkish, Azerbaijani | Yes      | İ→i, I→ı                    | Dotted/dotless I distinction |
+| Lithuanian           | Yes      | Preserves ogonek/accent contextually | Titlecase/lowercase differ |
+| Catalan              | Yes      | l·l → L·L (preserves middle dot) | Orthographic rule |
+| All others           | No       | —                            | Unicode default is correct |
+
+> **Titlecasing**: Normy does **not** perform titlecasing. This is intentionally left to Unicode default or user code.
+
+---
+
+## RULE 2: `fold` — Linguistic Search-Equivalence Folding
+
+Populate **only** for **official**, **native**, one-to-many equivalences used **within the language itself**.
+
+| Language | Mapping                          | Include? | Justification |
+|----------|----------------------------------|----------|-----------------|
+| German   | ß→"ss", ẞ→"ss"                  | Yes      | Official spelling reform — applies to both lowercase and uppercase |
+| Dutch    | Ĳ→"ij", ĳ→"ij" (U+0132/U+0133 only) | Yes   | Ligature expands in native Dutch search |
+| All others | —                              | No       | Not linguistically native |
+
+> **Critical**:
+>
+> - `fold` applies **only** to precomposed ligature characters U+0132 (Ĳ) and U+0133 (ĳ).
+> - The sequence `I + J` (or `i + j`) is **never** treated as a ligature in `fold`.
+> - Normy never infers linguistic ligatures from separate codepoints.
+> - Dutch titlecasing of IJ (e.g., "IJsselmeer") is **not** performed — left to user logic.
+
+---
+
+## RULE 3: `transliterate` — Historical Pre-Computer ASCII Conventions (Lossy)
+
+Populate **only** when documented in **official pre-1980** contexts.
+
+| Language       | Mapping                          | Include? | Historical Evidence |
+|----------------|----------------------------------|------------|---------------------|
+| German         | Ä→"ae", Ö→"oe", Ü→"ue", ß→"ss"   | Yes        | Reichsbahn, passports |
+| Scandinavian   | Å→"aa", Ä→"ae", Ö→"oe"           | Yes        | Postal standards |
+| Icelandic      | Þ→"th", Ð→"d"                    | Yes        | International naming |
+| All others     | —                                | No         | No historical tradition |
+
+> Strip removes marks; transliterate replaces letters. They never conflict — **transliterate always wins**.
+
+---
+
+## RULE 4: `strip` — Accent-Insensitive Search (Opt-In, Lossy, User Convenience Only)
+
+Populate **only** when marks are pronunciation-based and commonly omitted.
+
+| Language Group                            | Strip?         | Notes |
+|--------------------------------------------|------------------|-------|
+| French, Spanish, Portuguese, Italian, Catalan | Yes            | Accents routinely dropped |
+| Vietnamese                                | Yes (practical) | Removes **both tone marks** and **vowel quality marks** (ơ→o, ư→u, â→a, ă→a, ô→o, ê→e) — **always destructive and meaning-destroying**. Normy does **not** attempt to preserve vowel class or shortness. Provided only because Vietnamese search engines universally support toneless search. |
+| Czech, Slovak, Polish, Croatian, **Slovene** | Yes (practical) | Acute/caron are phonemic — **stripping destroys meaning** (e.g., c↔č, l↔ł, đ↔d). Included **only** due to overwhelming international search-engine practice, **not** linguistic validity. Slovene stripping is common but not universally expected. |
+| German, Dutch, Nordic, Icelandic          | No             | Ä, Ĳ, Å, Æ, Ø are **distinct letters** |
+| Turkish, Hungarian, Romanian              | No             | ğ, ş, ț are distinct phonemes |
+
+> **Spanish ñ/Ñ must never be stripped** — it is a separate letter.  
+> By default, `strip` is **disabled**. Normy is **non-destructive** out of the box.
+
+---
+
+## RULE 5: `diac` — Standalone Combining Marks Only
+
+Populate **only** with marks that **never** form precomposed characters in NFC.
+
+| Script         | Example Marks                       | Include? | Reason |
+|----------------|---------------------------------------|----------|----------|
+| Arabic         | fatḥa (U+064E), kasra (U+0650), ḍamma (U+064F) | Yes      | Optional vowel points — standalone only |
+| Hebrew         | qamats (U+05B8), patach (U+05B7)    | Yes      | Optional pointing |
+| Thai, Lao      | mai ek (U+0E48), sara a (U+0E32)    | Yes      | Standalone tone/vowel signs |
+| Devanagari     | candrabindu (U+0901), nuktā (U+093C) | Yes only if never precomposed | Must verify per-script |
+| Latin/Cyrillic | U+0300–U+036F combining diacritics  | No       | Form é, č, ą in NFC |
+
+> `diac` removal **must never** delete any mark that would normally be precomposed in NFC.
+
+---
+
+## RULE 6: `segment` — Script Boundary Segmentation
+
+| Language       | needs_segmentation | unigram_cjk | Heuristic Details |
+|----------------|--------------------|-------------|-----------------|
+| Chinese (ZH)   | true               | true        | Full unigram breaking |
+| Japanese (JA)  | true               | false       | Boundaries only at script transitions |
+| Korean (KO)    | true               | false       | Same as Japanese |
+| Thai, Lao, Khmer | true             | false       | Lightweight zero-width space insertion at script boundaries and legal syllable breaks — **no dictionary**, **no illegal cluster rejection** |
+| Myanmar        | true               | false       | Lightweight syllable boundary heuristic — **no dictionary** |
+
+---
+
+## RULE 7: `peek_ahead` — Multi-Character Contextual Folding
+
+| Language | Rule             | Include? | Reason |
+|----------|------------------|----------|--------|
+| Dutch    | I + J → "ij"     | Yes      | Only known multi-character fold in Normy |
+| All others | —              | No       | Dictionary-based logic not supported |
+
+> Normy treats all other digraph letters (Czech “ch”, Slovak “dz/dž”, Croatian “lj/nj”, etc.) as **ordinary sequences** — they are **not** treated as atomic units because Unicode does not encode them as single codepoints.
+
+---
+
+## RULE 8: `format_scope` — Structured Text Normalization (Format-Aware)
+
+| Scope                            | Normalize? | Justification |
+|----------------------------------|----------|---------------|
+| Text nodes                     | Yes      | Primary content |
+| HTML `<script>`, `<style>`, `<pre>`, `<code>` | No  | Prevents code corruption |
+| Markdown code blocks/fences/inline | No       | Preserves syntax |
+| HTML attribute values            | No         | Ensures functionality |
+
+---
+
+## Out of Scope: Unidecode-Style ASCII Fallback
+
+Normy **must never** include full Unidecode-style fallbacks (e.g., ğ→g, č→c, ø→o, ł→l).  
+These belong to a **separate, optional compatibility module** `normy-compat-ascii`, which is:
+
+- Not part of linguistic normalization
+- Not enabled by any default profile
+- Explicitly opt-in for legacy systems
+
+---
+
+## Conflict Resolution Order
+
+```text
+1. NFC (always first)
+2. case_map
+3. fold
+4. strip (opt-in)
+5. transliterate (opt-in) → overrides strip
+6. diac removal
+7. normalize_whitespace
+8. segment
+```
