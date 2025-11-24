@@ -13,9 +13,9 @@ use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
-pub struct ReplaceFullwidth;
+pub struct UnifyWidth;
 
-impl Stage for ReplaceFullwidth {
+impl Stage for UnifyWidth {
     fn name(&self) -> &'static str {
         "replace_fullwidth"
     }
@@ -45,7 +45,7 @@ impl Stage for ReplaceFullwidth {
     }
 }
 
-impl CharMapper for ReplaceFullwidth {
+impl CharMapper for UnifyWidth {
     #[inline(always)]
     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
         let converted = fullwidth_to_halfwidth(c);
@@ -69,19 +69,19 @@ mod tests {
 
     #[test]
     fn test_needs_apply_detects_fullwidth() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         assert!(stage.needs_apply("ＡＢＣ", &Context::new(ENG)).unwrap());
     }
 
     #[test]
     fn test_needs_apply_false_for_ascii() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         assert!(!stage.needs_apply("ABC 123 !?", &Context::new(ENG)).unwrap());
     }
 
     #[test]
     fn test_apply_fullwidth_latin() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         let result = stage
             .apply(Cow::Borrowed("Ｈｅｌｌｏ Ｗｏｒｌｄ"), &Context::new(ENG))
             .unwrap();
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_apply_fullwidth_digits_punctuation() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         let result = stage
             .apply(Cow::Borrowed("１２３４５！＠＃"), &Context::new(ENG))
             .unwrap();
@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_apply_when_no_changes_returns_borrowed() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         let text = Cow::Borrowed("Plain ASCII text");
         let result = stage.apply(text.clone(), &Context::new(ENG)).unwrap();
 
@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_char_mapper_map_fullwidth() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         let mapper: &dyn CharMapper = &stage;
 
         assert_eq!(mapper.map('Ａ', &Context::new(ENG)), Some('A'));
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn test_char_mapper_bind_iterates_normalized() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         let mapper: &dyn CharMapper = &stage;
 
         let iter = mapper.bind("ＡＢＣ １２３！", &Context::new(ENG));
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_fullwidth_replace_sanity() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         let text = Cow::Borrowed("Ｔｅｘｔ： １００％ full-width");
         let result = stage.apply(text, &Context::new(ENG)).unwrap();
 
@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn test_replace_fullwidth() {
-        let stage = ReplaceFullwidth;
+        let stage = UnifyWidth;
         let text = Cow::Borrowed("Ｈｅｌｌｏ　Ｗｏｒｌｄ！");
         let result = stage.apply(text, &Context::new(ENG)).unwrap();
         assert_eq!(result, "Hello World!");

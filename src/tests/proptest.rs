@@ -1,11 +1,11 @@
 mod prop_tests {
-    use crate::{DEU, ENG, FRA, FoldCase, LowerCase, Normy, RemoveDiacritics, TUR, NormalizeWhitespace};
+    use crate::{DEU, ENG, FRA, CaseFold, LowerCase, Normy, RemoveDiacritics, TUR, NormalizeWhitespace};
     use proptest::prelude::*;
 
     proptest! {
         #[test]
         fn case_fold_idempotent(s in ".{0,1000}") {
-            let normy = Normy::builder().lang(DEU).add_stage(FoldCase).build();
+            let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
             let once = normy.normalize(&s).unwrap().into_owned();
             let twice = normy.normalize(&once).unwrap().into_owned();
             prop_assert_eq!(once, twice);
@@ -13,7 +13,7 @@ mod prop_tests {
 
         #[test]
         fn german_sharp_s_expansion(s in "[ßSs]{0,100}") {
-            let normy = Normy::builder().lang(DEU).add_stage(FoldCase).build();
+            let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
             let result = normy.normalize(&s).unwrap();
             prop_assert!(result.chars().all(|c| c == 's' || c == 'S'));
             prop_assert!(result.matches("ss").count() >= s.matches("ß").count());

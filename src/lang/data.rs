@@ -990,7 +990,7 @@ mod tests {
             "Fold: ß→ss (multi-char, rejected)"
         );
 
-        // This is why German can use CharMapper for Lowercase but not FoldCase
+        // This is why German can use CharMapper for Lowercase but not CaseFold
         assert!(!get_from_table("DEU").has_one_to_one_folds());
     }
 

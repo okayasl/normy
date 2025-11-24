@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use normy::context::Context;
 use normy::stage::{CharMapper, Stage, StageError};
-use normy::{FoldCase, NormalizeWhitespace, Normy, RemoveControlChars, TUR};
+use normy::{CaseFold, NormalizeWhitespace, Normy, StripControlChars, TUR};
 
 fn is_emoji(c: char) -> bool {
     matches!(
@@ -58,8 +58,8 @@ impl CharMapper for StripEmoji {
 
 fn stage_from_name(name: &str) -> Option<Box<dyn Stage + Send + Sync>> {
     match name {
-        "remove_control" => Some(Box::new(RemoveControlChars)),
-        "fold_case" => Some(Box::new(FoldCase)),
+        "remove_control" => Some(Box::new(StripControlChars)),
+        "fold_case" => Some(Box::new(CaseFold)),
         "strip_emoji" => Some(Box::new(StripEmoji)),
         "whitespace" => Some(Box::new(NormalizeWhitespace::default())),
         _ => None,

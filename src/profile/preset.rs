@@ -1,6 +1,6 @@
 use crate::{
-    FoldCase, LowerCase, NFKC, NormalizeWhitespace, RemoveControlChars, RemoveDiacritics,
-    RemoveFormatControls, ReplaceFullwidth, StripHtml, StripMarkdown, UnigramCJK, process::Process,
+    CaseFold, CjkUnigram, LowerCase, NFKC, NormalizeWhitespace, RemoveDiacritics,
+    StripControlChars, StripFormatControls, StripHtml, StripMarkdown, UnifyWidth, process::Process,
     profile::Profile, stage::normalize_punctuation::NormalizePunctuation,
 };
 
@@ -15,8 +15,8 @@ pub fn ascii_fast() -> Profile<impl Process> {
 pub fn machine_translation() -> Profile<impl Process> {
     Profile::builder("machine_translation")
         .add_stage(NFKC)
-        .add_stage(RemoveControlChars)
-        .add_stage(RemoveFormatControls)
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
         .add_stage(NormalizePunctuation)
         .add_stage(NormalizeWhitespace::default())
         .build()
@@ -27,8 +27,8 @@ pub fn markdown_processing() -> Profile<impl Process> {
     Profile::builder("markdown_processing")
         .add_stage(NFKC)
         .add_stage(StripMarkdown)
-        .add_stage(RemoveControlChars)
-        .add_stage(RemoveFormatControls)
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
         .add_stage(NormalizeWhitespace::default())
         .build()
 }
@@ -38,9 +38,9 @@ pub fn web_scraping() -> Profile<impl Process> {
     Profile::builder("web_scraping")
         .add_stage(NFKC)
         .add_stage(StripHtml)
-        .add_stage(RemoveControlChars)
-        .add_stage(RemoveFormatControls)
-        .add_stage(ReplaceFullwidth)
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
+        .add_stage(UnifyWidth)
         .add_stage(NormalizeWhitespace::default())
         .build()
 }
@@ -50,13 +50,13 @@ pub fn search() -> Profile<impl Process> {
     Profile::builder("search")
         .add_stage(NFKC)
         .add_stage(LowerCase)
-        .add_stage(FoldCase)
+        .add_stage(CaseFold)
         .add_stage(RemoveDiacritics)
         .add_stage(StripHtml)
         .add_stage(StripMarkdown)
-        .add_stage(RemoveFormatControls)
+        .add_stage(StripFormatControls)
         .add_stage(NormalizeWhitespace::default())
-        .add_stage(UnigramCJK)
+        .add_stage(CjkUnigram)
         .build()
 }
 
@@ -64,11 +64,11 @@ pub fn search() -> Profile<impl Process> {
 pub fn cjk_search() -> Profile<impl Process> {
     Profile::builder("cjk_search")
         .add_stage(NFKC)
-        .add_stage(ReplaceFullwidth)
-        .add_stage(RemoveFormatControls)
-        .add_stage(RemoveControlChars)
+        .add_stage(UnifyWidth)
+        .add_stage(StripFormatControls)
+        .add_stage(StripControlChars)
         .add_stage(NormalizeWhitespace::default())
-        .add_stage(UnigramCJK) // Critical for CJK tokenization
+        .add_stage(CjkUnigram) // Critical for CJK tokenization
         .build()
 }
 
@@ -76,7 +76,7 @@ pub fn cjk_search() -> Profile<impl Process> {
 pub fn minimum() -> Profile<impl Process> {
     Profile::builder("minimum")
         .add_stage(NFKC)
-        .add_stage(RemoveControlChars)
+        .add_stage(StripControlChars)
         .add_stage(NormalizeWhitespace::collapse_only())
         .build()
 }
@@ -86,15 +86,15 @@ pub fn maximum() -> Profile<impl Process> {
     Profile::builder("maximum")
         .add_stage(NFKC)
         .add_stage(LowerCase)
-        .add_stage(FoldCase)
+        .add_stage(CaseFold)
         .add_stage(RemoveDiacritics)
         .add_stage(StripHtml)
         .add_stage(StripMarkdown)
-        .add_stage(RemoveFormatControls)
-        .add_stage(RemoveControlChars)
-        .add_stage(ReplaceFullwidth)
+        .add_stage(StripFormatControls)
+        .add_stage(StripControlChars)
+        .add_stage(UnifyWidth)
         .add_stage(NormalizeWhitespace::default())
-        .add_stage(UnigramCJK)
+        .add_stage(CjkUnigram)
         .build()
 }
 
@@ -105,11 +105,11 @@ pub fn social_media() -> Profile<impl Process> {
         .add_stage(StripHtml)
         .add_stage(StripMarkdown)
         .add_stage(LowerCase)
-        .add_stage(FoldCase)
+        .add_stage(CaseFold)
         .add_stage(RemoveDiacritics)
-        .add_stage(ReplaceFullwidth)
-        .add_stage(RemoveControlChars)
-        .add_stage(RemoveFormatControls)
+        .add_stage(UnifyWidth)
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
         .add_stage(NormalizePunctuation)
         .add_stage(NormalizeWhitespace::default())
         .build()

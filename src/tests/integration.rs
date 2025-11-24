@@ -2,11 +2,11 @@
 mod integration_tests {
 
     use crate::{
-        ARA, DEU, FoldCase, JPN, LowerCase, NLD, NormalizeWhitespace, Normy, TUR,
+        ARA, DEU, CaseFold, JPN, LowerCase, NLD, NormalizeWhitespace, Normy, TUR,
         stage::{
-            normalize_punctuation::NormalizePunctuation, remove_control_chars::RemoveControlChars,
-            remove_diacritics::RemoveDiacritics, replace_fullwidth::ReplaceFullwidth,
-            unigram_cjk::UnigramCJK,
+            normalize_punctuation::NormalizePunctuation, strip_control_chars::StripControlChars,
+            remove_diacritics::RemoveDiacritics, unify_width::UnifyWidth,
+            cjk_unigram::CjkUnigram,
         },
     };
 
@@ -29,7 +29,7 @@ mod integration_tests {
             .lang(ARA)
             .add_stage(NormalizeWhitespace::trim_only())
             .add_stage(RemoveDiacritics)
-            .add_stage(FoldCase)
+            .add_stage(CaseFold)
             .build();
 
         let input = "  كتابٌ جميل  ";
@@ -42,7 +42,7 @@ mod integration_tests {
         let normy = Normy::builder()
             .lang(DEU)
             .add_stage(NormalizeWhitespace::trim_only())
-            .add_stage(FoldCase)
+            .add_stage(CaseFold)
             .build();
 
         let input = "  Weißstraße  ";
@@ -88,7 +88,7 @@ mod integration_tests {
     fn dutch_case_fold_is_canonical() {
         let out = Normy::builder()
             .lang(NLD)
-            .add_stage(FoldCase)
+            .add_stage(CaseFold)
             .build()
             .normalize("IJsselmeer")
             .unwrap();
@@ -110,7 +110,7 @@ mod integration_tests {
 
     #[test]
     fn test_replace_fullwidth() {
-        let normy = Normy::builder().add_stage(ReplaceFullwidth).build();
+        let normy = Normy::builder().add_stage(UnifyWidth).build();
         let text = "Ｈｅｌｌｏ　Ｗｏｒｌｄ！";
         let normalized = normy.normalize(text).unwrap();
         assert_eq!(normalized, "Hello World!");
@@ -128,7 +128,7 @@ mod integration_tests {
     fn test_remove_control_chars() {
         let text = "Hello\x07\x1Bworld\x7F";
         let normalized = Normy::builder()
-            .add_stage(RemoveControlChars)
+            .add_stage(StripControlChars)
             .build()
             .normalize(text)
             .unwrap();
@@ -142,7 +142,7 @@ mod integration_tests {
         let normy = Normy::builder()
             .lang(JPN)
             .modify_lang(|lang| lang.unigram_cjk = true)
-            .add_stage(UnigramCJK)
+            .add_stage(CjkUnigram)
             .build();
 
         let text = "最高の言語";

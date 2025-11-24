@@ -1,4 +1,3 @@
-// src/stage/segment_word.rs
 //! Word segmentation stage – inserts U+0020 spaces where required by the
 //! current language’s rules (Western → CJK/Hangul/SE-Asian, Thai/Lao/Khmer
 //! syllable breaks, etc.).  
@@ -25,9 +24,9 @@ use crate::{
 };
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SegmentWord;
+pub struct SegmentWords;
 
-impl Stage for SegmentWord {
+impl Stage for SegmentWords {
     fn name(&self) -> &'static str {
         "segment_word"
     }
@@ -60,7 +59,7 @@ impl Stage for SegmentWord {
     }
 }
 
-impl CharMapper for SegmentWord {
+impl CharMapper for SegmentWords {
     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
         Some(c)
     }
@@ -182,7 +181,7 @@ mod tests {
     // --------------------------- Japanese ---------------------------
     #[test]
     fn test_japanese_segmentation() {
-        let stage = SegmentWord;
+        let stage = SegmentWords;
         let ctx = Context::new(JPN);
 
         let cases = &[
@@ -222,7 +221,7 @@ mod tests {
     // --------------------------- Chinese ---------------------------
     #[test]
     fn test_chinese_segmentation() {
-        let stage = SegmentWord;
+        let stage = SegmentWords;
         let ctx = Context::new(ZHO);
 
         let cases = &[
@@ -252,7 +251,7 @@ mod tests {
     // --------------------------- Korean ---------------------------
     #[test]
     fn test_korean_segmentation() {
-        let stage = SegmentWord;
+        let stage = SegmentWords;
         let ctx = Context::new(KOR);
 
         let cases = &[
@@ -281,7 +280,7 @@ mod tests {
     // --------------------------- Thai ---------------------------
     #[test]
     fn test_thai_segmentation() {
-        let stage = SegmentWord;
+        let stage = SegmentWords;
         let ctx = Context::new(THA);
 
         let cases = &[
@@ -310,7 +309,7 @@ mod tests {
     // --------------------------- Lao ---------------------------
     #[test]
     fn test_lao_segmentation() {
-        let stage = SegmentWord;
+        let stage = SegmentWords;
         let ctx = Context::new(LAO);
 
         let cases = &[
@@ -339,7 +338,7 @@ mod tests {
     // --------------------------- Myanmar ---------------------------
     #[test]
     fn test_myanmar_segmentation() {
-        let stage = SegmentWord;
+        let stage = SegmentWords;
         let ctx = Context::new(MYA);
 
         let cases = &[
@@ -368,7 +367,7 @@ mod tests {
     // --------------------------- Khmer ---------------------------
     #[test]
     fn test_khmer_segmentation() {
-        let stage = SegmentWord;
+        let stage = SegmentWords;
         let ctx = Context::new(KHM);
 
         let cases = &[

@@ -1,4 +1,3 @@
-//! Removes language-specific diacritical marks using NFD (Canonical Decomposition).
 use crate::{
     context::Context,
     lang::LangEntry,

@@ -1,6 +1,7 @@
 use normy::{
-    DEU, ENG, FRA, FoldCase, NFKC, NLD, NormalizeWhitespace, NormyBuilder, RemoveDiacritics,
-    RemoveFormatControls, StripHtml, StripMarkdown, TUR, UnigramCJK, ZHO, profile::ProfileBuilder,
+    CaseFold, CjkUnigram, DEU, ENG, FRA, NFKC, NLD, NormalizeWhitespace, NormyBuilder,
+    RemoveDiacritics, StripFormatControls, StripHtml, StripMarkdown, TUR, ZHO,
+    profile::ProfileBuilder,
 };
 use std::borrow::Cow;
 
@@ -14,12 +15,12 @@ fn main() {
         // • ZHO has unigram_cjk = true
         .add_stage(NFKC)
         .add_stage(RemoveDiacritics)
-        .add_stage(FoldCase) // ← uses your real fold_map + peek_ahead_fold
+        .add_stage(CaseFold) // ← uses your real fold_map + peek_ahead_fold
         .add_stage(StripHtml)
         .add_stage(StripMarkdown)
-        .add_stage(RemoveFormatControls)
+        .add_stage(StripFormatControls)
         .add_stage(NormalizeWhitespace::default())
-        .add_stage(UnigramCJK) // ← only active for ZHO, JPN, etc.
+        .add_stage(CjkUnigram) // ← only active for ZHO, JPN, etc.
         .build();
 
     let cases = &[

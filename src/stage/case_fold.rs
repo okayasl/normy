@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 /// Locale-sensitive case folding for search and comparison.
 ///
-/// `FoldCase` performs full Unicode case folding with language-specific rules,
+/// `CaseFold` performs full Unicode case folding with language-specific rules,
 /// including:
 /// - Multi-character expansions (e.g. German `ß` → `"ss"`, `ẞ` → `"ss"`)
 /// - Context-sensitive mappings via peek-ahead (e.g. Dutch `IJ` → `"ij"`)
@@ -21,9 +21,9 @@ use std::sync::Arc;
 ///
 /// When the target language has only one-to-one mappings and no peek-ahead rules,
 /// this stage implements `CharMapper`, enabling zero-allocation pipeline fusion.
-pub struct FoldCase;
+pub struct CaseFold;
 
-impl Stage for FoldCase {
+impl Stage for CaseFold {
     fn name(&self) -> &'static str {
         "case_fold"
     }
@@ -123,26 +123,26 @@ fn apply_with_peek_ahead<'a>(
     Ok(Cow::Owned(out))
 }
 
-impl CharMapper for FoldCase {
+impl CharMapper for CaseFold {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         ctx.lang_entry.fold_char(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(FoldCaseIter {
+        Box::new(CaseFoldIter {
             chars: text.chars(),
             lang: ctx.lang_entry,
         })
     }
 }
 
-struct FoldCaseIter<'a> {
+struct CaseFoldIter<'a> {
     chars: std::str::Chars<'a>,
     lang: LangEntry,
 }
 
-impl<'a> Iterator for FoldCaseIter<'a> {
+impl<'a> Iterator for CaseFoldIter<'a> {
     type Item = char;
 
     #[inline(always)]
@@ -156,7 +156,7 @@ impl<'a> Iterator for FoldCaseIter<'a> {
     }
 }
 
-impl<'a> FusedIterator for FoldCaseIter<'a> {}
+impl<'a> FusedIterator for CaseFoldIter<'a> {}
 
 #[cfg(test)]
 mod tests {
@@ -165,7 +165,7 @@ mod tests {
 
     #[test]
     fn test_english_basic() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(ENG);
         assert!(stage.needs_apply("HELLO", &ctx).unwrap());
         assert!(!stage.needs_apply("hello", &ctx).unwrap());
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_french_basic() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(FRA);
         assert!(stage.needs_apply("Café", &ctx).unwrap());
         let result = stage.apply(Cow::Borrowed("Café"), &ctx).unwrap();
@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_german_eszett() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(DEU);
         let result = stage.apply(Cow::Borrowed("Straße"), &ctx).unwrap();
         assert_eq!(result, "strasse");
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_uppercase() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD);
         // Two-char sequence "IJ"
         let result = stage.apply(Cow::Borrowed("IJssel"), &ctx).unwrap();
@@ -205,7 +205,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_lowercase() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD);
         // Already lowercase
         let result = stage.apply(Cow::Borrowed("ijssel"), &ctx).unwrap();
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_ligature() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD);
         // Ligature 'Ĳ' (U+0132)
         let result = stage.apply(Cow::Borrowed("Ĳssel"), &ctx).unwrap();
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_not_sequence() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD);
         // "IK" should not trigger peek-ahead
         let result = stage.apply(Cow::Borrowed("IK"), &ctx).unwrap();
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_idempotency() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD);
         let text = "IJssel";
         let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_char_mapper_eligibility() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         // English: 1→1, no peek-ahead → CharMapper eligible
         let ctx = Context::new(ENG);
         assert!(stage.as_char_mapper(&ctx).is_some());
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_uppercase_needs_apply() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD); // Dutch requires peek-ahead for "IJ"
         // "IJ" is a two-character sequence that must be folded to "ij"
         let text = "IJssel";
@@ -274,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ligature_needs_apply() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD);
         let text = "Ĳssel"; // Ĳ (U+0132) is the single-char ligature → must fold to "ijssel"
         assert!(stage.needs_apply(text, &ctx).unwrap()); // Passes if slice contains
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_german_eszett_lowercase_needs_apply() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(DEU);
         let text = "straße"; // All lowercase, but 'ß' → "ss" for case-fold
         assert!(stage.needs_apply(text, &ctx).unwrap()); // Passes
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_dutch_ij_lowercase_needs_apply() {
-        let stage = FoldCase;
+        let stage = CaseFold;
         let ctx = Context::new(NLD);
         let text = "ijssel"; // Already "ij", but if peek_ahead_fold checks lowercase
         assert!(!stage.needs_apply(text, &ctx).unwrap()); // Should be false
@@ -306,11 +306,11 @@ mod tests {
         let ctx_deu = Context::new(DEU);
         // These MUST be None or CharMapper will break
         assert!(
-            FoldCase.as_char_mapper(&ctx_nld).is_none(),
+            CaseFold.as_char_mapper(&ctx_nld).is_none(),
             "CRITICAL: Dutch needs peek-ahead, cannot use CharMapper"
         );
         assert!(
-            FoldCase.as_char_mapper(&ctx_deu).is_none(),
+            CaseFold.as_char_mapper(&ctx_deu).is_none(),
             "CRITICAL: German has multi-char folds, cannot use CharMapper"
         );
     }

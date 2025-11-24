@@ -12,20 +12,20 @@ pub use lang::data::*;
 pub use normy::{DynamicNormyBuilder, Normy, NormyBuilder}; // All languages auto-exported
 
 // All stages — flat, zero nesting
-pub use stage::fold_case::FoldCase;
+pub use stage::case_fold::CaseFold;
+pub use stage::cjk_unigram::CjkUnigram;
 pub use stage::lower_case::LowerCase;
 pub use stage::normalization::{NFC, NFD, NFKC, NFKD};
 pub use stage::normalize_punctuation::NormalizePunctuation;
 pub use stage::normalize_whitespace::NormalizeWhitespace;
-pub use stage::remove_control_chars::RemoveControlChars;
 pub use stage::remove_diacritics::RemoveDiacritics;
-pub use stage::remove_format_controls::RemoveFormatControls;
-pub use stage::replace_fullwidth::ReplaceFullwidth;
-pub use stage::segment_word::SegmentWord;
+pub use stage::segment_words::SegmentWords;
+pub use stage::strip_control_chars::StripControlChars;
+pub use stage::strip_format_controls::StripFormatControls;
 pub use stage::strip_html::StripHtml;
 pub use stage::strip_markdown::StripMarkdown;
 pub use stage::transliterate::Transliterate;
-pub use stage::unigram_cjk::UnigramCJK;
+pub use stage::unify_width::UnifyWidth;
 
 // Internal only
 mod normy;

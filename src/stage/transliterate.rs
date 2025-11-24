@@ -35,7 +35,7 @@ impl Stage for Transliterate {
             return Ok(text); // Zero-cost fast path
         }
 
-        // Pre-calculate capacity using helper (same as FoldCase)
+        // Pre-calculate capacity using helper (same as CaseFold)
         let (trans_count, extra_bytes) = ctx.lang_entry.count_transliterate_bytes(&text);
         if trans_count == 0 {
             return Ok(text); // Zero-copy when no actual replacements
@@ -136,7 +136,7 @@ mod tests {
     fn test_french_oe_ligature() {
         let stage = Transliterate;
         let ctx = Context::new(FRA);
-        // Assume pre-lowercased input (post-FoldCase)
+        // Assume pre-lowercased input (post-CaseFold)
         let result_upper = stage.apply(Cow::Borrowed("ŒUVRE"), &ctx).unwrap(); // 'Œ' → "oe" (lowercase target)
         assert_eq!(result_upper, "oeUVRE"); // Partial: Œ replaced, rest preserved (but in real pipeline, all lower)
         let result_lower = stage.apply(Cow::Borrowed("œuvre"), &ctx).unwrap();

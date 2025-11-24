@@ -10,9 +10,9 @@ use std::sync::Arc;
 /// This stage filters out all Unicode control characters (category Cc) from text.
 /// Format controls (Cf) are **not** removed. Useful for cleaning input, logs,
 /// or text streams that may contain non-printable characters.
-pub struct RemoveControlChars;
+pub struct StripControlChars;
 
-impl Stage for RemoveControlChars {
+impl Stage for StripControlChars {
     fn name(&self) -> &'static str {
         "remove_control_chars"
     }
@@ -42,7 +42,7 @@ impl Stage for RemoveControlChars {
     }
 }
 
-impl CharMapper for RemoveControlChars {
+impl CharMapper for StripControlChars {
     #[inline(always)]
     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
         if is_control(c) { None } else { Some(c) }
@@ -71,7 +71,7 @@ mod tests {
 
     #[test]
     fn test_needs_apply_detects_control_chars() {
-        let stage = RemoveControlChars;
+        let stage = StripControlChars;
         let ctx = Context::default();
 
         assert!(stage.needs_apply("hello\u{0001}world", &ctx).unwrap());
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_apply_removes_control_chars() {
-        let stage = RemoveControlChars;
+        let stage = StripControlChars;
         let ctx = Context::default();
 
         let input = "hello\u{0001}\u{007F}world";
@@ -90,7 +90,7 @@ mod tests {
 
     #[test]
     fn test_apply_returns_borrowed_when_no_changes() {
-        let stage = RemoveControlChars;
+        let stage = StripControlChars;
         let ctx = Context::default();
 
         let text = "plain ascii";
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn test_char_mapper_map() {
-        let stage = RemoveControlChars;
+        let stage = StripControlChars;
         let mapper: &dyn CharMapper = &stage;
         let ctx = Context::default();
 
@@ -115,7 +115,7 @@ mod tests {
 
     #[test]
     fn test_char_mapper_bind_iterates_filtered() {
-        let stage = RemoveControlChars;
+        let stage = StripControlChars;
         let mapper: &dyn CharMapper = &stage;
         let ctx = Context::default();
 
@@ -126,7 +126,7 @@ mod tests {
 
     #[test]
     fn test_idempotency() {
-        let stage = RemoveControlChars;
+        let stage = StripControlChars;
         let ctx = Context::default();
 
         let input = "hello\u{0001}\u{007F}world";

@@ -196,7 +196,7 @@ fn has_sequential_whitespace(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FoldCase, lang::data::ENG};
+    use crate::{CaseFold, lang::data::ENG};
 
     #[test]
     fn test_collapse_sequential() {
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_after_case_fold() {
-        let case_fold = FoldCase;
+        let case_fold = CaseFold;
         let whitespace = NormalizeWhitespace::default();
         let c = Context::new(ENG);
 

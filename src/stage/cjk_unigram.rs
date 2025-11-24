@@ -11,9 +11,9 @@ use crate::{
 };
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct UnigramCJK;
+pub struct CjkUnigram;
 
-impl Stage for UnigramCJK {
+impl Stage for CjkUnigram {
     fn name(&self) -> &'static str {
         "unigram_cjk"
     }
@@ -35,7 +35,7 @@ impl Stage for UnigramCJK {
     }
 }
 
-impl CharMapper for UnigramCJK {
+impl CharMapper for CjkUnigram {
     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
         Some(c)
     }
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_unigram_cjk_zho_enabled() {
-        let stage = UnigramCJK;
+        let stage = CjkUnigram;
         let ctx = Context::new(ZHO);
 
         assert!(stage.needs_apply("中华人民共和国", &ctx).unwrap());
@@ -161,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_unigram_cjk_jpn_disabled_by_default() {
-        let stage = UnigramCJK;
+        let stage = CjkUnigram;
         let ctx = Context::new(JPN);
 
         assert!(!stage.needs_apply("日本語", &ctx).unwrap());
@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_unigram_cjk_non_cjk_languages_never_run() {
-        let stage = UnigramCJK;
+        let stage = CjkUnigram;
         let languages = [ENG, DEU, FRA, TUR, ARA, KOR];
 
         for &lang in &languages {
@@ -183,7 +183,7 @@ mod tests {
 
     #[test]
     fn test_unigram_cjk_correct_segmentation_when_enabled() {
-        let stage = UnigramCJK;
+        let stage = CjkUnigram;
         let ctx = Context::new(ZHO);
 
         let cases = &[

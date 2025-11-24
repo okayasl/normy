@@ -25,9 +25,9 @@ use std::{borrow::Cow, str::Chars};
 ///
 /// This is a deliberate, principled choice: **zero-cost wins by default**.
 ///
-/// # Key Differences from `FoldCase`
+/// # Key Differences from `CaseFold`
 ///
-/// | Aspect                  | `LowerCase`                                   | `FoldCase`                                            |
+/// | Aspect                  | `LowerCase`                                   | `CaseFold`                                            |
 /// |-------------------------|------------------------------------------------|-------------------------------------------------------|
 /// | Purpose                 | Visual / orthographic normalization           | Case-insensitive matching & search                    |
 /// | Turkish `I` / `İ`       | `I` → `ı`, `İ` → `i` (correct lowercase)      | Same (uses `case_map`)                                |
@@ -43,7 +43,7 @@ use std::{borrow::Cow, str::Chars};
 /// - Preprocessing before NFKC/NFKD
 /// - Any pipeline where linguistic correctness > search recall
 ///
-/// Use `FoldCase` when you need case-insensitive matching that works correctly
+/// Use `CaseFold` when you need case-insensitive matching that works correctly
 /// across all languages — including Turkish.
 pub struct LowerCase;
 

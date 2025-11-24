@@ -25,9 +25,9 @@ use std::sync::Arc;
 /// This stage removes format controls **regardless of language**. Format
 /// controls are presentation hints, not content, and are typically unwanted
 /// in normalized text pipelines.
-pub struct RemoveFormatControls;
+pub struct StripFormatControls;
 
-impl Stage for RemoveFormatControls {
+impl Stage for StripFormatControls {
     fn name(&self) -> &'static str {
         "remove_format_controls"
     }
@@ -58,7 +58,7 @@ impl Stage for RemoveFormatControls {
     }
 }
 
-impl CharMapper for RemoveFormatControls {
+impl CharMapper for StripFormatControls {
     #[inline(always)]
     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
         if is_format_control(c) {
@@ -80,7 +80,7 @@ mod tests {
 
     #[test]
     fn test_zero_width_space() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         let text = "hello\u{200B}world";
@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_bidi_marks() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         // LRM + RLM
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn test_bom() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         let text = "\u{FEFF}hello"; // BOM at start
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_multiple_controls() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         let text = "\u{200B}\u{200C}\u{200D}text\u{202A}\u{202C}";
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn test_no_controls_zero_copy() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         let text = "hello world";
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn test_char_mapper_eligible() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         assert!(stage.as_char_mapper(&ctx).is_some());
@@ -143,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_real_world_arabic() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         // Arabic text with RLM
@@ -154,7 +154,7 @@ mod tests {
 
     #[test]
     fn test_idempotency() {
-        let stage = RemoveFormatControls;
+        let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
         let text = "hello\u{200B}world";

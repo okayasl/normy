@@ -21,20 +21,20 @@
 //! simply return `None` for both methods – they fall back to the `Cow<str>`
 //! allocation path, which is the correct, safe behaviour.
 
-pub mod fold_case;
+pub mod case_fold;
+pub mod cjk_unigram;
 pub mod lower_case;
 pub mod normalization;
 pub mod normalize_punctuation;
 pub mod normalize_whitespace;
-pub mod remove_control_chars;
 pub mod remove_diacritics;
-pub mod remove_format_controls;
-pub mod replace_fullwidth;
-pub mod segment_word;
+pub mod segment_words;
+pub mod strip_control_chars;
+pub mod strip_format_controls;
 pub mod strip_html;
 pub mod strip_markdown;
 pub mod transliterate;
-pub mod unigram_cjk;
+pub mod unify_width;
 
 use crate::context::Context;
 use std::borrow::Cow;
