@@ -191,18 +191,6 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
-    FIN, "FIN", "Finnish",
-        case: [],
-        fold: [],
-        transliterate: [],
-        precomposed_to_base: [],
-        spacing_diacritics: [],
-        needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
-        segment_rules: [],
-        unigram_cjk: false,
-
     ISL, "ISL", "Icelandic",
         case: [],
         fold: [],
@@ -355,7 +343,6 @@ define_languages! {
             'À' => 'A', 'à' => 'a', 'Á' => 'A', 'á' => 'a',
             'È' => 'E', 'è' => 'e', 'É' => 'E', 'é' => 'e',
             'Í' => 'I', 'í' => 'i', 'Ï' => 'I', 'ï' => 'i',
-            // 'Ò' => 'O', 'ò' => 'o', 'Ó' => 'O', 'ó' => 'o',
             'Ú' => 'U', 'ú' => 'u', 'Ü' => 'U', 'ü' => 'u',
         ],
         spacing_diacritics: [],
@@ -401,30 +388,6 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
-    RON, "RON", "Romanian",
-        case: [],
-        fold: [],
-        transliterate: [],
-        precomposed_to_base: [],
-        spacing_diacritics: [],
-        needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
-        segment_rules: [],
-        unigram_cjk: false,
-
-    HUN, "HUN", "Hungarian",
-        case: [],
-        fold: [],
-        transliterate: [],
-        precomposed_to_base: [],
-        spacing_diacritics: [],
-        needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
-        segment_rules: [],
-        unigram_cjk: false,
-
     HRV, "HRV", "Croatian",
         case: [],
         fold: [],
@@ -449,56 +412,8 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
-    UKR, "UKR", "Ukrainian",
-        case: [],
-        fold: [],
-        transliterate: [],
-        precomposed_to_base: [],
-        spacing_diacritics: [],
-        needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
-        segment_rules: [],
-        unigram_cjk: false,
-
-    BUL, "BUL", "Bulgarian",
-        case: [],
-        fold: [],
-        transliterate: [],
-        precomposed_to_base: [],
-        spacing_diacritics: [],
-        needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
-        segment_rules: [],
-        unigram_cjk: false,
-
     LIT, "LIT", "Lithuanian",
         case: [ 'Ė' => 'ė', 'Į' => 'į', 'Ų' => 'ų' ],
-        fold: [],
-        transliterate: [],
-        precomposed_to_base: [],
-        spacing_diacritics: [],
-        needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
-        segment_rules: [],
-        unigram_cjk: false,
-
-    LAV, "LAV", "Latvian",
-        case: [],
-        fold: [],
-        transliterate: [],
-        precomposed_to_base: [],
-        spacing_diacritics: [],
-        needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
-        segment_rules: [],
-        unigram_cjk: false,
-
-    EST, "EST", "Estonian",
-        case: [],
         fold: [],
         transliterate: [],
         precomposed_to_base: [],
@@ -677,8 +592,8 @@ mod tests {
         lang::{
             LangEntry,
             data::{
-                ARA, BUL, CAT, CES, DAN, DEU, ENG, FRA, HEB, HRV, HUN, JPN, KHM, KOR, MYA, NLD,
-                NOR, POL, SLK, SRP, SWE, THA, TUR, UKR, VIE, ZHO, from_code,
+                ARA, CAT, CES, DAN, DEU, ENG, FRA, HEB, HRV, JPN, KHM, KOR, MYA, NLD, NOR, POL,
+                SLK, SRP, SWE, THA, TUR, VIE, ZHO, from_code,
             },
         },
     };
@@ -795,7 +710,7 @@ mod tests {
     fn test_all_languages_have_valid_metadata() {
         let langs = [
             TUR, DEU, NLD, DAN, NOR, SWE, ARA, HEB, VIE, JPN, ZHO, KOR, THA, MYA, KHM, FRA, CAT,
-            HUN, POL, CES, SLK, HRV, SRP, UKR, BUL, ENG,
+            POL, CES, SLK, HRV, SRP, ENG,
         ];
 
         for lang in langs {
@@ -851,9 +766,7 @@ mod tests {
 
     #[test]
     fn test_idempotency_metadata() {
-        let langs = [
-            TUR, DEU, NLD, DAN, NOR, SWE, FRA, HUN, POL, CES, SLK, HRV, SRP, UKR, BUL,
-        ];
+        let langs = [TUR, DEU, NLD, DAN, NOR, SWE, FRA, POL, CES, SLK, HRV, SRP];
 
         for lang in langs {
             for fold in get_from_table(lang.code()).fold_map() {
