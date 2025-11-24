@@ -50,10 +50,8 @@ mod unit_tests {
             .lang(FRA)
             .add_stage(RemoveDiacritics)
             .build();
-        assert_eq!(
-            n.normalize("café résumé naïve").unwrap(),
-            "cafe resume naive"
-        );
+        let result = n.normalize("café résumé naïve").unwrap();
+        assert_eq!(result,"cafe resume naive");
         // Edge: composed → decomposed → stripped
         assert_eq!(n.normalize(" naïve").unwrap(), " naive"); // U+00E9 → e + ́ → e
     }

@@ -1,7 +1,3 @@
-//! stage/remove_control_chars.rs
-//! Remove C0 and C1 control characters (not format controls — those are Cf)
-//! e.g. BEL, DEL, etc. — very common in crawled data
-
 use crate::{
     context::Context,
     stage::{CharMapper, Stage, StageError},
@@ -11,6 +7,9 @@ use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
+/// This stage filters out all Unicode control characters (category Cc) from text.
+/// Format controls (Cf) are **not** removed. Useful for cleaning input, logs,
+/// or text streams that may contain non-printable characters.
 pub struct RemoveControlChars;
 
 impl Stage for RemoveControlChars {
@@ -51,5 +50,90 @@ impl CharMapper for RemoveControlChars {
 
     fn bind<'a>(&self, text: &'a str, _ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(text.chars().filter(|&c| !is_control(c)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::Context;
+
+    #[test]
+    fn test_is_control() {
+        assert!(is_control('\u{0000}'));
+        assert!(is_control('\u{001F}'));
+        assert!(is_control('\u{007F}'));
+        assert!(is_control('\u{009F}'));
+        assert!(!is_control('A'));
+        assert!(!is_control(' '));
+        assert!(!is_control('\u{200B}')); // zero-width space is not Cc
+    }
+
+    #[test]
+    fn test_needs_apply_detects_control_chars() {
+        let stage = RemoveControlChars;
+        let ctx = Context::default();
+
+        assert!(stage.needs_apply("hello\u{0001}world", &ctx).unwrap());
+        assert!(!stage.needs_apply("hello world", &ctx).unwrap());
+    }
+
+    #[test]
+    fn test_apply_removes_control_chars() {
+        let stage = RemoveControlChars;
+        let ctx = Context::default();
+
+        let input = "hello\u{0001}\u{007F}world";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert_eq!(result, "helloworld");
+    }
+
+    #[test]
+    fn test_apply_returns_borrowed_when_no_changes() {
+        let stage = RemoveControlChars;
+        let ctx = Context::default();
+
+        let text = "plain ascii";
+        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
+
+        match result {
+            Cow::Borrowed(_) => {} // OK
+            _ => panic!("Expected Cow::Borrowed for unchanged text"),
+        }
+    }
+
+    #[test]
+    fn test_char_mapper_map() {
+        let stage = RemoveControlChars;
+        let mapper: &dyn CharMapper = &stage;
+        let ctx = Context::default();
+
+        assert_eq!(mapper.map('A', &ctx), Some('A'));
+        assert_eq!(mapper.map('\u{0001}', &ctx), None);
+        assert_eq!(mapper.map('\u{007F}', &ctx), None);
+    }
+
+    #[test]
+    fn test_char_mapper_bind_iterates_filtered() {
+        let stage = RemoveControlChars;
+        let mapper: &dyn CharMapper = &stage;
+        let ctx = Context::default();
+
+        let input = "A\u{0001}B\u{007F}C";
+        let collected: String = mapper.bind(input, &ctx).collect();
+        assert_eq!(collected, "ABC");
+    }
+
+    #[test]
+    fn test_idempotency() {
+        let stage = RemoveControlChars;
+        let ctx = Context::default();
+
+        let input = "hello\u{0001}\u{007F}world";
+        let first = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        let second = stage.apply(first.clone(), &ctx).unwrap();
+
+        assert_eq!(first, "helloworld");
+        assert_eq!(first, second);
     }
 }

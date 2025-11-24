@@ -36,6 +36,12 @@ pub struct FoldMap {
     pub to: &'static str,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct StripMap {
+    pub from: char,
+    pub to: char,
+}
+
 pub type DiacriticSet = &'static [char];
 
 #[derive(Clone, Copy, Debug)]
@@ -56,13 +62,19 @@ pub enum SegmentRule {
 pub struct LangEntry {
     pub case_map: &'static [CaseMap],
     pub fold_map: &'static [FoldMap],
-    pub transliterate_map: &'static [FoldMap], // NEW!
-    pub diacritics: Option<DiacriticSet>,
+    pub transliterate_map: &'static [FoldMap],
+
+    // Correct: use StripMap, not (char, char)
+    pub strip_map: &'static [StripMap],
+    pub strip_char_slice: &'static [char],
+
+    pub diacritics: Option<&'static [char]>,
+    pub diacritic_slice: Option<&'static [char]>,
+
     pub needs_segmentation: bool,
     pub requires_peek_ahead: bool,
     pub fold_char_slice: &'static [char],
-    pub transliterate_char_slice: &'static [char], // NEW!
-    pub diacritic_slice: Option<&'static [char]>,
+    pub transliterate_char_slice: &'static [char],
     pub peek_pairs: &'static [PeekPair],
     pub segment_rules: &'static [SegmentRule],
     pub unigram_cjk: bool,
@@ -284,6 +296,35 @@ impl LangEntry {
             }
         }
         (count, extra)
+    }
+
+    #[inline(always)]
+    pub fn strip_diacritic(&self, c: char) -> Option<char> {
+        self.strip_map
+            .iter()
+            .find(|&&StripMap { from, .. }| from == c)
+            .map(|&StripMap { to, .. }| to)
+    }
+
+    #[inline(always)]
+    pub fn has_strip_map(&self) -> bool {
+        !self.strip_map.is_empty()
+    }
+
+    #[inline(always)]
+    pub fn has_strip_or_diacritics(&self) -> bool {
+        !self.strip_map.is_empty() || self.diacritics.is_some()
+    }
+
+    #[inline(always)]
+    pub fn needs_diacritic_removal(&self, text: &str) -> bool {
+        if !self.strip_map.is_empty() {
+            text.chars().any(|c| self.strip_char_slice.contains(&c))
+        } else {
+            self.diacritics
+                .map(|diacs| text.chars().any(|c| diacs.contains(&c)))
+                .unwrap_or(false)
+        }
     }
 
     // -------------------------------------------------------------------------

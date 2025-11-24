@@ -1,6 +1,3 @@
-//!
-//! Whitespace normalization for text processing pipelines.
-
 use crate::{
     context::Context,
     stage::{Stage, StageError},
@@ -8,18 +5,49 @@ use crate::{
 };
 use std::borrow::Cow;
 
-/// Normalizes whitespace in text according to configurable rules.
+/// Normalize and standardize whitespace in text pipelines.
 ///
-/// # Features
-/// - **Collapse sequential whitespace**: Multiple spaces → single space
-/// - **Trim edges**: Remove leading/trailing whitespace
-/// - **Normalize Unicode whitespace**: Convert all whitespace variants to ASCII space
+/// This stage provides flexible whitespace normalization for text processing,
+/// including search, tokenization, display cleanup, and API input sanitization.
 ///
-/// # When to Use
-/// - **Search/indexing**: Collapse whitespace for consistent queries
-/// - **Tokenization**: Simplify word boundary detection
-/// - **Display normalization**: Clean up formatting
-/// - **API input sanitization**: Standardize user input
+/// ## Features
+///
+/// 1. **Collapse sequential whitespace**: Multiple consecutive whitespace
+///    characters (spaces, tabs, newlines, Unicode spaces) are collapsed into
+///    a single ASCII space when `collapse_sequential = true`.
+///
+/// 2. **Trim edges**: Leading and trailing whitespace is removed when
+///    `trim_edges = true`.
+///
+/// 3. **Normalize Unicode whitespace**: Converts all Unicode whitespace
+///    characters (e.g., NBSP, EM SPACE, IDEOGRAPHIC SPACE) into standard
+///    ASCII space `' '` when `normalize_unicode = true`.
+///
+/// 4. **Zero-copy when possible**: If no normalization is needed, returns
+///    `Cow::Borrowed` to avoid unnecessary allocations.
+///
+/// ## Preset constructors
+///
+/// - `NormalizeWhitespace::default()`: All features enabled (collapse, trim, normalize).
+/// - `NormalizeWhitespace::collapse_only()`: Collapse consecutive spaces only, preserves edges.
+/// - `NormalizeWhitespace::trim_only()`: Trim edges only, preserves internal spacing.
+///
+/// ## Usage Scenarios
+///
+/// - **Search / indexing**: Ensure consistent whitespace for queries and storage.
+/// - **Tokenization**: Simplify word boundary detection by normalizing spaces.
+/// - **Display cleanup**: Standardize formatting for rendering or logging.
+/// - **API input sanitization**: Convert messy user input into clean, predictable text.
+///
+/// ## Unicode Support
+///
+/// Supports a wide set of Unicode whitespace characters, including but not limited to:
+/// - No-break space (U+00A0)
+/// - Ogham space mark (U+1680)
+/// - En / Em / Figure / Ideographic spaces (U+2000–U+3000)
+/// - Narrow / medium / thin spaces (U+202F, U+205F, U+2009)
+///
+/// These characters are normalized to ASCII space `' '` when `normalize_unicode` is enabled.
 #[derive(Debug, Clone, Copy)]
 pub struct NormalizeWhitespace {
     /// Collapse multiple sequential whitespace chars into one
@@ -81,12 +109,10 @@ impl Stage for NormalizeWhitespace {
     }
 
     fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        // Quick checks for common cases
         if text.is_empty() {
             return Ok(false);
         }
 
-        // Check if any transformation is needed
         if self.trim_edges
             && (text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace))
         {
@@ -116,7 +142,6 @@ impl Stage for NormalizeWhitespace {
         for c in text.chars() {
             let is_ws = c.is_whitespace();
 
-            // Normalize Unicode whitespace to ASCII space
             let normalized_char = if is_ws && self.normalize_unicode {
                 ' '
             } else {
@@ -125,12 +150,10 @@ impl Stage for NormalizeWhitespace {
 
             if is_ws {
                 if self.trim_edges && !started {
-                    // Skip leading whitespace
                     continue;
                 }
 
                 if self.collapse_sequential && prev_was_whitespace {
-                    // Skip sequential whitespace
                     continue;
                 }
 
@@ -143,7 +166,6 @@ impl Stage for NormalizeWhitespace {
             }
         }
 
-        // Trim trailing whitespace
         if self.trim_edges {
             let trimmed = result.trim_end();
             if trimmed.len() != result.len() {
@@ -155,11 +177,6 @@ impl Stage for NormalizeWhitespace {
     }
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Check if text contains sequential whitespace
 #[inline]
 fn has_sequential_whitespace(text: &str) -> bool {
     let mut prev_was_ws = false;
@@ -175,10 +192,6 @@ fn has_sequential_whitespace(text: &str) -> bool {
     }
     false
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {

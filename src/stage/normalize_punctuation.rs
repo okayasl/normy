@@ -1,8 +1,3 @@
-//! stage/normalize_punctuation.rs
-//! Normalize fancy punctuation to ASCII equivalents
-//! “” → ", ‘’ → ', –—→ -, …→ ..., etc.
-//! Critical for search relevance
-
 use crate::{
     context::Context,
     stage::{CharMapper, Stage, StageError},
@@ -12,6 +7,34 @@ use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
+/// Normalize Unicode punctuation to ASCII equivalents based on a fixed mapping.
+///
+/// This stage replaces various Unicode punctuation characters with standard
+/// ASCII ones according to the internal `PUNCT_NORM` table, making text
+/// easier to process in search, tokenization, or other NLP pipelines. It is
+/// idempotent and zero-copy when the input requires no changes.
+///
+/// ## Normalizations performed
+///
+/// | Unicode | ASCII |
+/// |---------|-------|
+/// | `“`, `”`, `„`, `«`, `»` | `"` |
+/// | `‘`, `’`, `‚`             | `'` |
+/// | `–`, `—`, `─`, `―`       | `-` |
+/// | `…`, `⋯`, `․`, `‧`       | `.` |
+/// | `•`, `·`, `∙`             | `*` |
+/// | `‹`                       | `<` |
+/// | `›`                       | `>` |
+/// | `′`, `″`                  | `"` |
+///
+/// All other characters, including ASCII, are left unchanged.
+///
+/// # Features
+/// - Implements `Stage` and `CharMapper`, supporting full-text normalization
+///   or character-wise mapping.
+/// - Returns `Cow::Borrowed` if no changes are needed, avoiding unnecessary allocations.
+/// - Suitable for pipelines that require consistent ASCII punctuation, e.g.,
+///   search indexing, simplified display, or NLP preprocessing.
 pub struct NormalizePunctuation;
 
 impl Stage for NormalizePunctuation {

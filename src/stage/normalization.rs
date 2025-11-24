@@ -7,10 +7,6 @@ use unicode_normalization::{
     IsNormalized, UnicodeNormalization, is_nfc_quick, is_nfd_quick, is_nfkc_quick, is_nfkd_quick,
 };
 
-/// Unicode normalization stages (NFC, NFD, NFKC, NFKD).
-///
-/// This module provides a generic `NormalizationStage` for Unicode text normalization,
-/// covering the four standard forms:
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NormalizationForm {
     NFC,
@@ -52,7 +48,10 @@ pub const NFKC: NormalizationStage = NormalizationStage::new(NormalizationForm::
 ///   Lossy: formatting info lost. Useful for phonetic processing and maximum normalization.
 pub const NFKD: NormalizationStage = NormalizationStage::new(NormalizationForm::NFKD);
 
-/// Generic Unicode normalization stage for all four forms.
+/// Unicode normalization stages (NFC, NFD, NFKC, NFKD).
+///
+/// This module provides a generic `NormalizationStage` for Unicode text normalization,
+/// covering the four standard forms: NFC, NFD, NFKC, and NFKD.
 pub struct NormalizationStage {
     form: NormalizationForm,
 }
@@ -62,7 +61,6 @@ impl NormalizationStage {
         Self { form }
     }
 
-    /// Quick check if the text is already normalized.
     #[inline(always)]
     fn quick_check(&self, text: &str) -> bool {
         match self.form {
@@ -73,17 +71,16 @@ impl NormalizationStage {
         }
     }
 
-    /// Perform normalization (returns `Cow::Borrowed` if already normalized).
     #[inline(always)]
     fn normalize<'a>(&self, text: Cow<'a, str>) -> Cow<'a, str> {
         if self.quick_check(&text) {
             return text;
         }
         let owned = match self.form {
-            NormalizationForm::NFC => text.nfc().collect(),
-            NormalizationForm::NFD => text.nfd().collect(),
-            NormalizationForm::NFKC => text.nfkc().collect(),
-            NormalizationForm::NFKD => text.nfkd().collect(),
+            NormalizationForm::NFC => text.nfc().collect::<String>(),
+            NormalizationForm::NFD => text.nfd().collect::<String>(),
+            NormalizationForm::NFKC => text.nfkc().collect::<String>(),
+            NormalizationForm::NFKD => text.nfkd().collect::<String>(),
         };
         Cow::Owned(owned)
     }
@@ -125,37 +122,22 @@ mod tests {
     #[test]
     fn test_canonical_nfc_nfd() -> TestResult {
         let c = Context::default();
-        let text = "cafe\u{0301}"; // e + combining acute
-
-        // NFC: composed
-        let nfc = NormalizationStage::new(NormalizationForm::NFC).apply(Cow::Borrowed(text), &c)?;
+        let text = "cafe\u{0301}";
+        let nfc = NFC.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfc, "café");
-        assert_eq!(nfc.chars().count(), 4);
-
-        // NFD: decomposed
-        let nfd = NormalizationStage::new(NormalizationForm::NFD).apply(Cow::Borrowed(text), &c)?;
+        let nfd = NFD.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfd, "cafe\u{0301}");
-        assert_eq!(nfd.chars().count(), 5);
-
         Ok(())
     }
 
     #[test]
     fn test_compatibility_nfkc_nfkd() -> TestResult {
         let c = Context::default();
-        let text = "ﬀﬁ ½ ①"; // ligatures + fraction + circled number
-
-        // NFKC: compatibility composition
-        let nfkc =
-            NormalizationStage::new(NormalizationForm::NFKC).apply(Cow::Borrowed(text), &c)?;
-        // Expected Unicode output
+        let text = "ﬀﬁ ½ ①";
+        let nfkc = NFKC.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfkc, "fffi 1⁄2 1");
-
-        // NFKD: compatibility decomposition
-        let nfkd =
-            NormalizationStage::new(NormalizationForm::NFKD).apply(Cow::Borrowed(text), &c)?;
-        assert_eq!(nfkd, "fffi 1⁄2 1"); // note fraction slash is separate U+2044
-
+        let nfkd = NFKD.apply(Cow::Borrowed(text), &c)?;
+        assert_eq!(nfkd, "fffi 1⁄2 1");
         Ok(())
     }
 
