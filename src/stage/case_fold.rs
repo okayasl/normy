@@ -52,23 +52,21 @@ impl Stage for CaseFold {
         if ctx.lang_entry.requires_peek_ahead() {
             return apply_with_peek_ahead(text, ctx);
         }
-        let (_foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
+
+        let (_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
         let mut out = String::with_capacity(text.len() + extra_bytes);
+
         for c in text.chars() {
-            match ctx.lang_entry.fold_char(c) {
-                Some(ch) => out.push(ch),
-                None => {
-                    let expanded = ctx
-                        .lang_entry
-                        .fold_map()
-                        .iter()
-                        .find(|m| m.from == c)
-                        .expect("inconsistent fold_map: missing multi-char expansion")
-                        .to;
-                    out.push_str(expanded);
-                }
+            if let Some(ch) = ctx.lang_entry.fold_char(c) {
+                out.push(ch);
+            } else if let Some(m) = ctx.lang_entry.fold_map().iter().find(|m| m.from == c) {
+                out.push_str(m.to);
+            } else {
+                // Defensive: should never happen — but correct if it does
+                out.extend(c.to_lowercase());
             }
         }
+
         Ok(Cow::Owned(out))
     }
 

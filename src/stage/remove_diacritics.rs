@@ -364,6 +364,20 @@ mod tests {
     }
 
     #[test]
+    fn test_polish_l() {
+        let stage = RemoveDiacritics;
+        let ctx = Context::new(POL);
+
+        let result_upper = stage.apply(Cow::Borrowed("Łódź"), &ctx).unwrap();
+        // Correct expectation: Ł -> l AND ź -> z (per your language definition)
+        assert_eq!(result_upper, "Lodz");
+
+        let result_lower = stage.apply(Cow::Borrowed("łódź"), &ctx).unwrap();
+        // Correct expectation: ł -> l AND ź -> z
+        assert_eq!(result_lower, "lodz");
+    }
+
+    #[test]
     fn test_vietnamese_clean_text_zero_copy() {
         let stage = RemoveDiacritics;
         let ctx = Context::new(VIE);

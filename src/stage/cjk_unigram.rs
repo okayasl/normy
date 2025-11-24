@@ -1,7 +1,3 @@
-// src/stage/unigram_cjk.rs
-//! UnigramCJK stage – inserts spaces between consecutive CJK ideographs.
-//! Works after SegmentWord. Fully iterator-based and fused for efficiency.
-
 use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use crate::{
@@ -10,6 +6,31 @@ use crate::{
     unicode::is_cjk_han_or_kana,
 };
 
+/// CJK Unigram Segmentation — inserts spaces between consecutive Han ideographs.
+///
+/// This stage converts runs of CJK characters (Chinese, Japanese, Korean) into
+/// space-separated unigrams for use in search indexing, BoW models, or
+/// downstream tokenization.
+///
+/// # Design Principles
+///
+/// - **Zero-Allocation Always**: Implements `CharMapper` → fully fused in static pipelines
+/// - **Post-SegmentWords**: Runs after `SegmentWords` to handle mixed-script text
+/// - **Stateless & Branch-Predictable**: Minimal state, hot loop inlinable
+/// - **No False Positives**: Only triggers on actual Han/Kana sequences
+///
+/// # Example
+///
+/// ```text
+/// "规范库非常快" → "规 范 库 非 常 快"
+/// "Hello世界"     → "Hello 世 界"     (preserves Latin)
+/// ```
+///
+/// This stage is essential for any cross-lingual search system and enables
+/// simple bigram/trigram models over CJK text without dictionary-based breaking.
+///
+/// When combined with `SegmentWords`, it produces tokenizer-free, high-recall
+/// word segmentation across all scripts.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CjkUnigram;
 
