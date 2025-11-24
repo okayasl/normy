@@ -3,7 +3,7 @@ mod unit_tests {
 
     use crate::{
         DEU, ENG, FRA, CaseFold, JPN, LowerCase, NLD, Normy, RemoveDiacritics, TUR,
-        stage::normalize_whitespace::NormalizeWhitespace,
+        TRIM_WHITESPACE_ONLY,
     };
     use std::borrow::Cow;
     #[test]
@@ -69,7 +69,7 @@ mod unit_tests {
     fn zero_copy_no_whitespace() {
         let normy = Normy::builder()
             .lang(ENG)
-            .add_stage(NormalizeWhitespace::trim_only())
+            .add_stage(TRIM_WHITESPACE_ONLY)
             .build();
         let input = "hello";
         let result = normy.normalize(input).unwrap();
@@ -80,7 +80,7 @@ mod unit_tests {
     fn trims_all_ascii_whitespace() {
         let normy = Normy::builder()
             .lang(ENG)
-            .add_stage(NormalizeWhitespace::trim_only())
+            .add_stage(TRIM_WHITESPACE_ONLY)
             .build();
         assert_eq!(
             normy.normalize(" \t\n hello \r\n pop ").unwrap(),
@@ -92,7 +92,7 @@ mod unit_tests {
     fn full_width_spaces_japanese() {
         let normy = Normy::builder()
             .lang(JPN)
-            .add_stage(NormalizeWhitespace::trim_only())
+            .add_stage(TRIM_WHITESPACE_ONLY)
             .build();
         assert_eq!(normy.normalize("　こんにちは　").unwrap(), "こんにちは");
     }

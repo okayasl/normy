@@ -17,7 +17,9 @@ pub use stage::cjk_unigram::CjkUnigram;
 pub use stage::lower_case::LowerCase;
 pub use stage::normalization::{NFC, NFD, NFKC, NFKD};
 pub use stage::normalize_punctuation::NormalizePunctuation;
-pub use stage::normalize_whitespace::NormalizeWhitespace;
+pub use stage::normalize_whitespace::{
+    COLLAPSE_WHITESPACE_ONLY, NORMALIZE_WHITESPACE_FULL, TRIM_WHITESPACE_ONLY,
+};
 pub use stage::remove_diacritics::RemoveDiacritics;
 pub use stage::segment_words::SegmentWords;
 pub use stage::strip_control_chars::StripControlChars;

@@ -1,9 +1,9 @@
 use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use normy::{
-    CaseFold, ENG, JPN, LowerCase, NFKC, NormalizePunctuation, NormalizeWhitespace, NormyBuilder,
-    RemoveDiacritics, StripControlChars, StripFormatControls, StripHtml, StripMarkdown, TUR,
-    UnifyWidth, ZHO,
+    CaseFold, ENG, JPN, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation,
+    NormyBuilder, RemoveDiacritics, StripControlChars, StripFormatControls, StripHtml,
+    StripMarkdown, TUR, UnifyWidth, ZHO,
     context::Context,
     process::Process,
     profile::{
@@ -75,7 +75,7 @@ pub fn custom_social_media() -> Profile<impl Process> {
         .add_stage(StripFormatControls)
         .add_stage(StripEmoji)
         .add_stage(NormalizePunctuation)
-        .add_stage(NormalizeWhitespace::default())
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
         .build()
 }
 

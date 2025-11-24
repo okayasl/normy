@@ -1,5 +1,5 @@
 use normy::{
-    CaseFold, CjkUnigram, DEU, ENG, FRA, NFKC, NLD, NormalizeWhitespace, NormyBuilder,
+    CaseFold, CjkUnigram, DEU, ENG, FRA, NFKC, NLD, NORMALIZE_WHITESPACE_FULL, NormyBuilder,
     RemoveDiacritics, StripFormatControls, StripHtml, StripMarkdown, TUR, ZHO,
     profile::ProfileBuilder,
 };
@@ -19,7 +19,7 @@ fn main() {
         .add_stage(StripHtml)
         .add_stage(StripMarkdown)
         .add_stage(StripFormatControls)
-        .add_stage(NormalizeWhitespace::default())
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
         .add_stage(CjkUnigram) // ← only active for ZHO, JPN, etc.
         .build();
 
