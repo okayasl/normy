@@ -55,7 +55,7 @@ Populate **only** when documented in **official pre-1980** contexts.
 
 ---
 
-## RULE 4: `strip` — Accent-Insensitive Search (Opt-In, Lossy, User Convenience Only)
+## RULE 4: `precomposed_to_base` — Accent-Insensitive Search (Opt-In, Lossy, User Convenience Only)
 
 Populate **only** when marks are pronunciation-based and commonly omitted.
 
@@ -68,11 +68,11 @@ Populate **only** when marks are pronunciation-based and commonly omitted.
 | Turkish, Hungarian, Romanian              | No             | ğ, ş, ț are distinct phonemes |
 
 > **Spanish ñ/Ñ must never be stripped** — it is a separate letter.  
-> By default, `strip` is **disabled**. Normy is **non-destructive** out of the box.
+> By default, `precomposed_to_base` is **disabled**. Normy is **non-destructive** out of the box.
 
 ---
 
-## RULE 5: `diac` — Standalone Combining Marks Only
+## RULE 5: `spacing_diacritics` — Standalone Combining Marks Only
 
 Populate **only** with marks that **never** form precomposed characters in NFC.
 
@@ -84,11 +84,11 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 | Devanagari     | candrabindu (U+0901), nuktā (U+093C) | Yes only if never precomposed | Must verify per-script |
 | Latin/Cyrillic | U+0300–U+036F combining diacritics  | No       | Form é, č, ą in NFC |
 
-> `diac` removal **must never** delete any mark that would normally be precomposed in NFC.
+> `spacing_diacritics` removal **must never** delete any mark that would normally be precomposed in NFC.
 
 ---
 
-## RULE 6: `segment` — Script Boundary Segmentation
+## RULE 6: `needs_word_segmentation` — Script Boundary Segmentation
 
 | Language       | needs_segmentation | unigram_cjk | Heuristic Details |
 |----------------|--------------------|-------------|-------------------|
@@ -100,7 +100,7 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 
 ---
 
-## RULE 7: `peek_ahead` — Multi-Character Contextual Folding
+## RULE 7: `requires_peek_ahead` — Multi-Character Contextual Folding
 
 | Language | Rule             | Include? | Reason |
 |----------|------------------|----------|--------|
@@ -139,8 +139,8 @@ These belong to a **separate, optional compatibility module** (`normy-compat-asc
 1. NFC (always first)
 2. case_map
 3. fold
-4. strip (opt-in)
-5. transliterate (opt-in) → overrides strip
-6. diac removal
+4. precomposed_to_base (opt-in)
+5. transliterate (opt-in) → overrides precomposed_to_base
+6. spacing_diacritics removal
 7. normalize_whitespace
 8. segment
