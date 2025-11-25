@@ -9,7 +9,7 @@ use crate::{
     lang::{LangEntry, SegmentRule},
     stage::{CharMapper, Stage, StageError},
     unicode::{
-        CharClass::{self},
+        CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
         classify, is_any_whitespace,
     },
 };
@@ -126,23 +126,22 @@ fn check_boundary_with_classes(
     // Define the set of non-Western classes that MUST break when transitioning
     // to or from Western, or when transitioning between themselves.
     // ADD CharClass::Other to this set.
-    use CharClass::{Cjk, Hangul, NonCJKScript, Other, SEAsian, Western}; // Import needed for clarity
 
     match (prev_class, curr_class) {
         // Western <-> Script/Other transitions (controlled by lang rules)
-        (Western, Cjk | Hangul | SEAsian | NonCJKScript | Other) => {
+        (Western, Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other) => {
             // <-- ADD Other
             lang.segment_rules().contains(&SegmentRule::WesternToScript)
         }
-        (Cjk | Hangul | SEAsian | NonCJKScript | Other, Western) => {
+        (Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other, Western) => {
             // <-- ADD Other
             lang.segment_rules().contains(&SegmentRule::ScriptToWestern)
         }
 
         // Non-Western Script/Other <-> Non-Western Script/Other transitions
         (
-            Cjk | Hangul | SEAsian | NonCJKScript | Other,
-            Cjk | Hangul | SEAsian | NonCJKScript | Other,
+            Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other,
+            Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other,
         ) => true, // <-- ADD Other
 
         // This final arm now guarantees:
@@ -226,7 +225,15 @@ where
                 if let Some(p_class) = self.prev_class
                     && check_boundary_with_classes(p_class, curr_class, self.lang)
                 {
-                    self.pending_space = true;
+                    // Flush previous char immediately
+                    let prev = self.prev_char.take();
+                    self.prev_char = Some(curr);
+                    self.prev_class = Some(curr_class);
+
+                    if let Some(pc) = prev {
+                        self.pending_space = true;
+                        return Some(pc);
+                    }
                 }
 
                 // Emit previous character, cache current
@@ -283,7 +290,7 @@ impl FusedIterator for SegmentWordIterator {}
 mod tests {
     use super::*;
     use crate::{
-        LANG_TABLE,
+        HIN, LANG_TABLE, TAM,
         lang::{
             Lang,
             data::{JPN, KHM, KOR, LAO, MYA, THA, ZHO},
@@ -508,54 +515,231 @@ mod tests {
 
     // Add this to the existing #[cfg(test)] mod in src/stage/segment_words.rs
 
-    // #[test]
-    // fn test_hindi_indic_virama_segmentation() {
-    //     use crate::lang::data::HIN; // Hindi = Devanagari
-    //     use std::borrow::Cow;
+    #[test]
+    fn test_hindi_indic_virama_segmentation() {
+        use crate::lang::data::HIN; // Hindi = Devanagari
+        use std::borrow::Cow;
 
-    //     let stage = SegmentWords;
-    //     let ctx = Context::new(HIN);
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
 
-    //     // Real-world Hindi examples requiring virama-aware syllable breaks
-    //     let cases = &[
-    //         // "पत्नी" = patnī → प + त + ् + न + ी
-    //         // Virama (् U+094D) joins त and न → should insert space *after* virama cluster
-    //         // Expected: "प त् नी" or at minimum "पत्नी" → "प त्नी" (partial break)
-    //         // Current code: treats all as NonCJKScript → no break → "पत्नी"
-    //         ("पत्नी", "प त्नी"), // Minimal correct: break after virama
-    //         // "संतोष" = saṃtoṣ → स + ं + त + ो + ष
-    //         // नुकता (ं U+0902) + consonant cluster
-    //         ("संतोष", "सं तोष"), // Expected: break before तो
-    //         // "अंतरराष्ट्रीय" = antararāṣṭrīya
-    //         // Multiple virama clusters: त् र, ष् ट् र
-    //         ("अंतरराष्ट्रीय", "अन्तर् राष्ट्र् ईय"), // Ideal (aggressive)
-    //         // At minimum: should have at least one internal break
-    //         ("अंतरराष्ट्रीय", "अंतर राष्ट्र् ईय"), // Acceptable minimal
-    //         // Mixed script: Hinglish — should break on Latin↔Devanagari AND virama
-    //         ("Helloदोस्त", "Hello दोस्त"),          // Already works
-    //         ("दोस्तHello", "दोस्त Hello"),          // Already works
-    //         ("मेराBestFriend", "मेरा Best Friend"), // Should insert two breaks
-    //         ("मेराbestfriend", "मेरा bestfriend"),  // Lowercase: still break
-    //         // Critical: virama at word end (rare but valid in Sanskrit loanwords)
-    //         ("विद्वत्", "विद्व त्"), // "vidvat" (learned) — virama-final
-    //     ];
+        // Real-world Hindi examples requiring virama-aware syllable breaks
+        let cases = &[
+            // "पत्नी" = patnī → प + त + ् + न + ी
+            // Virama (् U+094D) joins त and न → should insert space *after* virama cluster
+            // Expected: "प त् नी" or at minimum "पत्नी" → "प त्नी" (partial break)
+            // Current code: treats all as NonCJKScript → no break → "पत्नी"
+            ("पत्नी", "प त्नी"), // Minimal correct: break after virama
+            // "संतोष" = saṃtoṣ → स + ं + त + ो + ष
+            // नुकता (ं U+0902) + consonant cluster
+            ("संतोष", "सं तोष"), // Expected: break before तो
+            // "अंतरराष्ट्रीय" = antararāṣṭrīya
+            // Multiple virama clusters: त् र, ष् ट् र
+            ("अंतरराष्ट्रीय", "अन्तर् राष्ट्र् ईय"), // Ideal (aggressive)
+            // At minimum: should have at least one internal break
+            ("अंतरराष्ट्रीय", "अंतर राष्ट्र् ईय"), // Acceptable minimal
+            // Mixed script: Hinglish — should break on Latin↔Devanagari AND virama
+            ("Helloदोस्त", "Hello दोस्त"),          // Already works
+            ("दोस्तHello", "दोस्त Hello"),          // Already works
+            ("मेराBestFriend", "मेरा Best Friend"), // Should insert two breaks
+            ("मेराbestfriend", "मेरा bestfriend"),  // Lowercase: still break
+            // Critical: virama at word end (rare but valid in Sanskrit loanwords)
+            ("विद्वत्", "विद्व त्"), // "vidvat" (learned) — virama-final
+        ];
 
-    //     for &(input, expected) in cases {
-    //         let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-    //         assert_eq!(
-    //             output, expected,
-    //             "\nFAILED: Hindi virama segmentation\n  input:  {input}\n  got:    {output}\n  want:   {expected}\n"
-    //         );
-    //     }
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                output, expected,
+                "\nFAILED: Hindi virama segmentation\n  input:  {input}\n  got:    {output}\n  want:   {expected}\n"
+            );
+        }
 
-    //     // Extra assertion: ensure we didn't accidentally break Latin-only text
-    //     let no_break = "hello world";
-    //     let output = stage.apply(Cow::Borrowed(no_break), &ctx).unwrap();
-    //     assert_eq!(
-    //         output, no_break,
-    //         "Should not insert spaces in pure Latin text even under HIN context"
-    //     );
-    // }
+        // Extra assertion: ensure we didn't accidentally break Latin-only text
+        let no_break = "hello world";
+        let output = stage.apply(Cow::Borrowed(no_break), &ctx).unwrap();
+        assert_eq!(
+            output, no_break,
+            "Should not insert spaces in pure Latin text even under HIN context"
+        );
+    }
+
+    // Short helper to make ZWSP insertion obvious in test data
+    const ZWSP: &str = "\u{200B}";
+
+    #[test]
+    fn test_hindi_virama_basic() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+
+        let cases: &[(&str, &str)] = &[
+            // single virama joining two consonants -> break AFTER virama
+            // प + ् + त + ् + न + ी  => प्‌त्‌नी
+            ("पत्नी", &format!("प\u{094D}{}त\u{094D}{}नी", ZWSP, ZWSP)), // double virama cluster
+            // single join: क + ् + त -> क्‌त
+            ("क्वित्", "क्वित्"), // already has complex cluster; keep as-is if no explicit virama between simple consonants
+            // simpler explicit
+            ("क्त", &format!("क\u{094D}{}त", ZWSP)),
+            // virama followed by vowel sign -> still break after virama if it joins consonant
+            ("विक्टोरिया", &format!("विक\u{094D}{}टोरिया", ZWSP)),
+            // word-final virama: no break
+            ("विद्वत्", "विद्वत्"),
+            // ZWJ (U+200D) suppresses virama break
+            ("क्\u{200D}ष", "क्\u{200D}ष"), // virama suppressed by ZWJ -> no ZWSP
+            // Nukta (U+093C) combined consonants still obey virama rule
+            // (e.g. क़ = क + nukta) followed by virama join
+            ("क़्त", &format!("क\u{093C}\u{094D}{}त", ZWSP)),
+        ];
+
+        for &(input, expected) in cases {
+            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                out, expected,
+                "\nFAILED: Hindi basic\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hindi_virama_complex_clusters_and_mixed_script() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+
+        let cases: &[(&str, &str)] = &[
+            // long word with multiple viramas -> insert ZWSP after each internal virama (not final)
+            (
+                "अंतरराष्ट्रीय",
+                // break after त्, after र्, after ष्, before final vowel cluster as per rule (not word-final)
+                &format!(
+                    "अन्\u{094D}{}तर\u{094D}{}राष\u{094D}{}ट\u{094D}{}रीय",
+                    ZWSP, ZWSP, ZWSP, ZWSP
+                ),
+            ),
+            // Mixed Hinglish: Devanagari <-> Latin boundaries + virama handling
+            ("Helloदोस्त", &format!("Hello{}दोस्त", ZWSP)), // script boundary only
+            ("मेराBestFriend", &format!("मेरा{}Best{}Friend", ZWSP, ZWSP)), // two script boundaries
+            ("मेराbestfriend", &format!("मेरा{}bestfriend", ZWSP)),
+        ];
+
+        for &(input, expected) in cases {
+            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                out, expected,
+                "\nFAILED: Hindi complex/mixed\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
+            );
+        }
+    }
+
+    #[test]
+    fn test_hindi_punctuation_digits_whitespace() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+
+        let cases: &[(&str, &str)] = &[
+            // punctuation should cause script<->other boundary as usual
+            ("राम,सीता", &format!("राम,{}सीता", ZWSP)),
+            // digits adjacent to Devanagari -> break
+            ("साल2025", &format!("साल{}2025", ZWSP)),
+            ("2025साल", &format!("2025{}साल", ZWSP)),
+            // whitespace preserved/collapsed to single ASCII space
+            ("  राम   सीता  ", " राम सीता "),
+        ];
+
+        for &(input, expected) in cases {
+            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                out, expected,
+                "\nFAILED: Hindi punct/digit/whitespace\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
+            );
+        }
+    }
+
+    // -------------------- Tamil (puḷḷi) --------------------
+
+    #[test]
+    fn test_tamil_pulli_basic() {
+        let stage = SegmentWords;
+        let ctx = Context::new(TAM);
+
+        let cases: &[(&str, &str)] = &[
+            // puḷḷi (virama) U+0BCD between consonants -> ZWSP after puḷḷi (if not word-final)
+            ("பற்றி", &format!("ப்{}ற்{}றி", ZWSP, ZWSP)), // double puḷḷi
+            ("அக்கா", &format!("அக்{}கா", ZWSP)),
+            ("இலங்கை", &format!("இலங்{}கை", ZWSP)),
+            // no puḷḷi -> no break
+            ("தமிழ்", "தமிழ்"),
+            // puḷḷi at word end -> no break
+            ("சமார்த்த்\u{0BCD}", "சமார்த்த\u{0BCD}"), // final pulli (rare) - no inserted ZWSP
+            // ZWJ suppression (Tamil uses ZWJ similarly)
+            ("க்\u{200D}க", "க்\u{200D}க"),
+        ];
+
+        for &(input, expected) in cases {
+            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                out, expected,
+                "\nFAILED: Tamil basic\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
+            );
+        }
+    }
+
+    #[test]
+    fn test_tamil_complex_and_mixed() {
+        let stage = SegmentWords;
+        let ctx = Context::new(TAM);
+
+        let cases: &[(&str, &str)] = &[
+            // Complex cluster with multiple puḷḷi -> multiple ZWSP inserted internal
+            ("பிரிந்துபோயின்", "பிரிந்துபோயின்"), // no puḷḷi sequence -> unchanged
+            // Mixed Tamil + Latin
+            ("Helloவணக்கம்", &format!("Hello{}வணக்கம்", ZWSP)),
+            ("வணக்கம்World", &format!("வணக்கம்{}World", ZWSP)),
+            // digits
+            ("தமிழ்123", &format!("தமிழ்{}123", ZWSP)),
+        ];
+
+        for &(input, expected) in cases {
+            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                out, expected,
+                "\nFAILED: Tamil complex/mixed\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
+            );
+        }
+    }
+
+    #[test]
+    fn test_indic_zwj_and_suppression() {
+        let stage = SegmentWords;
+        let ctx_h = Context::new(HIN);
+        let ctx_t = Context::new(TAM);
+
+        // ZWJ suppresses virama effect (no ZWSP should be inserted)
+        let h_input = "क्\u{200D}ष"; // Devanagari K + virama + ZWJ + ṣa
+        let h_expected = "क्\u{200D}ष";
+        let h_out = stage.apply(Cow::Borrowed(h_input), &ctx_h).unwrap();
+        assert_eq!(h_out, h_expected, "Hindi ZWJ suppression failed");
+
+        let t_input = "க்\u{200D}க"; // Tamil
+        let t_expected = "க்\u{200D}க";
+        let t_out = stage.apply(Cow::Borrowed(t_input), &ctx_t).unwrap();
+        assert_eq!(t_out, t_expected, "Tamil ZWJ suppression failed");
+    }
+
+    #[test]
+    fn test_property_no_break_inside_simple_word() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+
+        // Ensure Latin-only text is unchanged under HIN context
+        let latin = "hello world";
+        let out = stage.apply(Cow::Borrowed(latin), &ctx).unwrap();
+        assert_eq!(out, latin, "Should not touch pure Latin text");
+
+        // Ensure single Devanagari word without virama remains unchanged
+        let simple = "रामायण";
+        let out2 = stage.apply(Cow::Borrowed(simple), &ctx).unwrap();
+        assert_eq!(out2, simple, "Should not insert ZWSP when no virama exists");
+    }
 
     // Small helper for iterating character pairs
     fn assert_boundaries(lang: &Lang, pairs: &[(&str, &str)], expected: bool) {

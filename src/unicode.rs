@@ -236,18 +236,15 @@ pub fn is_ascii_letter(c: char) -> bool {
     )
 }
 
-// /// Script cluster test used by segmentation.
-// #[inline(always)]
-// pub fn is_same_script_cluster(a: char, b: char) -> bool {
-//     match (classify(a), classify(b)) {
-//         (CharClass::Western, CharClass::Western) => true,
-//         (CharClass::Cjk, CharClass::Cjk) => true,
-//         (CharClass::Hangul, CharClass::Hangul) => true,
-//         (CharClass::SEAsian, CharClass::SEAsian) => true,
-//         _ if is_cjk_unified_ideograph(a) && is_cjk_unified_ideograph(b) => true,
-//         _ => false,
-//     }
-// }
+#[inline(always)]
+pub fn is_indic_script(c: char) -> bool {
+    matches!(c as u32,
+        0x0900..=0x097F | // Devanagari
+        0xA8E0..=0xA8FF | // Devanagari Extended
+        0x0B80..=0x0BFF | // Tamil
+        0x11FC0..=0x11FFF // Tamil Supplement
+    )
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -259,6 +256,7 @@ pub enum CharClass {
     Hangul,       // Hangul syllables & Jamo
     SEAsian,      // Thai, Lao, Myanmar, Khmer, Tai Tham
     NonCJKScript, // Greek, Cyrillic, Arabic, Hebrew, etc.
+    Indic,
 }
 
 // Key fix in unicode.rs - classify() function
@@ -299,6 +297,10 @@ pub fn classify(c: char) -> CharClass {
     // 5. Southeast Asian scripts
     if is_se_asian_script(c) {
         return CharClass::SEAsian;
+    }
+
+    if is_indic_script(c) {
+        return CharClass::Indic;
     }
 
     // 6. Western extended letters (Latin-1 / Extended-A/B)
