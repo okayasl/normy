@@ -236,18 +236,18 @@ pub fn is_ascii_letter(c: char) -> bool {
     )
 }
 
-/// Script cluster test used by segmentation.
-#[inline(always)]
-pub fn is_same_script_cluster(a: char, b: char) -> bool {
-    match (classify(a), classify(b)) {
-        (CharClass::Western, CharClass::Western) => true,
-        (CharClass::Cjk, CharClass::Cjk) => true,
-        (CharClass::Hangul, CharClass::Hangul) => true,
-        (CharClass::SEAsian, CharClass::SEAsian) => true,
-        _ if is_cjk_unified_ideograph(a) && is_cjk_unified_ideograph(b) => true,
-        _ => false,
-    }
-}
+// /// Script cluster test used by segmentation.
+// #[inline(always)]
+// pub fn is_same_script_cluster(a: char, b: char) -> bool {
+//     match (classify(a), classify(b)) {
+//         (CharClass::Western, CharClass::Western) => true,
+//         (CharClass::Cjk, CharClass::Cjk) => true,
+//         (CharClass::Hangul, CharClass::Hangul) => true,
+//         (CharClass::SEAsian, CharClass::SEAsian) => true,
+//         _ if is_cjk_unified_ideograph(a) && is_cjk_unified_ideograph(b) => true,
+//         _ => false,
+//     }
+// }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]

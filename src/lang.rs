@@ -1,9 +1,6 @@
 pub mod data;
 
-use crate::{
-    ENG,
-    unicode::{CharClass, classify, is_any_whitespace, is_same_script_cluster},
-};
+use crate::ENG;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Lang {
@@ -362,186 +359,186 @@ impl LangEntry {
     //     text.chars().any(|c| self.is_diacritic(c))
     // }
 
-    /// Determine whether a boundary (space) should be inserted between two characters.
-    /// Returns `true` if a segmentation boundary is required, `false` otherwise.
-    ///
-    /// Rules:
-    /// 1. Whitespace never produces boundaries.
-    /// 2. Characters in the same script cluster (Western, CJK, Hangul, SE-Asian) do not produce boundaries.
-    /// 3. Consecutive CJK ideographs do not produce boundaries.
-    /// 4. Western → Script or Script → Western boundaries follow the language's segment rules.
-    /// 5. Cross-script transitions produce a boundary.
-    #[inline(always)]
-    pub fn needs_boundary_between(&self, prev: char, curr: char) -> bool {
-        // --- 1. Whitespace never produces boundaries ---
-        if is_any_whitespace(prev) || is_any_whitespace(curr) {
-            return false;
-        }
+    // /// Determine whether a boundary (space) should be inserted between two characters.
+    // /// Returns `true` if a segmentation boundary is required, `false` otherwise.
+    // ///
+    // /// Rules:
+    // /// 1. Whitespace never produces boundaries.
+    // /// 2. Characters in the same script cluster (Western, CJK, Hangul, SE-Asian) do not produce boundaries.
+    // /// 3. Consecutive CJK ideographs do not produce boundaries.
+    // /// 4. Western → Script or Script → Western boundaries follow the language's segment rules.
+    // /// 5. Cross-script transitions produce a boundary.
+    // #[inline(always)]
+    // pub fn needs_boundary_between(&self, prev: char, curr: char) -> bool {
+    //     // --- 1. Whitespace never produces boundaries ---
+    //     if is_any_whitespace(prev) || is_any_whitespace(curr) {
+    //         return false;
+    //     }
 
-        // --- 2. Same script cluster: no boundary ---
-        if is_same_script_cluster(prev, curr) {
-            return false;
-        }
+    //     // --- 2. Same script cluster: no boundary ---
+    //     if is_same_script_cluster(prev, curr) {
+    //         return false;
+    //     }
 
-        // --- 3. Cross-cluster transitions ---
-        let prev_class = classify(prev);
-        let curr_class = classify(curr);
+    //     // --- 3. Cross-cluster transitions ---
+    //     let prev_class = classify(prev);
+    //     let curr_class = classify(curr);
 
-        match (prev_class, curr_class) {
-            // Western → Script (CJK/Hangul/SEAsian/NonCJKScript)
-            (
-                CharClass::Western,
-                CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
-            ) => self.segment_rules().contains(&SegmentRule::WesternToScript),
+    //     match (prev_class, curr_class) {
+    //         // Western → Script (CJK/Hangul/SEAsian/NonCJKScript)
+    //         (
+    //             CharClass::Western,
+    //             CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
+    //         ) => self.segment_rules().contains(&SegmentRule::WesternToScript),
 
-            // Script → Western
-            (
-                CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
-                CharClass::Western,
-            ) => self.segment_rules().contains(&SegmentRule::ScriptToWestern),
+    //         // Script → Western
+    //         (
+    //             CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
+    //             CharClass::Western,
+    //         ) => self.segment_rules().contains(&SegmentRule::ScriptToWestern),
 
-            // Cross-script (CJK → Hangul/SEAsian/NonCJKScript etc.)
-            (pc, cc) if pc != cc => true,
+    //         // Cross-script (CJK → Hangul/SEAsian/NonCJKScript etc.)
+    //         (pc, cc) if pc != cc => true,
 
-            // Everything else: no boundary
-            _ => false,
-        }
-    }
+    //         // Everything else: no boundary
+    //         _ => false,
+    //     }
+    // }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::lang::{
-        Lang,
-        data::{JPN, KOR, LANG_TABLE, THA, ZHO},
-    };
+// #[cfg(test)]
+// mod tests {
+//     use crate::lang::{
+//         Lang,
+//         data::{JPN, KOR, LANG_TABLE, THA, ZHO},
+//     };
 
-    // Small helper for iterating character pairs
-    fn assert_boundaries(lang: &Lang, pairs: &[(&str, &str)], expected: bool) {
-        for &(a, b) in pairs {
-            let chars: Vec<char> = a.chars().collect();
-            let chars2: Vec<char> = b.chars().collect();
-            let lang_entry = LANG_TABLE
-                .get(lang.code())
-                .copied()
-                .expect("language not present in LANG_TABLE – this is a bug");
-            assert_eq!(
-                lang_entry.needs_boundary_between(chars[0], chars2[0]),
-                expected,
-                "Failed: {} -> {} for {}",
-                a,
-                b,
-                std::any::type_name::<Lang>()
-            );
-        }
-    }
+//     // Small helper for iterating character pairs
+//     fn assert_boundaries(lang: &Lang, pairs: &[(&str, &str)], expected: bool) {
+//         for &(a, b) in pairs {
+//             let chars: Vec<char> = a.chars().collect();
+//             let chars2: Vec<char> = b.chars().collect();
+//             let lang_entry = LANG_TABLE
+//                 .get(lang.code())
+//                 .copied()
+//                 .expect("language not present in LANG_TABLE – this is a bug");
+//             assert_eq!(
+//                 lang_entry.needs_boundary_between(chars[0], chars2[0]),
+//                 expected,
+//                 "Failed: {} -> {} for {}",
+//                 a,
+//                 b,
+//                 std::any::type_name::<Lang>()
+//             );
+//         }
+//     }
 
-    #[test]
-    fn test_whitespace_no_boundary() {
-        let whitespace_pairs = &[(" ", "あ"), ("あ", " "), ("\n", "A"), ("A", "\t")];
-        assert_boundaries(&JPN, whitespace_pairs, false);
-    }
+//     #[test]
+//     fn test_whitespace_no_boundary() {
+//         let whitespace_pairs = &[(" ", "あ"), ("あ", " "), ("\n", "A"), ("A", "\t")];
+//         assert_boundaries(&JPN, whitespace_pairs, false);
+//     }
 
-    #[test]
-    fn test_western_script_breaks() {
-        let pairs = &[
-            ("A", "あ"),
-            ("あ", "A"),
-            ("A", "中"),
-            ("文", "A"),
-            ("A", "\u{AC00}"), // Hangul
-            ("\u{AC00}", "A"),
-        ];
-        assert_boundaries(&JPN, &pairs[0..2], true);
-        assert_boundaries(&ZHO, &pairs[2..4], true);
-        assert_boundaries(&KOR, &pairs[4..6], true);
-    }
+//     #[test]
+//     fn test_western_script_breaks() {
+//         let pairs = &[
+//             ("A", "あ"),
+//             ("あ", "A"),
+//             ("A", "中"),
+//             ("文", "A"),
+//             ("A", "\u{AC00}"), // Hangul
+//             ("\u{AC00}", "A"),
+//         ];
+//         assert_boundaries(&JPN, &pairs[0..2], true);
+//         assert_boundaries(&ZHO, &pairs[2..4], true);
+//         assert_boundaries(&KOR, &pairs[4..6], true);
+//     }
 
-    #[test]
-    fn test_same_cluster_no_break() {
-        let japanese = &[("あ", "ア")];
-        let hangul = &[("\u{AC00}", "\u{AC01}")];
-        let thai = &[("\u{0E01}", "\u{0E02}")];
+//     #[test]
+//     fn test_same_cluster_no_break() {
+//         let japanese = &[("あ", "ア")];
+//         let hangul = &[("\u{AC00}", "\u{AC01}")];
+//         let thai = &[("\u{0E01}", "\u{0E02}")];
 
-        assert_boundaries(&JPN, japanese, false);
-        assert_boundaries(&KOR, hangul, false);
-        assert_boundaries(&THA, thai, false);
-    }
+//         assert_boundaries(&JPN, japanese, false);
+//         assert_boundaries(&KOR, hangul, false);
+//         assert_boundaries(&THA, thai, false);
+//     }
 
-    #[test]
-    fn test_punctuation_and_symbols() {
-        let script_to_punct = &[
-            ("日", ")"),
-            ("文", "."),
-            ("\u{0E01}", ","),
-            ("\u{AC00}", "-"),
-        ];
-        let script_to_emoji = &[("あ", "😀"), ("😀", "あ"), ("A", "😃"), ("가", "🎉")];
+//     #[test]
+//     fn test_punctuation_and_symbols() {
+//         let script_to_punct = &[
+//             ("日", ")"),
+//             ("文", "."),
+//             ("\u{0E01}", ","),
+//             ("\u{AC00}", "-"),
+//         ];
+//         let script_to_emoji = &[("あ", "😀"), ("😀", "あ"), ("A", "😃"), ("가", "🎉")];
 
-        assert_boundaries(&JPN, &script_to_punct[0..2], true);
-        assert_boundaries(&THA, &script_to_punct[2..3], true);
-        assert_boundaries(&KOR, &script_to_punct[3..4], true);
+//         assert_boundaries(&JPN, &script_to_punct[0..2], true);
+//         assert_boundaries(&THA, &script_to_punct[2..3], true);
+//         assert_boundaries(&KOR, &script_to_punct[3..4], true);
 
-        assert_boundaries(&JPN, &script_to_emoji[0..2], true);
-        assert_boundaries(&ZHO, &script_to_emoji[2..3], true);
-        assert_boundaries(&KOR, &script_to_emoji[3..4], true);
-    }
+//         assert_boundaries(&JPN, &script_to_emoji[0..2], true);
+//         assert_boundaries(&ZHO, &script_to_emoji[2..3], true);
+//         assert_boundaries(&KOR, &script_to_emoji[3..4], true);
+//     }
 
-    #[test]
-    fn test_digits_break() {
-        let pairs = &[("1", "あ"), ("あ", "1"), ("9", "中"), ("0", "\u{AC00}")];
-        assert_boundaries(&JPN, &pairs[0..2], true);
-        assert_boundaries(&ZHO, &pairs[2..3], true);
-        assert_boundaries(&KOR, &pairs[3..4], true);
-    }
+//     #[test]
+//     fn test_digits_break() {
+//         let pairs = &[("1", "あ"), ("あ", "1"), ("9", "中"), ("0", "\u{AC00}")];
+//         assert_boundaries(&JPN, &pairs[0..2], true);
+//         assert_boundaries(&ZHO, &pairs[2..3], true);
+//         assert_boundaries(&KOR, &pairs[3..4], true);
+//     }
 
-    #[test]
-    fn test_cross_script_clusters() {
-        let pairs = &[
-            ("A", "Я"),
-            ("Z", "Ж"),
-            ("あ", "\u{0E01}"),
-            ("文", "\u{AC00}"),
-        ];
-        assert_boundaries(&JPN, &pairs[0..3], true);
-        assert_boundaries(&KOR, &pairs[1..4], true);
-    }
+//     #[test]
+//     fn test_cross_script_clusters() {
+//         let pairs = &[
+//             ("A", "Я"),
+//             ("Z", "Ж"),
+//             ("あ", "\u{0E01}"),
+//             ("文", "\u{AC00}"),
+//         ];
+//         assert_boundaries(&JPN, &pairs[0..3], true);
+//         assert_boundaries(&KOR, &pairs[1..4], true);
+//     }
 
-    #[test]
-    fn test_edge_cjk_blocks() {
-        // No break inside CJK blocks
-        let no_break = &[("\u{2F00}", "\u{2F01}"), ("\u{2F00}", "\u{2F00}")];
-        assert_boundaries(&JPN, no_break, false);
+//     #[test]
+//     fn test_edge_cjk_blocks() {
+//         // No break inside CJK blocks
+//         let no_break = &[("\u{2F00}", "\u{2F01}"), ("\u{2F00}", "\u{2F00}")];
+//         assert_boundaries(&JPN, no_break, false);
 
-        // Break with CJK punctuation
-        let break_pairs = &[("、", "あ"), ("日", "。")];
-        assert_boundaries(&JPN, break_pairs, true);
-    }
+//         // Break with CJK punctuation
+//         let break_pairs = &[("、", "あ"), ("日", "。")];
+//         assert_boundaries(&JPN, break_pairs, true);
+//     }
 
-    #[test]
-    fn test_western_and_digits() {
-        let pairs = &[
-            ("A", "B"), // Western → Western
-            ("1", "2"), // Digit → Digit
-            ("A", "1"), // Letter → Digit
-            ("1", "A"), // Digit → Letter
-        ];
-        assert_boundaries(&JPN, &pairs[0..2], false); // Western→Western and digits: no break
-        assert_boundaries(&JPN, &pairs[2..4], false); // Cross Western class: no break
-    }
+//     #[test]
+//     fn test_western_and_digits() {
+//         let pairs = &[
+//             ("A", "B"), // Western → Western
+//             ("1", "2"), // Digit → Digit
+//             ("A", "1"), // Letter → Digit
+//             ("1", "A"), // Digit → Letter
+//         ];
+//         assert_boundaries(&JPN, &pairs[0..2], false); // Western→Western and digits: no break
+//         assert_boundaries(&JPN, &pairs[2..4], false); // Cross Western class: no break
+//     }
 
-    #[test]
-    fn test_ascii_to_cjk_and_back() {
-        let pairs = &[
-            ("H", "世"), // Western → CJK
-            ("o", "世"), // Western → CJK
-            ("世", "H"), // CJK → Western
-            ("文", "A"), // CJK → Western
-        ];
-        // Western -> CJK: MUST insert space (true)
-        assert_boundaries(&JPN, &pairs[0..2], true);
+//     #[test]
+//     fn test_ascii_to_cjk_and_back() {
+//         let pairs = &[
+//             ("H", "世"), // Western → CJK
+//             ("o", "世"), // Western → CJK
+//             ("世", "H"), // CJK → Western
+//             ("文", "A"), // CJK → Western
+//         ];
+//         // Western -> CJK: MUST insert space (true)
+//         assert_boundaries(&JPN, &pairs[0..2], true);
 
-        // CJK -> Western: MUST insert space (true)
-        assert_boundaries(&JPN, &pairs[2..4], true); // <-- FIX: Change false to true
-    }
-}
+//         // CJK -> Western: MUST insert space (true)
+//         assert_boundaries(&JPN, &pairs[2..4], true); // <-- FIX: Change false to true
+//     }
+// }
