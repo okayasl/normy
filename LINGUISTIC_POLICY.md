@@ -49,6 +49,7 @@ Populate **only** when documented in **official pre-1980** contexts.
 | German         | Ä→"ae", Ö→"oe", Ü→"ue", ß→"ss"   | Yes      | Reichsbahn, passports |
 | Scandinavian   | Å→"aa", Ä→"ae", Ö→"oe"           | Yes      | Postal standards |
 | Icelandic      | Þ→"th", Ð→"d"                    | Yes      | International naming |
+| Russian        | ISO/R 9:1968 (e.g., $\text{Ю}\rightarrow\text{"ju"}, \text{Щ}\rightarrow\text{"šč"}, \text{Ъ}\rightarrow\text{"ʺ"}$)                   | Yes      | ISO/R 9:1968 Scientific Transliteration (Pre-1980 standard) |
 | All others     | —                                | No       | No historical tradition |
 
 > Strip removes marks; transliterate replaces letters. They never conflict — **transliterate always wins**.
@@ -95,6 +96,8 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 | Chinese (ZH)   | true               | true        | Full unigram breaking |
 | Japanese (JA)  | true               | false       | Boundaries only at script transitions |
 | Korean (KO)    | true               | false       | Same as Japanese |
+| Hindi (HI)    | true               | false       | Required for Devanagari script processing (clustered segmentation) |
+| Tamil (TA)    | true               | false       | Required for agglutinative, non-space-delimited script processing (morphological segmentation) |
 | Thai, Lao, Khmer | true             | false       | Lightweight zero-width space insertion at script boundaries and legal syllable breaks — **no dictionary**, **no illegal cluster rejection** |
 | Myanmar        | true               | false       | Lightweight syllable boundary heuristic — **no dictionary** |
 
@@ -105,6 +108,7 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 | Language | Rule             | Include? | Reason |
 |----------|------------------|----------|--------|
 | Dutch    | I + J → "ij"     | Yes      | Only known multi-character fold in Normy |
+| Greek    | $\text{σ} \leftrightarrow \text{ς}$     | Yes      | Required for word-boundary detection necessary for accurate contextual casing of Sigma  |
 | All others | —              | No       | Dictionary-based logic not supported |
 
 > Normy treats all other digraph letters (Czech “ch”, Slovak “dz/dž”, Croatian “lj/nj”, etc.) as **ordinary sequences** — they are **not** treated as atomic units because Unicode does not encode them as single codepoints.

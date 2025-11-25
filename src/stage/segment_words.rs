@@ -432,4 +432,55 @@ mod tests {
             assert_eq!(output, expected);
         }
     }
+
+    // Add this to the existing #[cfg(test)] mod in src/stage/segment_words.rs
+
+    #[test]
+    fn test_hindi_indic_virama_segmentation_fails_until_implemented() {
+        use crate::lang::data::HIN; // Hindi = Devanagari
+        use std::borrow::Cow;
+
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+
+        // Real-world Hindi examples requiring virama-aware syllable breaks
+        let cases = &[
+            // "पत्नी" = patnī → प + त + ् + न + ी
+            // Virama (् U+094D) joins त and न → should insert space *after* virama cluster
+            // Expected: "प त् नी" or at minimum "पत्नी" → "प त्नी" (partial break)
+            // Current code: treats all as NonCJKScript → no break → "पत्नी"
+            ("पत्नी", "प त्नी"), // Minimal correct: break after virama
+            // "संतोष" = saṃtoṣ → स + ं + त + ो + ष
+            // नुकता (ं U+0902) + consonant cluster
+            ("संतोष", "सं तोष"), // Expected: break before तो
+            // "अंतरराष्ट्रीय" = antararāṣṭrīya
+            // Multiple virama clusters: त् र, ष् ट् र
+            ("अंतरराष्ट्रीय", "अन्तर् राष्ट्र् ईय"), // Ideal (aggressive)
+            // At minimum: should have at least one internal break
+            ("अंतरराष्ट्रीय", "अंतर राष्ट्र् ईय"), // Acceptable minimal
+            // Mixed script: Hinglish — should break on Latin↔Devanagari AND virama
+            ("Helloदोस्त", "Hello दोस्त"),          // Already works
+            ("दोस्तHello", "दोस्त Hello"),          // Already works
+            ("मेराBestFriend", "मेरा Best Friend"), // Should insert two breaks
+            ("मेराbestfriend", "मेरा bestfriend"),  // Lowercase: still break
+            // Critical: virama at word end (rare but valid in Sanskrit loanwords)
+            ("विद्वत्", "विद्व त्"), // "vidvat" (learned) — virama-final
+        ];
+
+        for &(input, expected) in cases {
+            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                output, expected,
+                "\nFAILED: Hindi virama segmentation\n  input:  {input}\n  got:    {output}\n  want:   {expected}\n\nThis test fails intentionally until `SegmentWords` implements Indic virama (U+094D) cluster breaking.\nSee `needs_boundary_between` in `LangEntry` — it currently only checks script transitions.\nFix: Add virama-aware logic in `segment_chars` iterator using `is_indic_virama(c)` or `peek_pairs`.\n"
+            );
+        }
+
+        // Extra assertion: ensure we didn't accidentally break Latin-only text
+        let no_break = "hello world";
+        let output = stage.apply(Cow::Borrowed(no_break), &ctx).unwrap();
+        assert_eq!(
+            output, no_break,
+            "Should not insert spaces in pure Latin text even under HIN context"
+        );
+    }
 }

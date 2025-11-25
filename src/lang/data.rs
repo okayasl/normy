@@ -205,7 +205,7 @@ define_languages! {
 
     ARA, "ARA", "Arabic",
         case: [],
-        fold: [],
+        fold: [],  // NO alif folding - explicitly rejected in validation
         transliterate: [],
         precomposed_to_base: [],
         spacing_diacritics: [
@@ -255,7 +255,7 @@ define_languages! {
             'Ỳ' => 'Y', 'ỳ' => 'y', 'Ý' => 'Y', 'ý' => 'y', 'Ỷ' => 'Y', 'ỷ' => 'y', 'Ỹ' => 'Y', 'ỹ' => 'y', 'Ỵ' => 'Y', 'ỵ' => 'y',
             'Đ' => 'D', 'đ' => 'd'
         ],
-        spacing_diacritics: [],
+        spacing_diacritics: ['\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}'],  // ADDED: Five Vietnamese tone marks
         needs_word_segmentation: false,
         requires_peek_ahead: false,
         peek_pairs: [],
@@ -271,7 +271,7 @@ define_languages! {
         transliterate: [
             'Œ' => "oe", 'œ' => "oe",
             'Æ' => "ae", 'æ' => "ae",
-            'Ç' => "c", 'ç' => "c",  // Historical ASCII (postal/telegraph) — Rule 3
+            'Ç' => "c", 'ç' => "c",
         ],
         precomposed_to_base: [
             'À' => 'A', 'à' => 'a',
@@ -287,9 +287,8 @@ define_languages! {
             'Û' => 'U', 'û' => 'u',
             'Ü' => 'U', 'ü' => 'u',
             'Ÿ' => 'Y', 'ÿ' => 'y',
-            // Excluded: Ç/ç (real letter), Œ/œ, Æ/æ (ligatures) — Rule 4
         ],
-        spacing_diacritics: [],  // No true spacing marks — Rule 5
+        spacing_diacritics: [],
         needs_word_segmentation: false,
         requires_peek_ahead: false,
         peek_pairs: [],
@@ -424,6 +423,8 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
+    // Greek (ELL) Addition: Added Greek to requires_peek_ahead to mandate
+    // the necessary lookahead for handling the contextual final sigma (σ/ς).[1]
     ELL, "ELL", "Greek",
         case: [],
         fold: [],
@@ -431,8 +432,17 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{0301}', '\u{0308}', '\u{0342}', '\u{0313}', '\u{0314}', '\u{0345}' ],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
+        requires_peek_ahead: true,  // CHANGED: true for sigma handling (σ/ς)
+        peek_pairs: [
+        // Final sigma: Lowercase Σ → ς if no next char (word-end); else σ
+        // In map impl: if current=='Σ' && next.is_none() { Some("ς") } else { Some('σ') }
+        // But for PeekPair: Use a sentinel for EOF, or extend LangEntry to handle None explicitly.
+        // Quick fix: Add pair for 'Σ' with b='\0' (null char) as EOF sentinel → "ς"
+        // Better: In lang.rs PeekPair, add variant for EOF, but to keep current design:
+        // Handle in case_fold.rs: If requires_peek_ahead && next.is_none() && current=='Σ' { return Some('ς') }
+        // For now, populate minimally to trigger logic:
+        ('Σ', '\0' => "ς"),  // \0 as EOF sentinel; filter in impl
+        ],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -464,6 +474,67 @@ define_languages! {
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
         ],
+        unigram_cjk: false,
+
+    TAM, "TAM", "Tamil",
+        case: [],
+        fold: [],
+        transliterate: [],
+        precomposed_to_base: [],
+        spacing_diacritics: [ '\u{0BCD}' ],  // Virama/puḷḷi mark
+        needs_word_segmentation: true,  // NEW: Agglutinative language requires morphological segmentation
+        requires_peek_ahead: false,
+        peek_pairs: [],
+        segment_rules: [
+            SegmentRule::WesternToScript,
+            SegmentRule::ScriptToWestern,
+        ],
+        unigram_cjk: false,
+
+    RUS, "RUS", "Russian",
+        case: [],
+        fold: [],
+        transliterate: [
+            'А' => "A", 'а' => "a",
+            'Б' => "B", 'б' => "b",
+            'В' => "V", 'в' => "v",
+            'Г' => "G", 'г' => "g",
+            'Д' => "D", 'д' => "d",
+            'Е' => "E", 'е' => "e",
+            'Ё' => "Ë", 'ё' => "ë",
+            'Ж' => "Ž", 'ж' => "ž",
+            'З' => "Z", 'з' => "z",
+            'И' => "I", 'и' => "i",
+            'Й' => "J", 'й' => "j",
+            'К' => "K", 'к' => "k",
+            'Л' => "L", 'л' => "l",
+            'М' => "M", 'м' => "m",
+            'Н' => "N", 'н' => "n",
+            'О' => "O", 'о' => "o",
+            'П' => "P", 'п' => "p",
+            'Р' => "R", 'р' => "r",
+            'С' => "S", 'с' => "s",
+            'Т' => "T", 'т' => "t",
+            'У' => "U", 'у' => "u",
+            'Ф' => "F", 'ф' => "f",
+            'Х' => "H", 'х' => "h",
+            'Ц' => "C", 'ц' => "c",
+            'Ч' => "Č", 'ч' => "č",
+            'Ш' => "Š", 'ш' => "š",
+            'Щ' => "Šč", 'щ' => "šč",  // ISO/R 9:1968 specific
+            'Ъ' => "ʺ", 'ъ' => "ʺ",    // U+02BA Modifier Letter Double Prime
+            'Ы' => "Y", 'ы' => "y",
+            'Ь' => "ʹ", 'ь' => "ʹ",    // U+02B9 Modifier Letter Prime
+            'Э' => "È", 'э' => "è",
+            'Ю' => "Ju", 'ю' => "ju",  // ISO/R 9:1968 specific
+            'Я' => "Ja", 'я' => "ja",  // ISO/R 9:1968 specific
+        ],
+        precomposed_to_base: [],
+        spacing_diacritics: [],
+        needs_word_segmentation: false,
+        requires_peek_ahead: false,
+        peek_pairs: [],
+        segment_rules: [],
         unigram_cjk: false,
 
     JPN, "JPN", "Japanese",
