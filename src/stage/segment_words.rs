@@ -43,15 +43,23 @@ use crate::{
 /// | Hindi, Tamil (Indic)     | Insert ZWSP after virama+consonant for word-break opportunities                   |
 /// | Mixed scripts            | Spaces inserted only at language-defined boundaries                               |
 ///
-/// # Indic Script Handling (Golden Rule)
+/// # Indic Script Handling (Linguistic Heuristic)
 ///
-/// For Hindi, Tamil, and other Indic scripts:
-/// - Insert **ZWSP** (U+200B) after virama when followed by a consonant (non-final position)
-/// - Insert **space** (U+0020) at script transitions (Indic ↔ Western)
-/// - No break after word-final virama
+/// For Hindi, Tamil, and other Indic scripts, segmentation applies a **zero-dictionary heuristic**
+/// to manage word-break opportunities while preserving legitimate conjuncts.
 ///
-/// This provides consistent word-break opportunities for search engines, line breaking,
-/// and NLP tokenization without preventing ligature rendering in modern fonts.
+/// The rules operate as follows:
+///
+/// 1.  **ZWSP Insertion (Tamil & Hindi exceptions):** A ZWSP (U+200B) is inserted after a **virama**
+///     when followed by a consonant (e.g., in **Tamil** or **Hindi** words like **`पत्नी`**) to create
+///     break points for tokenization and line wrapping.
+/// 2.  **Conjunct Preservation (Hindi):** For Devanagari (**Hindi**), a minimal, zero-cost **heuristic**
+///     prevents ZWSP insertion where the **virama** is followed by a consonant known to form a mandatory,
+///     non-breaking **conjunct** (e.g., **`र`**, **`य`**, **`व`**, **`ह`**). This ensures words like **`विद्वत्`** remain unsegmented.
+/// 3.  **Script Transitions:** A standard space (U+0020) is inserted at script transitions (Indic ↔ Western).
+///
+/// This approach provides consistent word-break opportunities without preventing ligature rendering or
+/// linguistically incorrect segmentation of compound consonants.
 ///
 /// # Performance Characteristics
 ///
@@ -67,8 +75,9 @@ use crate::{
 /// ```text
 /// "Helloโลกสวัสดี"    → "Hello โลก สวัสดี"
 /// "normy很棒"         → "normy 很 棒"
-/// "पत्नी"             → "पत्‍नी" (ZWSP after virama)
-/// "Helloपत्नी"        → "Hello पत्‍नी" (space + ZWSP)
+/// "पत्नी"             → "पत्\u{200B}नी" (ZWSP after virama, break point required)
+/// "विद्वत्"           → "विद्वत्" (Conjunct preserved by heuristic, no break)
+/// "Helloपत्नी"        → "Hello पत्\u{200B}नी" (space + ZWSP)
 /// ```
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SegmentWords;
