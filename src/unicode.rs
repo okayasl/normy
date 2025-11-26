@@ -285,6 +285,20 @@ pub const fn is_virama(c: char) -> bool {
     )
 }
 
+// Codepoints for the most common non-breaking conjunct initial consonants in Devanagari (Hindi)
+// 'र' (ra), 'य' (ya), 'व' (va), 'ह' (ha)
+// The heuristic prevents ZWSP insertion when the Virama is followed by one of these characters.
+#[inline(always)]
+pub const fn should_prevent_indic_break(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x0930 | // Devanagari 'र' (ra)
+        0x092F | // Devanagari 'य' (ya)
+        0x0935 | // Devanagari 'व' (va)
+        0x0939 // Devanagari 'ह' (ha)
+    )
+}
+
 #[inline(always)]
 pub fn zwsp() -> char {
     '\u{200B}'

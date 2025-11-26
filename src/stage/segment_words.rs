@@ -5,12 +5,13 @@ use std::{
 };
 
 use crate::{
+    HIN,
     context::Context,
     lang::{LangEntry, SegmentRule},
     stage::{CharMapper, Stage, StageError},
     unicode::{
         CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
-        classify, is_any_whitespace, is_virama, zwsp,
+        classify, is_any_whitespace, is_virama, should_prevent_indic_break, zwsp,
     },
 };
 
@@ -184,6 +185,7 @@ pub fn segment_chars<I>(chars: I, lang: LangEntry) -> impl Iterator<Item = char>
 where
     I: Iterator<Item = char>,
 {
+    // The Seg struct remains unchanged
     struct Seg<I: Iterator> {
         lang: LangEntry,
         inner: Peekable<I>,
@@ -192,6 +194,7 @@ where
         pending_space: Option<char>,
     }
 
+    // The Iterator implementation for Seg
     impl<I: Iterator<Item = char>> Iterator for Seg<I> {
         type Item = char;
 
@@ -243,14 +246,19 @@ where
                 if let (Some(prev), Some(prev_class)) = (self.prev_char, self.prev_class) {
                     let prev_is_virama = is_virama(prev);
 
+                    // The first debug print is removed here.
+
                     // Golden Indic Rule: Insert ZWSP after virama + consonant
                     if prev_class == Indic
                         && prev_is_virama
                         && !curr_is_virama
                         && curr_class == Indic
                     {
-                        need_boundary = true;
-                        use_zwsp = true;
+                        // This is the linguistic exception filter. Only applies to Hindi (Devanagari) for  most common non-breaking conjunct initial consonants
+                        if !(self.lang.code == HIN.code && should_prevent_indic_break(curr)) {
+                            need_boundary = true;
+                            use_zwsp = true;
+                        }
                     }
                     // Script transition boundary (use space)
                     else if check_boundary_with_classes(prev_class, curr_class, self.lang) {
@@ -443,7 +451,8 @@ mod tests {
                     "प\u{094D}\u{200B}त\u{094D}\u{200B}नी",
                 ),
                 ("सन्तोष", "सन्\u{200B}तोष"),
-                ("विद्वत्", "विद्\u{200B}वत्"),
+                ("विद्वत्", "विद्वत्"),             // no break,
+                ("विद्वत्त्व", "विद्वत्\u{200B}त्व"), // non-final virama followed by consonant → break
                 ("रामायण", "रामायण"),
                 ("Helloपत्नी", "Hello पत्\u{200B}नी"),
                 ("पत्नीHello", "पत्\u{200B}नी Hello"),
