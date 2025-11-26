@@ -265,7 +265,7 @@ pub fn is_indic_script(c: char) -> bool {
 }
 
 #[inline(always)]
-pub fn is_virama(c: char) -> bool {
+pub const fn is_virama(c: char) -> bool {
     matches!(
         c as u32,
         0x094D | // Devanagari
@@ -278,8 +278,10 @@ pub fn is_virama(c: char) -> bool {
         0x0CCD | // Kannada
         0x0D4D | // Malayalam
         0x0DCA | // Sinhala
-        0x17D2 | // Khmer coeng
-        0x103A // Myanmar asat
+        0x17D2 | // Khmer
+        0x103A | // Myanmar
+        0x1B44 | // Balinese
+        0xAAD // Tai Tham
     )
 }
 
@@ -301,8 +303,6 @@ pub enum CharClass {
     Indic,
 }
 
-// Key fix in unicode.rs - classify() function
-
 #[inline(always)]
 pub fn classify(c: char) -> CharClass {
     if c.is_ascii() {
@@ -314,7 +314,6 @@ pub fn classify(c: char) -> CharClass {
         }
         return CharClass::Other;
     }
-
     if is_any_whitespace(c) {
         return CharClass::Whitespace;
     }
@@ -329,17 +328,13 @@ pub fn classify(c: char) -> CharClass {
     }
     if is_indic_script(c) {
         return CharClass::Indic;
-    } // ← Must be before Latin!
-
-    // Extended Latin (á, ç, ð, ø, ś, etc.)
+    }
     if ('\u{00C0}'..='\u{02AF}').contains(&c) {
         return CharClass::Western;
     }
-
     if c.is_alphabetic() {
         return CharClass::NonCJKScript;
     }
-
     CharClass::Other
 }
 

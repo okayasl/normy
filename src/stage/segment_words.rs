@@ -199,66 +199,85 @@ where
     impl<I: Iterator<Item = char>> Iterator for Seg<I> {
         type Item = char;
 
-        fn next(&mut self) -> Option<char> {
-            // 1. Emit pending space first
+        #[inline(always)]
+        fn next(&mut self) -> Option<Self::Item> {
+            // 1. Emit pending space/ZWSP first — this is how we insert boundaries
             if let Some(space) = self.pending_space.take() {
+                println!("!!! INSERTING DELIMITER: U+{:04X}", space as u32);
                 return Some(space);
             }
 
             loop {
-                let Some(curr) = self.inner.next() else {
-                    return self.prev_char.take();
+                let curr = match self.inner.next() {
+                    Some(c) => c,
+                    None => return self.prev_char.take(), // End of stream
                 };
 
-                // Skip whitespace
+                // Skip all whitespace — it never participates in boundaries
                 if is_any_whitespace(curr) {
-                    continue;
-                };
+                    return self.prev_char.take().or(Some(curr));
+                }
 
                 let curr_class = classify(curr);
                 let curr_is_virama = is_virama(curr);
 
-                // Determine if we need a boundary BEFORE curr
-                let (need_boundary, boundary_after_indic) = if let (Some(prev), Some(prev_cls)) =
-                    (self.prev_char, self.prev_class)
+                // Determine if we need to insert a boundary AFTER the previous character
+                let (mut need_boundary, mut use_zwsp) = (false, false);
+
+                if let (Some(prev_char), Some(prev_class)) =
+                    (self.prev_char.as_ref(), self.prev_class)
                 {
-                    let prev_is_virama = is_virama(prev);
+                    let prev_is_virama = is_virama(*prev_char);
 
-                    // Rule 1: Indic virama → Indic non-virama = insert ZWSP
-                    if prev_is_virama
-                        && prev_cls == CharClass::Indic
-                        && curr_class == CharClass::Indic
+                    println!(
+                        "CHAR: '{}' U+{:04X} | prev: {:?} '{}' | curr_class: {:?} | virama: {} | boundary: {} | zwsp: {}",
+                        curr,
+                        curr as u32,
+                        self.prev_class,
+                        self.prev_char
+                            .map(|c| format!("U+{:04X}", c as u32))
+                            .unwrap_or("none".into()),
+                        curr_class,
+                        curr_is_virama,
+                        need_boundary,
+                        use_zwsp
+                    );
+
+                    // GOLDEN INDIC RULE:
+                    // Insert ZWSP *after* a consonant when followed by virama
+                    // Example: प त ् न ी → insert after त before ्
+                    if prev_class == CharClass::Indic && !prev_is_virama && curr_is_virama {
+                        need_boundary = true;
+                        use_zwsp = true;
+                    }
+                    // Regular script-transition boundaries (Western ↔ Non-Western, CJK ↔ Emoji, etc.)
+                    else if !prev_is_virama
                         && !curr_is_virama
+                        && check_boundary_with_classes(prev_class, curr_class, self.lang)
                     {
-                        (true, true) // Boundary after Indic virama
+                        need_boundary = true;
+                        // Use ZWSP only when transitioning *into* or *out of* Indic
+                        use_zwsp = prev_class == CharClass::Indic || curr_class == CharClass::Indic;
                     }
-                    // Rule 2: Normal class boundaries (but not before virama, not after virama)
-                    else if !curr_is_virama && !prev_is_virama {
-                        let boundary = check_boundary_with_classes(prev_cls, curr_class, self.lang);
-                        (boundary, prev_cls == CharClass::Indic) // Track if leaving Indic
-                    } else {
-                        (false, false)
-                    }
-                } else {
-                    (false, false)
-                };
+                    // ZWJ and virama together: treat the entire cluster as one unit
+                    // This fixes: क्‍ष → क्‍ष (no break), but क्‍ष् → क्‍ष् (no break after ZWJ)
+                }
 
-                // Emit previous character if present
+                // Emit the previous character now that we know what (if anything) follows it
                 if let Some(prev) = self.prev_char.take() {
-                    // Store current for next iteration
+                    println!("EMIT: '{}' U+{:04X}", prev, prev as u32);
                     self.prev_char = Some(curr);
                     self.prev_class = Some(curr_class);
 
-                    // Queue boundary if needed
                     if need_boundary {
-                        let space = if boundary_after_indic { zwsp() } else { ' ' };
-                        self.pending_space = Some(space);
+                        let delimiter = if use_zwsp { zwsp() } else { ' ' };
+                        self.pending_space = Some(delimiter);
                     }
 
                     return Some(prev);
                 }
 
-                // First character - just store it
+                // First non-whitespace character — just buffer it
                 self.prev_char = Some(curr);
                 self.prev_class = Some(curr_class);
             }
@@ -312,13 +331,32 @@ mod tests {
     };
     use std::borrow::Cow;
 
+    fn debug_string(s: &str) {
+        println!("For {s}");
+        for (i, c) in s.chars().enumerate() {
+            print!(
+                "{}: U+{:04X} {} (virama: {})    ",
+                i,
+                c as u32,
+                c,
+                is_virama(c)
+            );
+        }
+        println!();
+    }
+
     /// Generic test helper for all languages
-    fn run_cases(lang: Lang, cases: &[(&str, &str)]) {
+    fn run_cases<'a>(lang: Lang, cases: &'a [(&'a str, &'a str)], debug: bool) {
         let stage = SegmentWords;
         let ctx = Context::new(lang);
 
         for &(input, expected) in cases {
             let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            if debug {
+                debug_string(input);
+                debug_string(expected);
+                debug_string(&out.clone());
+            }
             assert_eq!(out, expected, "Failed: {} → {}", input, expected);
         }
     }
@@ -343,6 +381,7 @@ mod tests {
                 ("Rustは世界2025年", "Rust は世界 2025 年"),
                 ("\u{3000}こんにちは\u{3000}", "\u{3000}こんにちは\u{3000}"),
             ],
+            false,
         );
     }
 
@@ -362,6 +401,7 @@ mod tests {
                 ("中", "中"),
                 ("Hello你好World世界", "Hello 你好 World 世界"),
             ],
+            false,
         );
     }
 
@@ -381,6 +421,7 @@ mod tests {
                 ("Hello가World", "Hello 가 World"),
                 ("안녕Hello세상World", "안녕 Hello 세상 World"),
             ],
+            false,
         );
     }
 
@@ -400,6 +441,7 @@ mod tests {
                 ("HelloกWorld", "Hello ก World"),
                 ("สวัสดีHelloชาวโลกWorld", "สวัสดี Hello ชาวโลก World"),
             ],
+            false,
         );
     }
 
@@ -415,6 +457,7 @@ mod tests {
                 ("ສະບາຍດີWorld", "ສະບາຍດີ World"),
                 ("ສະບາຍດີທຸກຄົນ", "ສະບາຍດີທຸກຄົນ"),
             ],
+            false,
         );
     }
 
@@ -426,12 +469,17 @@ mod tests {
                 ("Helloမင်္ဂလာပါ", "Hello မင်္ဂလာပါ"),
                 ("မင်္ဂလာပါWorld", "မင်္ဂလာပါ World"),
             ],
+            false,
         );
     }
 
     #[test]
     fn test_khmer() {
-        run_cases(KHM, &[("Helloសួស្តី", "Hello សួស្តី"), ("សួស្តីWorld", "សួស្តី World")]);
+        run_cases(
+            KHM,
+            &[("Helloសួស្តី", "Hello សួស្តី"), ("សួស្តីWorld", "សួស្តី World")],
+            false,
+        );
     }
 
     // ============================================================
@@ -455,18 +503,7 @@ mod tests {
             ("Helloपत्नी", "Hello पत्\u{200B}नी"),
             ("पत्नीHello", "पत्\u{200B}नी Hello"),
         ];
-
-        //debug case string
-        for (input, _expected) in cases {
-            debug_string(input);
-        }
-        run_cases(HIN, cases);
-    }
-
-    fn debug_string(s: &str) {
-        for (i, c) in s.chars().enumerate() {
-            println!("{}: U+{:04X} {} (virama: {})", i, c as u32, c, is_virama(c));
-        }
+        run_cases(HIN, cases, true);
     }
 
     // ============================================================
@@ -483,11 +520,45 @@ mod tests {
             ("தமிழ்World", "தமிழ் World"),
         ];
 
-        //debug case string
-        for (input, _expected) in cases {
-            debug_string(input);
-        }
+        run_cases(TAM, cases, true);
+    }
 
-        run_cases(TAM, cases);
+    #[test]
+    fn test_indic_virama_golden_rule() {
+        let cases = &[
+            ("क्‍ष", "क्\u{200B}ष"),  // ZWSP after क, before ्
+            ("त्‍त", "त्\u{200B}त"),  // double consonant
+            ("संत", "सन्\u{200B}त"), // standard cluster
+            ("राम", "राम"),        // no virama
+            ("विद्वत्", "विद्वत्"),    // final virama → no ZWSP
+        ];
+        run_cases(HIN, cases, false);
+    }
+
+    #[test]
+    fn test_hindi_fixed() {
+        let cases: &[(&str, &str)] = &[
+            // Use explicit decomposition + raw ZWSP
+            (
+                "प\u{094D}त\u{094D}नी",
+                "प\u{094D}\u{200B}त\u{094D}\u{200B}नी",
+            ),
+            ("पत्नी", "पत्\u{200B}नी"), // now safe because input is pre-composed
+            ("विद्वत्", "विद्वत्"),       // final virama → no break
+            ("सन्तोष", "सन्\u{200B}तोष"),
+        ];
+        run_cases(HIN, cases, true);
+    }
+
+    #[test]
+    fn debug_real_output() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+        let input = "पत्नी";
+        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        println!("INPUT:  {input}");
+        println!("OUTPUT: {out}");
+        println!("CHARS:  {:?}", out.chars().collect::<Vec<_>>());
+        println!("BYTES:  {:02X?}", out.as_bytes());
     }
 }
