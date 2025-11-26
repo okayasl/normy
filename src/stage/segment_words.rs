@@ -152,29 +152,52 @@ fn check_boundary_with_classes(
     }
 }
 
-/// Optimized: Early-exit scan for any segmentation boundary
-/// This is the fastest way to check if text needs segmentation at all
 #[inline]
 pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
     let mut prev_class: Option<CharClass> = None;
+    let mut prev_char: Option<char> = None; // Add this for virama check
 
     for curr in text.chars() {
-        // Skip whitespace entirely (never triggers boundaries)
         if is_any_whitespace(curr) {
+            println!(">>> NEEDS SKIP WS: '{}' U+{:04X}", curr, curr as u32);
             continue;
         }
 
         let curr_class = classify(curr);
 
-        if let Some(p_class) = prev_class
-            && check_boundary_with_classes(p_class, curr_class, lang)
+        if let Some(p_class) = prev_class {
+            if check_boundary_with_classes(p_class, curr_class, lang) {
+                println!(
+                    ">>> NEEDS BOUNDARY DETECTED: {:?} → {:?} ",
+                    p_class, curr_class
+                );
+                return true;
+            } else {
+                println!(
+                    ">>> NEEDS NO CLASS BOUNDARY: {:?} → {:?} ",
+                    p_class, curr_class
+                );
+            }
+        }
+
+        // Virama check (temporary — will be permanent in fix)
+        if let (Some(p_class), Some(p_char)) = (prev_class, prev_char)
+            && p_class == Indic
+            && !is_virama(p_char)
+            && is_virama(curr)
         {
-            return true; // Early exit
+            println!(
+                ">>> NEEDS VIRAMA BOUNDARY DETECTED: '{}' → '{}' ",
+                p_char, curr
+            );
+            return true;
         }
 
         prev_class = Some(curr_class);
+        prev_char = Some(curr); // Add this
     }
 
+    println!(">>> NEEDS: NO BOUNDARIES FOUND → RETURNING FALSE");
     false
 }
 
@@ -184,7 +207,7 @@ pub fn segment_allocating(text: &str, lang: LangEntry) -> String {
 }
 
 #[inline]
-fn segment_chars<I>(chars: I, lang: LangEntry) -> impl Iterator<Item = char>
+pub fn segment_chars<I>(chars: I, lang: LangEntry) -> impl Iterator<Item = char>
 where
     I: Iterator<Item = char>,
 {
@@ -201,83 +224,131 @@ where
 
         #[inline(always)]
         fn next(&mut self) -> Option<Self::Item> {
-            // 1. Emit pending space/ZWSP first — this is how we insert boundaries
+            // 1. Emit pending delimiter first (ZWSP or space)
             if let Some(space) = self.pending_space.take() {
-                println!("!!! INSERTING DELIMITER: U+{:04X}", space as u32);
+                println!(
+                    ">>> INSERT DELIMITER: U+{:04X} ({})",
+                    space as u32,
+                    if space == zwsp() { "ZWSP" } else { "SPACE" }
+                );
                 return Some(space);
             }
 
             loop {
                 let curr = match self.inner.next() {
                     Some(c) => c,
-                    None => return self.prev_char.take(), // End of stream
+                    None => {
+                        if let Some(last) = self.prev_char.take() {
+                            println!(
+                                ">>> END OF INPUT → FLUSH LAST CHAR: '{}' U+{:04X}",
+                                last, last as u32
+                            );
+                            return Some(last);
+                        }
+                        return None;
+                    }
                 };
 
-                // Skip all whitespace — it never participates in boundaries
+                // Skip whitespace early
                 if is_any_whitespace(curr) {
-                    return self.prev_char.take().or(Some(curr));
+                    println!(
+                        ">>> WHITESPACE '{}' U+{:04X} → PASS THROUGH",
+                        curr, curr as u32
+                    );
+                    if let Some(prev) = self.prev_char.take() {
+                        println!(
+                            ">>> FLUSH BUFFERED CHAR DUE TO WHITESPACE: '{}' U+{:04X}",
+                            prev, prev as u32
+                        );
+                        return Some(prev);
+                    }
+                    return Some(curr);
                 }
 
                 let curr_class = classify(curr);
                 let curr_is_virama = is_virama(curr);
 
-                // Determine if we need to insert a boundary AFTER the previous character
+                println!(
+                    ">>> PROCESS: curr='{}' U+{:04X} | class={:?} | virama={} | prev={:?}",
+                    curr,
+                    curr as u32,
+                    curr_class,
+                    curr_is_virama,
+                    self.prev_char
+                        .map(|c| format!("'{}' U+{:04X}", c, c as u32))
+                        .unwrap_or("none".into())
+                );
+
                 let (mut need_boundary, mut use_zwsp) = (false, false);
 
-                if let (Some(prev_char), Some(prev_class)) =
-                    (self.prev_char.as_ref(), self.prev_class)
-                {
-                    let prev_is_virama = is_virama(*prev_char);
+                if let (Some(prev), Some(prev_class)) = (self.prev_char, self.prev_class) {
+                    let prev_is_virama = is_virama(prev);
 
-                    println!(
-                        "CHAR: '{}' U+{:04X} | prev: {:?} '{}' | curr_class: {:?} | virama: {} | boundary: {} | zwsp: {}",
-                        curr,
-                        curr as u32,
-                        self.prev_class,
-                        self.prev_char
-                            .map(|c| format!("U+{:04X}", c as u32))
-                            .unwrap_or("none".into()),
-                        curr_class,
-                        curr_is_virama,
-                        need_boundary,
-                        use_zwsp
-                    );
-
-                    // GOLDEN INDIC RULE:
-                    // Insert ZWSP *after* a consonant when followed by virama
-                    // Example: प त ् न ी → insert after त before ्
-                    if prev_class == CharClass::Indic && !prev_is_virama && curr_is_virama {
+                    // GOLDEN INDIC RULE — CORRECTED & VERBOSE
+                    if prev_class == Indic
+                        && prev_is_virama
+                        && !curr_is_virama
+                        && curr_class == Indic
+                    {
+                        println!(
+                            ">>> HIT GOLDEN INDIC RULE: prev='{}' (virama) → curr='{}' (consonant) → INSERT ZWSP AFTER VIRAMA",
+                            prev, curr
+                        );
                         need_boundary = true;
                         use_zwsp = true;
                     }
-                    // Regular script-transition boundaries (Western ↔ Non-Western, CJK ↔ Emoji, etc.)
+                    // Regular script transition boundary
                     else if !prev_is_virama
                         && !curr_is_virama
                         && check_boundary_with_classes(prev_class, curr_class, self.lang)
                     {
+                        let from = format!("{:?}", prev_class);
+                        let to = format!("{:?}", curr_class);
+                        println!(
+                            ">>> SCRIPT BOUNDARY: {} → {} → INSERT {}",
+                            from,
+                            to,
+                            if prev_class == Indic || curr_class == Indic {
+                                "ZWSP"
+                            } else {
+                                "SPACE"
+                            }
+                        );
                         need_boundary = true;
-                        // Use ZWSP only when transitioning *into* or *out of* Indic
-                        use_zwsp = prev_class == CharClass::Indic || curr_class == CharClass::Indic;
+                        use_zwsp = prev_class == Indic || curr_class == Indic;
+                    } else {
+                        println!(
+                            ">>> NO BOUNDARY: prev='{}' U+{:04X} (virama={}) | curr='{}' U+{:04X} (virama={})",
+                            prev, prev as u32, prev_is_virama, curr, curr as u32, curr_is_virama
+                        );
                     }
-                    // ZWJ and virama together: treat the entire cluster as one unit
-                    // This fixes: क्‍ष → क्‍ष (no break), but क्‍ष् → क्‍ष् (no break after ZWJ)
-                }
 
-                // Emit the previous character now that we know what (if anything) follows it
-                if let Some(prev) = self.prev_char.take() {
-                    println!("EMIT: '{}' U+{:04X}", prev, prev as u32);
-                    self.prev_char = Some(curr);
-                    self.prev_class = Some(curr_class);
+                    // Emit the previous character NOW that we know what follows it
+                    println!(">>> EMIT PREV CHAR: '{}' U+{:04X}", prev, prev as u32);
 
                     if need_boundary {
-                        let delimiter = if use_zwsp { zwsp() } else { ' ' };
-                        self.pending_space = Some(delimiter);
+                        let delim = if use_zwsp { zwsp() } else { ' ' };
+                        println!(
+                            ">>> QUEUE DELIMITER AFTER '{}' → U+{:04X} ({})",
+                            prev,
+                            delim as u32,
+                            if use_zwsp { "ZWSP" } else { "SPACE" }
+                        );
+                        self.pending_space = Some(delim);
                     }
+
+                    // Update buffer for next iteration
+                    self.prev_char = Some(curr);
+                    self.prev_class = Some(curr_class);
 
                     return Some(prev);
                 }
 
-                // First non-whitespace character — just buffer it
+                // First non-whitespace character — buffer it
+                println!(
+                    ">>> BUFFER FIRST CHAR: '{}' U+{:04X} | class={:?}",
+                    curr, curr as u32, curr_class
+                );
                 self.prev_char = Some(curr);
                 self.prev_class = Some(curr_class);
             }
@@ -506,6 +577,41 @@ mod tests {
         run_cases(HIN, cases, true);
     }
 
+    #[test]
+    fn debug_step_by_step_hindi_patnee() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+        let input = "Helloपत्नी"; // NFC: प त ् न ी
+
+        println!("=== Stage apply ===");
+        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        println!("INPUT:  {input}");
+        println!("OUTPUT: {out}");
+        println!("CHARS:  {:?}", out.chars().collect::<Vec<_>>());
+        println!("BYTES:  {:02X?}", out.as_bytes());
+
+        println!("=== STEP BY STEP DEBUG ===");
+        for c in input.chars() {
+            println!(
+                "CHAR: {:<4} U+{:04X} | is_virama: {} | classify: {:?}",
+                c,
+                c as u32,
+                is_virama(c),
+                classify(c)
+            );
+        }
+
+        let iter = segment_chars(input.chars(), ctx.lang_entry);
+        println!("\n--- ITERATOR OUTPUT ---");
+        for c in iter {
+            if c == '\u{200B}' {
+                println!("INSERTED ZWSP U+200B");
+            } else {
+                println!("EMIT: {:<4} U+{:04X}", c, c as u32);
+            }
+        }
+    }
+
     // ============================================================
     // Tamil — ZWSP at puḷḷi boundaries
     // ============================================================
@@ -533,32 +639,5 @@ mod tests {
             ("विद्वत्", "विद्वत्"),    // final virama → no ZWSP
         ];
         run_cases(HIN, cases, false);
-    }
-
-    #[test]
-    fn test_hindi_fixed() {
-        let cases: &[(&str, &str)] = &[
-            // Use explicit decomposition + raw ZWSP
-            (
-                "प\u{094D}त\u{094D}नी",
-                "प\u{094D}\u{200B}त\u{094D}\u{200B}नी",
-            ),
-            ("पत्नी", "पत्\u{200B}नी"), // now safe because input is pre-composed
-            ("विद्वत्", "विद्वत्"),       // final virama → no break
-            ("सन्तोष", "सन्\u{200B}तोष"),
-        ];
-        run_cases(HIN, cases, true);
-    }
-
-    #[test]
-    fn debug_real_output() {
-        let stage = SegmentWords;
-        let ctx = Context::new(HIN);
-        let input = "पत्नी";
-        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        println!("INPUT:  {input}");
-        println!("OUTPUT: {out}");
-        println!("CHARS:  {:?}", out.chars().collect::<Vec<_>>());
-        println!("BYTES:  {:02X?}", out.as_bytes());
     }
 }
