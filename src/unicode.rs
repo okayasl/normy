@@ -100,6 +100,33 @@ pub fn is_any_whitespace(c: char) -> bool {
 //     is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
 // }
 
+// /// ASCII alphabetic only.
+// #[inline(always)]
+// pub fn is_ascii_letter(c: char) -> bool {
+//     matches!(c as u32,
+//         0x0041..=0x005A | // A–Z
+//         0x0061..=0x007A   // a–z
+//     )
+// }
+// #[inline(always)]
+// pub fn is_virama_to_skip(c: char) -> bool {
+//     matches!(
+//         c as u32,
+//         0x094D | // Devanagari
+//         0x09CD | // Bengali
+//         0x0A4D | // Gurmukhi
+//         0x0ACD | // Gujarati
+//         0x0B4D | // Oriya
+//         0x0BCD | // Tamil
+//         0x0C4D | // Telugu
+//         0x0CCD | // Kannada
+//         0x0D4D | // Malayalam
+//         0x0DCA | // Sinhala
+//         0x17D2 | // Khmer coeng
+//         0x103A // Myanmar asat
+//     )
+// }
+
 /// Control characters (Category Cc). Format controls (Cf) are handled separately.
 #[inline(always)]
 pub fn is_control(c: char) -> bool {
@@ -227,15 +254,6 @@ pub fn is_se_asian_script(c: char) -> bool {
     )
 }
 
-/// ASCII alphabetic only.
-#[inline(always)]
-pub fn is_ascii_letter(c: char) -> bool {
-    matches!(c as u32,
-        0x0041..=0x005A | // A–Z
-        0x0061..=0x007A   // a–z
-    )
-}
-
 #[inline(always)]
 pub fn is_indic_script(c: char) -> bool {
     matches!(c as u32,
@@ -244,6 +262,30 @@ pub fn is_indic_script(c: char) -> bool {
         0x0B80..=0x0BFF | // Tamil
         0x11FC0..=0x11FFF // Tamil Supplement
     )
+}
+
+#[inline(always)]
+pub fn is_virama(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x094D | // Devanagari
+        0x09CD | // Bengali
+        0x0A4D | // Gurmukhi
+        0x0ACD | // Gujarati
+        0x0B4D | // Oriya
+        0x0BCD | // Tamil
+        0x0C4D | // Telugu
+        0x0CCD | // Kannada
+        0x0D4D | // Malayalam
+        0x0DCA | // Sinhala
+        0x17D2 | // Khmer coeng
+        0x103A // Myanmar asat
+    )
+}
+
+#[inline(always)]
+pub fn zwsp() -> char {
+    '\u{200B}'
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -263,57 +305,41 @@ pub enum CharClass {
 
 #[inline(always)]
 pub fn classify(c: char) -> CharClass {
-    // 1. Fast ASCII
     if c.is_ascii() {
         if c.is_ascii_whitespace() {
             return CharClass::Whitespace;
         }
-        // CRITICAL FIX: Include ASCII punctuation in Western class
-        // This is essential for proper segmentation boundaries
-        // Industry standard (ICU, UAX #29): digits and punctuation
-        // should trigger boundaries when adjacent to script characters
         if c.is_ascii_alphanumeric() || c.is_ascii_punctuation() {
             return CharClass::Western;
         }
-        // Other ASCII symbols → Other
         return CharClass::Other;
     }
 
-    // 2. Unicode whitespace
-    if is_unicode_whitespace(c) {
+    if is_any_whitespace(c) {
         return CharClass::Whitespace;
     }
-
-    // 3. CJK cluster
     if is_cjk_han_or_kana(c) {
         return CharClass::Cjk;
     }
-
-    // 4. Hangul
     if is_hangul(c) {
         return CharClass::Hangul;
     }
-
-    // 5. Southeast Asian scripts
     if is_se_asian_script(c) {
         return CharClass::SEAsian;
     }
-
     if is_indic_script(c) {
         return CharClass::Indic;
-    }
+    } // ← Must be before Latin!
 
-    // 6. Western extended letters (Latin-1 / Extended-A/B)
-    if ('\u{00C0}'..='\u{02AF}').contains(&c) || is_ascii_letter(c) {
+    // Extended Latin (á, ç, ð, ø, ś, etc.)
+    if ('\u{00C0}'..='\u{02AF}').contains(&c) {
         return CharClass::Western;
     }
 
-    // 7. Everything else that is a script character (Cyrillic, Greek, Arabic, etc.)
     if c.is_alphabetic() {
         return CharClass::NonCJKScript;
     }
 
-    // 8. Fallback
     CharClass::Other
 }
 

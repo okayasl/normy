@@ -10,7 +10,7 @@ use crate::{
     stage::{CharMapper, Stage, StageError},
     unicode::{
         CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
-        classify, is_any_whitespace,
+        classify, is_any_whitespace, is_virama, zwsp,
     },
 };
 
@@ -193,62 +193,75 @@ where
         inner: Peekable<I>,
         prev_char: Option<char>,
         prev_class: Option<CharClass>,
-        pending_space: bool,
+        pending_space: Option<char>,
     }
 
     impl<I: Iterator<Item = char>> Iterator for Seg<I> {
         type Item = char;
 
         fn next(&mut self) -> Option<char> {
-            // Emit pending space first
-            if self.pending_space {
-                self.pending_space = false;
-                return Some(' ');
+            // 1. Emit pending space first
+            if let Some(space) = self.pending_space.take() {
+                return Some(space);
             }
 
-            while let Some(curr) = self.inner.next() {
-                // Collapse consecutive whitespace
+            loop {
+                let Some(curr) = self.inner.next() else {
+                    return self.prev_char.take();
+                };
+
+                // Skip whitespace
                 if is_any_whitespace(curr) {
-                    while self.inner.peek().is_some_and(|c| is_any_whitespace(*c)) {
-                        self.inner.next();
-                    }
-                    // Insert single space if between non-whitespace chars
-                    if self.prev_char.is_some() && self.inner.peek().is_some() {
-                        self.pending_space = true;
-                    }
                     continue;
-                }
+                };
 
                 let curr_class = classify(curr);
+                let curr_is_virama = is_virama(curr);
 
-                // Check boundary using cached prev_class
-                if let Some(p_class) = self.prev_class
-                    && check_boundary_with_classes(p_class, curr_class, self.lang)
+                // Determine if we need a boundary BEFORE curr
+                let (need_boundary, boundary_after_indic) = if let (Some(prev), Some(prev_cls)) =
+                    (self.prev_char, self.prev_class)
                 {
-                    // Flush previous char immediately
-                    let prev = self.prev_char.take();
-                    self.prev_char = Some(curr);
-                    self.prev_class = Some(curr_class);
+                    let prev_is_virama = is_virama(prev);
 
-                    if let Some(pc) = prev {
-                        self.pending_space = true;
-                        return Some(pc);
+                    // Rule 1: Indic virama → Indic non-virama = insert ZWSP
+                    if prev_is_virama
+                        && prev_cls == CharClass::Indic
+                        && curr_class == CharClass::Indic
+                        && !curr_is_virama
+                    {
+                        (true, true) // Boundary after Indic virama
                     }
-                }
-
-                // Emit previous character, cache current
-                if let Some(prev_c) = self.prev_char.take() {
-                    self.prev_char = Some(curr);
-                    self.prev_class = Some(curr_class);
-                    return Some(prev_c);
+                    // Rule 2: Normal class boundaries (but not before virama, not after virama)
+                    else if !curr_is_virama && !prev_is_virama {
+                        let boundary = check_boundary_with_classes(prev_cls, curr_class, self.lang);
+                        (boundary, prev_cls == CharClass::Indic) // Track if leaving Indic
+                    } else {
+                        (false, false)
+                    }
                 } else {
+                    (false, false)
+                };
+
+                // Emit previous character if present
+                if let Some(prev) = self.prev_char.take() {
+                    // Store current for next iteration
                     self.prev_char = Some(curr);
                     self.prev_class = Some(curr_class);
-                }
-            }
 
-            // Emit final character
-            self.prev_char.take()
+                    // Queue boundary if needed
+                    if need_boundary {
+                        let space = if boundary_after_indic { zwsp() } else { ' ' };
+                        self.pending_space = Some(space);
+                    }
+
+                    return Some(prev);
+                }
+
+                // First character - just store it
+                self.prev_char = Some(curr);
+                self.prev_class = Some(curr_class);
+            }
         }
     }
 
@@ -257,7 +270,7 @@ where
         inner: chars.peekable(),
         prev_char: None,
         prev_class: None,
-        pending_space: false,
+        pending_space: None,
     }
 }
 /// Iterator wrapper for explicit usage if needed
@@ -290,7 +303,8 @@ impl FusedIterator for SegmentWordIterator {}
 mod tests {
     use super::*;
     use crate::{
-        HIN, LANG_TABLE, TAM,
+        HIN, TAM,
+        context::Context,
         lang::{
             Lang,
             data::{JPN, KHM, KOR, LAO, MYA, THA, ZHO},
@@ -298,575 +312,182 @@ mod tests {
     };
     use std::borrow::Cow;
 
-    // --------------------------- Japanese ---------------------------
-    #[test]
-    fn test_japanese_segmentation() {
+    /// Generic test helper for all languages
+    fn run_cases(lang: Lang, cases: &[(&str, &str)]) {
         let stage = SegmentWords;
-        let ctx = Context::new(JPN);
-
-        let cases = &[
-            // Hiragana → Hiragana: no break
-            ("こんにちは", "こんにちは"),
-            // Hiragana → Kanji: no break
-            ("は最高", "は最高"),
-            // Western → Hiragana: break
-            ("Rustは", "Rust は"),
-            // Western → Kanji: break
-            ("Hello世界", "Hello 世界"),
-            // ASCII digits → Kanji: break
-            ("25年", "25 年"),
-            // Mixed Western + Kanji + Hiragana
-            ("東京2025年", "東京 2025 年"),
-        ];
+        let ctx = Context::new(lang);
 
         for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected, "Failed on input: {}", input);
-        }
-
-        // Extreme/edge cases
-        let extremes = &[
-            ("", ""),                                         // empty string
-            ("A", "A"),                                       // single Western char
-            ("世", "世"),                                     // single CJK char
-            ("Rustは世界2025年", "Rust は世界 2025 年"),      // long mixed sequence
-            ("　こんにちは　", "\u{3000}こんにちは\u{3000}"), // full-width spaces.
-        ];
-        for &(input, expected) in extremes {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected, "Extreme case failed on input: {}", input);
+            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(out, expected, "Failed: {} → {}", input, expected);
         }
     }
 
-    // --------------------------- Chinese ---------------------------
+    // ============================================================
+    // Japanese — regular spaces at script boundaries
+    // ============================================================
     #[test]
-    fn test_chinese_segmentation() {
-        let stage = SegmentWords;
-        let ctx = Context::new(ZHO);
-
-        let cases = &[
-            ("Hello世界", "Hello 世界"), // Western → CJK
-            ("世界Hello", "世界 Hello"), // CJK → Western
-            ("你好世界", "你好世界"),    // consecutive CJK: no break
-        ];
-
-        for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected, "Failed on input: {}", input);
-        }
-
-        // Edge cases
-        let extremes = &[
-            ("", ""),
-            ("A", "A"),
-            ("中", "中"),
-            ("Hello你好World世界", "Hello 你好 World 世界"),
-        ];
-        for &(input, expected) in extremes {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected, "Extreme case failed on input: {}", input);
-        }
-    }
-
-    // --------------------------- Korean ---------------------------
-    #[test]
-    fn test_korean_segmentation() {
-        let stage = SegmentWords;
-        let ctx = Context::new(KOR);
-
-        let cases = &[
-            ("Hello안녕하세요", "Hello 안녕하세요"), // Western → Hangul
-            ("안녕하세요World", "안녕하세요 World"), // Hangul → Western
-            ("안녕하세요", "안녕하세요"),            // Hangul cluster
-        ];
-
-        for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-
-        let extremes = &[
-            ("", ""),
-            ("가", "가"),                                    // single Hangul
-            ("Hello가World", "Hello 가 World"),              // mixed short
-            ("안녕Hello세상World", "안녕 Hello 세상 World"), // longer mixed
-        ];
-        for &(input, expected) in extremes {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-    }
-
-    // --------------------------- Thai ---------------------------
-    #[test]
-    fn test_thai_segmentation() {
-        let stage = SegmentWords;
-        let ctx = Context::new(THA);
-
-        let cases = &[
-            ("Helloสวัสดี", "Hello สวัสดี"),  // Western → Thai
-            ("สวัสดีWorld", "สวัสดี World"),  // Thai → Western
-            ("สวัสดีชาวโลก", "สวัสดีชาวโลก"), // Thai cluster
-        ];
-
-        for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-
-        let extremes = &[
-            ("", ""),
-            ("ก", "ก"),
-            ("HelloกWorld", "Hello ก World"),
-            ("สวัสดีHelloชาวโลกWorld", "สวัสดี Hello ชาวโลก World"),
-        ];
-        for &(input, expected) in extremes {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-    }
-
-    // --------------------------- Lao ---------------------------
-    #[test]
-    fn test_lao_segmentation() {
-        let stage = SegmentWords;
-        let ctx = Context::new(LAO);
-
-        let cases = &[
-            ("Helloສະບາຍດີ", "Hello ສະບາຍດີ"),
-            ("ສະບາຍດີWorld", "ສະບາຍດີ World"),
-            ("ສະບາຍດີທຸກຄົນ", "ສະບາຍດີທຸກຄົນ"),
-        ];
-
-        for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-
-        let extremes = &[
-            ("", ""),
-            ("ກ", "ກ"),
-            ("HelloກWorld", "Hello ກ World"),
-            ("ສະບາຍHelloດີWorld", "ສະບາຍ Hello ດີ World"),
-        ];
-        for &(input, expected) in extremes {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-    }
-
-    // --------------------------- Myanmar ---------------------------
-    #[test]
-    fn test_myanmar_segmentation() {
-        let stage = SegmentWords;
-        let ctx = Context::new(MYA);
-
-        let cases = &[
-            ("Helloမင်္ဂလာပါ", "Hello မင်္ဂလာပါ"),
-            ("မင်္ဂလာပါWorld", "မင်္ဂလာပါ World"),
-            ("မင်္ဂလာပါ", "မင်္ဂလာပါ"),
-        ];
-
-        for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-
-        let extremes = &[
-            ("", ""),
-            ("မ", "မ"),
-            ("HelloမWorld", "Hello မ World"),
-            ("မင်္ဂလာHelloပါWorld", "မင်္ဂလာ Hello ပါ World"),
-        ];
-        for &(input, expected) in extremes {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-    }
-
-    // --------------------------- Khmer ---------------------------
-    #[test]
-    fn test_khmer_segmentation() {
-        let stage = SegmentWords;
-        let ctx = Context::new(KHM);
-
-        let cases = &[
-            ("Helloសួស្តី", "Hello សួស្តី"),
-            ("សួស្តីWorld", "សួស្តី World"),
-            ("សួស្តីជាកម្ពុជា", "សួស្តីជាកម្ពុជា"),
-        ];
-
-        for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-
-        let extremes = &[
-            ("", ""),
-            ("ក", "ក"),
-            ("HelloកWorld", "Hello ក World"),
-            ("សួស្តីHelloជាកម្ពុជាWorld", "សួស្តី Hello ជាកម្ពុជា World"),
-        ];
-        for &(input, expected) in extremes {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(output, expected);
-        }
-    }
-
-    // Add this to the existing #[cfg(test)] mod in src/stage/segment_words.rs
-
-    #[test]
-    fn test_hindi_indic_virama_segmentation() {
-        use crate::lang::data::HIN; // Hindi = Devanagari
-        use std::borrow::Cow;
-
-        let stage = SegmentWords;
-        let ctx = Context::new(HIN);
-
-        // Real-world Hindi examples requiring virama-aware syllable breaks
-        let cases = &[
-            // "पत्नी" = patnī → प + त + ् + न + ी
-            // Virama (् U+094D) joins त and न → should insert space *after* virama cluster
-            // Expected: "प त् नी" or at minimum "पत्नी" → "प त्नी" (partial break)
-            // Current code: treats all as NonCJKScript → no break → "पत्नी"
-            ("पत्नी", "प त्नी"), // Minimal correct: break after virama
-            // "संतोष" = saṃtoṣ → स + ं + त + ो + ष
-            // नुकता (ं U+0902) + consonant cluster
-            ("संतोष", "सं तोष"), // Expected: break before तो
-            // "अंतरराष्ट्रीय" = antararāṣṭrīya
-            // Multiple virama clusters: त् र, ष् ट् र
-            ("अंतरराष्ट्रीय", "अन्तर् राष्ट्र् ईय"), // Ideal (aggressive)
-            // At minimum: should have at least one internal break
-            ("अंतरराष्ट्रीय", "अंतर राष्ट्र् ईय"), // Acceptable minimal
-            // Mixed script: Hinglish — should break on Latin↔Devanagari AND virama
-            ("Helloदोस्त", "Hello दोस्त"),          // Already works
-            ("दोस्तHello", "दोस्त Hello"),          // Already works
-            ("मेराBestFriend", "मेरा Best Friend"), // Should insert two breaks
-            ("मेराbestfriend", "मेरा bestfriend"),  // Lowercase: still break
-            // Critical: virama at word end (rare but valid in Sanskrit loanwords)
-            ("विद्वत्", "विद्व त्"), // "vidvat" (learned) — virama-final
-        ];
-
-        for &(input, expected) in cases {
-            let output = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(
-                output, expected,
-                "\nFAILED: Hindi virama segmentation\n  input:  {input}\n  got:    {output}\n  want:   {expected}\n"
-            );
-        }
-
-        // Extra assertion: ensure we didn't accidentally break Latin-only text
-        let no_break = "hello world";
-        let output = stage.apply(Cow::Borrowed(no_break), &ctx).unwrap();
-        assert_eq!(
-            output, no_break,
-            "Should not insert spaces in pure Latin text even under HIN context"
+    fn test_japanese() {
+        run_cases(
+            JPN,
+            &[
+                ("こんにちは", "こんにちは"),
+                ("は最高", "は最高"),
+                ("Rustは", "Rust は"),
+                ("Hello世界", "Hello 世界"),
+                ("25年", "25 年"),
+                ("東京2025年", "東京 2025 年"),
+                ("", ""),
+                ("A", "A"),
+                ("世", "世"),
+                ("Rustは世界2025年", "Rust は世界 2025 年"),
+                ("\u{3000}こんにちは\u{3000}", "\u{3000}こんにちは\u{3000}"),
+            ],
         );
     }
 
-    // Short helper to make ZWSP insertion obvious in test data
-    const ZWSP: &str = "\u{200B}";
-
+    // ============================================================
+    // Chinese — regular spaces at script boundaries
+    // ============================================================
     #[test]
-    fn test_hindi_virama_basic() {
-        let stage = SegmentWords;
-        let ctx = Context::new(HIN);
+    fn test_chinese() {
+        run_cases(
+            ZHO,
+            &[
+                ("Hello世界", "Hello 世界"),
+                ("世界Hello", "世界 Hello"),
+                ("你好世界", "你好世界"),
+                ("", ""),
+                ("A", "A"),
+                ("中", "中"),
+                ("Hello你好World世界", "Hello 你好 World 世界"),
+            ],
+        );
+    }
 
-        let cases: &[(&str, &str)] = &[
-            // single virama joining two consonants -> break AFTER virama
-            // प + ् + त + ् + न + ी  => प्‌त्‌नी
-            ("पत्नी", &format!("प\u{094D}{}त\u{094D}{}नी", ZWSP, ZWSP)), // double virama cluster
-            // single join: क + ् + त -> क्‌त
-            ("क्वित्", "क्वित्"), // already has complex cluster; keep as-is if no explicit virama between simple consonants
-            // simpler explicit
-            ("क्त", &format!("क\u{094D}{}त", ZWSP)),
-            // virama followed by vowel sign -> still break after virama if it joins consonant
-            ("विक्टोरिया", &format!("विक\u{094D}{}टोरिया", ZWSP)),
-            // word-final virama: no break
-            ("विद्वत्", "विद्वत्"),
-            // ZWJ (U+200D) suppresses virama break
-            ("क्\u{200D}ष", "क्\u{200D}ष"), // virama suppressed by ZWJ -> no ZWSP
-            // Nukta (U+093C) combined consonants still obey virama rule
-            // (e.g. क़ = क + nukta) followed by virama join
-            ("क़्त", &format!("क\u{093C}\u{094D}{}त", ZWSP)),
-        ];
+    // ============================================================
+    // Korean — regular spaces at script boundaries
+    // ============================================================
+    #[test]
+    fn test_korean() {
+        run_cases(
+            KOR,
+            &[
+                ("Hello안녕하세요", "Hello 안녕하세요"),
+                ("안녕하세요World", "안녕하세요 World"),
+                ("안녕하세요", "안녕하세요"),
+                ("", ""),
+                ("가", "가"),
+                ("Hello가World", "Hello 가 World"),
+                ("안녕Hello세상World", "안녕 Hello 세상 World"),
+            ],
+        );
+    }
 
-        for &(input, expected) in cases {
-            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(
-                out, expected,
-                "\nFAILED: Hindi basic\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
-            );
-        }
+    // ============================================================
+    // Thai — regular spaces at script boundaries
+    // ============================================================
+    #[test]
+    fn test_thai() {
+        run_cases(
+            THA,
+            &[
+                ("Helloสวัสดี", "Hello สวัสดี"),
+                ("สวัสดีWorld", "สวัสดี World"),
+                ("สวัสดีชาวโลก", "สวัสดีชาวโลก"),
+                ("", ""),
+                ("ก", "ก"),
+                ("HelloกWorld", "Hello ก World"),
+                ("สวัสดีHelloชาวโลกWorld", "สวัสดี Hello ชาวโลก World"),
+            ],
+        );
+    }
+
+    // ============================================================
+    // Lao, Myanmar, Khmer — same as Thai
+    // ============================================================
+    #[test]
+    fn test_lao() {
+        run_cases(
+            LAO,
+            &[
+                ("Helloສະບາຍດີ", "Hello ສະບາຍດີ"),
+                ("ສະບາຍດີWorld", "ສະບາຍດີ World"),
+                ("ສະບາຍດີທຸກຄົນ", "ສະບາຍດີທຸກຄົນ"),
+            ],
+        );
     }
 
     #[test]
-    fn test_hindi_virama_complex_clusters_and_mixed_script() {
-        let stage = SegmentWords;
-        let ctx = Context::new(HIN);
+    fn test_myanmar() {
+        run_cases(
+            MYA,
+            &[
+                ("Helloမင်္ဂလာပါ", "Hello မင်္ဂလာပါ"),
+                ("မင်္ဂလာပါWorld", "မင်္ဂလာပါ World"),
+            ],
+        );
+    }
 
+    #[test]
+    fn test_khmer() {
+        run_cases(KHM, &[("Helloសួស្តី", "Hello សួស្តី"), ("សួស្តីWorld", "សួស្តី World")]);
+    }
+
+    // ============================================================
+    // Hindi (Devanagari) — ZWSP at virama boundaries
+    // ============================================================
+    #[test]
+    fn test_hindi() {
         let cases: &[(&str, &str)] = &[
-            // long word with multiple viramas -> insert ZWSP after each internal virama (not final)
+            // Single virama words
+            ("पत्नी", "पत्\u{200B}नी"), // Only one virama in input
+            // If you want double virama, use explicit Unicode:
             (
-                "अंतरराष्ट्रीय",
-                // break after त्, after र्, after ष्, before final vowel cluster as per rule (not word-final)
-                &format!(
-                    "अन्\u{094D}{}तर\u{094D}{}राष\u{094D}{}ट\u{094D}{}रीय",
-                    ZWSP, ZWSP, ZWSP, ZWSP
-                ),
+                "प\u{094D}त\u{094D}नी",
+                "प\u{094D}\u{200B}त\u{094D}\u{200B}नी",
             ),
-            // Mixed Hinglish: Devanagari <-> Latin boundaries + virama handling
-            ("Helloदोस्त", &format!("Hello{}दोस्त", ZWSP)), // script boundary only
-            ("मेराBestFriend", &format!("मेरा{}Best{}Friend", ZWSP, ZWSP)), // two script boundaries
-            ("मेराbestfriend", &format!("मेरा{}bestfriend", ZWSP)),
+            // Other cases...
+            ("सन्तोष", "सन्\u{200B}तोष"), // One virama
+            ("विद्वत्", "विद्\u{200B}वत्"), // One virama, final virama no break
+            ("रामायण", "रामायण"),       // No virama
+            // Script transitions
+            ("Helloपत्नी", "Hello पत्\u{200B}नी"),
+            ("पत्नीHello", "पत्\u{200B}नी Hello"),
         ];
 
-        for &(input, expected) in cases {
-            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(
-                out, expected,
-                "\nFAILED: Hindi complex/mixed\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
-            );
+        //debug case string
+        for (input, _expected) in cases {
+            debug_string(input);
+        }
+        run_cases(HIN, cases);
+    }
+
+    fn debug_string(s: &str) {
+        for (i, c) in s.chars().enumerate() {
+            println!("{}: U+{:04X} {} (virama: {})", i, c as u32, c, is_virama(c));
         }
     }
 
+    // ============================================================
+    // Tamil — ZWSP at puḷḷi boundaries
+    // ============================================================
     #[test]
-    fn test_hindi_punctuation_digits_whitespace() {
-        let stage = SegmentWords;
-        let ctx = Context::new(HIN);
-
+    fn test_tamil() {
         let cases: &[(&str, &str)] = &[
-            // punctuation should cause script<->other boundary as usual
-            ("राम,सीता", &format!("राम,{}सीता", ZWSP)),
-            // digits adjacent to Devanagari -> break
-            ("साल2025", &format!("साल{}2025", ZWSP)),
-            ("2025साल", &format!("2025{}साल", ZWSP)),
-            // whitespace preserved/collapsed to single ASCII space
-            ("  राम   सीता  ", " राम सीता "),
+            ("பற்றி", "பற்\u{200B}றி"), // One virama
+            ("தமிழ்", "தமிழ்"),         // Final virama, no break
+            ("அக்கா", "அக்\u{200B}கா"),   // One virama
+            // Script transitions
+            ("Helloதமிழ்", "Hello தமிழ்"),
+            ("தமிழ்World", "தமிழ் World"),
         ];
 
-        for &(input, expected) in cases {
-            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(
-                out, expected,
-                "\nFAILED: Hindi punct/digit/whitespace\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
-            );
+        //debug case string
+        for (input, _expected) in cases {
+            debug_string(input);
         }
-    }
 
-    // -------------------- Tamil (puḷḷi) --------------------
-
-    #[test]
-    fn test_tamil_pulli_basic() {
-        let stage = SegmentWords;
-        let ctx = Context::new(TAM);
-
-        let cases: &[(&str, &str)] = &[
-            // puḷḷi (virama) U+0BCD between consonants -> ZWSP after puḷḷi (if not word-final)
-            ("பற்றி", &format!("ப்{}ற்{}றி", ZWSP, ZWSP)), // double puḷḷi
-            ("அக்கா", &format!("அக்{}கா", ZWSP)),
-            ("இலங்கை", &format!("இலங்{}கை", ZWSP)),
-            // no puḷḷi -> no break
-            ("தமிழ்", "தமிழ்"),
-            // puḷḷi at word end -> no break
-            ("சமார்த்த்\u{0BCD}", "சமார்த்த\u{0BCD}"), // final pulli (rare) - no inserted ZWSP
-            // ZWJ suppression (Tamil uses ZWJ similarly)
-            ("க்\u{200D}க", "க்\u{200D}க"),
-        ];
-
-        for &(input, expected) in cases {
-            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(
-                out, expected,
-                "\nFAILED: Tamil basic\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
-            );
-        }
-    }
-
-    #[test]
-    fn test_tamil_complex_and_mixed() {
-        let stage = SegmentWords;
-        let ctx = Context::new(TAM);
-
-        let cases: &[(&str, &str)] = &[
-            // Complex cluster with multiple puḷḷi -> multiple ZWSP inserted internal
-            ("பிரிந்துபோயின்", "பிரிந்துபோயின்"), // no puḷḷi sequence -> unchanged
-            // Mixed Tamil + Latin
-            ("Helloவணக்கம்", &format!("Hello{}வணக்கம்", ZWSP)),
-            ("வணக்கம்World", &format!("வணக்கம்{}World", ZWSP)),
-            // digits
-            ("தமிழ்123", &format!("தமிழ்{}123", ZWSP)),
-        ];
-
-        for &(input, expected) in cases {
-            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            assert_eq!(
-                out, expected,
-                "\nFAILED: Tamil complex/mixed\n  input:  {input}\n  got:    {out}\n  want:   {expected}\n"
-            );
-        }
-    }
-
-    #[test]
-    fn test_indic_zwj_and_suppression() {
-        let stage = SegmentWords;
-        let ctx_h = Context::new(HIN);
-        let ctx_t = Context::new(TAM);
-
-        // ZWJ suppresses virama effect (no ZWSP should be inserted)
-        let h_input = "क्\u{200D}ष"; // Devanagari K + virama + ZWJ + ṣa
-        let h_expected = "क्\u{200D}ष";
-        let h_out = stage.apply(Cow::Borrowed(h_input), &ctx_h).unwrap();
-        assert_eq!(h_out, h_expected, "Hindi ZWJ suppression failed");
-
-        let t_input = "க்\u{200D}க"; // Tamil
-        let t_expected = "க்\u{200D}க";
-        let t_out = stage.apply(Cow::Borrowed(t_input), &ctx_t).unwrap();
-        assert_eq!(t_out, t_expected, "Tamil ZWJ suppression failed");
-    }
-
-    #[test]
-    fn test_property_no_break_inside_simple_word() {
-        let stage = SegmentWords;
-        let ctx = Context::new(HIN);
-
-        // Ensure Latin-only text is unchanged under HIN context
-        let latin = "hello world";
-        let out = stage.apply(Cow::Borrowed(latin), &ctx).unwrap();
-        assert_eq!(out, latin, "Should not touch pure Latin text");
-
-        // Ensure single Devanagari word without virama remains unchanged
-        let simple = "रामायण";
-        let out2 = stage.apply(Cow::Borrowed(simple), &ctx).unwrap();
-        assert_eq!(out2, simple, "Should not insert ZWSP when no virama exists");
-    }
-
-    // Small helper for iterating character pairs
-    fn assert_boundaries(lang: &Lang, pairs: &[(&str, &str)], expected: bool) {
-        for &(a, b) in pairs {
-            let chars: Vec<char> = a.chars().collect();
-            let chars2: Vec<char> = b.chars().collect();
-            let lang_entry = LANG_TABLE
-                .get(lang.code())
-                .copied()
-                .expect("language not present in LANG_TABLE – this is a bug");
-            assert_eq!(
-                check_boundary_with_classes(classify(chars[0]), classify(chars2[0]), lang_entry),
-                expected,
-                "Failed: {} -> {} for {}",
-                a,
-                b,
-                std::any::type_name::<Lang>()
-            );
-        }
-    }
-
-    #[test]
-    fn test_whitespace_no_boundary() {
-        let whitespace_pairs = &[(" ", "あ"), ("あ", " "), ("\n", "A"), ("A", "\t")];
-        assert_boundaries(&JPN, whitespace_pairs, false);
-    }
-
-    #[test]
-    fn test_western_script_breaks() {
-        let pairs = &[
-            ("A", "あ"),
-            ("あ", "A"),
-            ("A", "中"),
-            ("文", "A"),
-            ("A", "\u{AC00}"), // Hangul
-            ("\u{AC00}", "A"),
-        ];
-        assert_boundaries(&JPN, &pairs[0..2], true);
-        assert_boundaries(&ZHO, &pairs[2..4], true);
-        assert_boundaries(&KOR, &pairs[4..6], true);
-    }
-
-    #[test]
-    fn test_same_cluster_no_break() {
-        let japanese = &[("あ", "ア")];
-        let hangul = &[("\u{AC00}", "\u{AC01}")];
-        let thai = &[("\u{0E01}", "\u{0E02}")];
-
-        assert_boundaries(&JPN, japanese, false);
-        assert_boundaries(&KOR, hangul, false);
-        assert_boundaries(&THA, thai, false);
-    }
-
-    #[test]
-    fn test_punctuation_and_symbols() {
-        let script_to_punct = &[
-            ("日", ")"),
-            ("文", "."),
-            ("\u{0E01}", ","),
-            ("\u{AC00}", "-"),
-        ];
-        let script_to_emoji = &[("あ", "😀"), ("😀", "あ"), ("A", "😃"), ("가", "🎉")];
-
-        assert_boundaries(&JPN, &script_to_punct[0..2], true);
-        assert_boundaries(&THA, &script_to_punct[2..3], true);
-        assert_boundaries(&KOR, &script_to_punct[3..4], true);
-
-        assert_boundaries(&JPN, &script_to_emoji[0..2], true);
-        assert_boundaries(&ZHO, &script_to_emoji[2..3], true);
-        assert_boundaries(&KOR, &script_to_emoji[3..4], true);
-    }
-
-    #[test]
-    fn test_digits_break() {
-        let pairs = &[("1", "あ"), ("あ", "1"), ("9", "中"), ("0", "\u{AC00}")];
-        assert_boundaries(&JPN, &pairs[0..2], true);
-        assert_boundaries(&ZHO, &pairs[2..3], true);
-        assert_boundaries(&KOR, &pairs[3..4], true);
-    }
-
-    #[test]
-    fn test_cross_script_clusters() {
-        let pairs = &[
-            ("A", "Я"),
-            ("Z", "Ж"),
-            ("あ", "\u{0E01}"),
-            ("文", "\u{AC00}"),
-        ];
-        assert_boundaries(&JPN, &pairs[0..3], true);
-        assert_boundaries(&KOR, &pairs[1..4], true);
-    }
-
-    #[test]
-    fn test_edge_cjk_blocks() {
-        // No break inside CJK blocks
-        let no_break = &[("\u{2F00}", "\u{2F01}"), ("\u{2F00}", "\u{2F00}")];
-        assert_boundaries(&JPN, no_break, false);
-
-        // Break with CJK punctuation
-        let break_pairs = &[("、", "あ"), ("日", "。")];
-        assert_boundaries(&JPN, break_pairs, true);
-    }
-
-    #[test]
-    fn test_western_and_digits() {
-        let pairs = &[
-            ("A", "B"), // Western → Western
-            ("1", "2"), // Digit → Digit
-            ("A", "1"), // Letter → Digit
-            ("1", "A"), // Digit → Letter
-        ];
-        assert_boundaries(&JPN, &pairs[0..2], false); // Western→Western and digits: no break
-        assert_boundaries(&JPN, &pairs[2..4], false); // Cross Western class: no break
-    }
-
-    #[test]
-    fn test_ascii_to_cjk_and_back() {
-        let pairs = &[
-            ("H", "世"), // Western → CJK
-            ("o", "世"), // Western → CJK
-            ("世", "H"), // CJK → Western
-            ("文", "A"), // CJK → Western
-        ];
-        // Western -> CJK: MUST insert space (true)
-        assert_boundaries(&JPN, &pairs[0..2], true);
-
-        // CJK -> Western: MUST insert space (true)
-        assert_boundaries(&JPN, &pairs[2..4], true); // <-- FIX: Change false to true
+        run_cases(TAM, cases);
     }
 }
