@@ -57,6 +57,7 @@ pub enum SegmentRule {
 
 #[derive(Clone, Copy, Debug)]
 pub struct LangEntry {
+    pub code: &'static str,
     pub case_map: &'static [CaseMap],
     pub fold_map: &'static [FoldMap],
     pub transliterate_map: &'static [FoldMap],

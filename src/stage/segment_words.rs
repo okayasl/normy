@@ -118,86 +118,94 @@ fn check_boundary_with_classes(
     curr_class: CharClass,
     lang: LangEntry,
 ) -> bool {
-    // Same class = no boundary
     if prev_class == curr_class {
+        println!(
+            ">>> CLASS CHECK: SAME CLASS {:?} -> NO BOUNDARY",
+            prev_class
+        );
         return false;
     }
-
-    // Define the set of non-Western classes that MUST break when transitioning
-    // to or from Western, or when transitioning between themselves.
-    // ADD CharClass::Other to this set.
-
     match (prev_class, curr_class) {
-        // Western <-> Script/Other transitions (controlled by lang rules)
         (Western, Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other) => {
-            // <-- ADD Other
-            lang.segment_rules().contains(&SegmentRule::WesternToScript)
+            let rule = lang.segment_rules().contains(&SegmentRule::WesternToScript);
+            println!(
+                ">>> CLASS CHECK: WESTERN -> SCRIPT ({:?} -> {:?}) = BOUNDARY? {} (rule: WesternToScript)",
+                prev_class, curr_class, rule
+            );
+            rule
         }
         (Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other, Western) => {
-            // <-- ADD Other
-            lang.segment_rules().contains(&SegmentRule::ScriptToWestern)
+            let rule = lang.segment_rules().contains(&SegmentRule::ScriptToWestern);
+            println!(
+                ">>> CLASS CHECK: SCRIPT -> WESTERN ({:?} -> {:?}) = BOUNDARY? {} (rule: ScriptToWestern)",
+                prev_class, curr_class, rule
+            );
+            rule
         }
-
-        // Non-Western Script/Other <-> Non-Western Script/Other transitions
         (
             Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other,
             Cjk | Hangul | SEAsian | NonCJKScript | Indic | Other,
-        ) => true, // <-- ADD Other
-
-        // This final arm now guarantees:
-        // 1. (Cjk, Other) -> true (Fixes `あ` -> `😀`)
-        // 2. (Other, Cjk) -> true (Fixes `、` -> `あ`)
-        // 3. (Script, Script) -> true (Original intent)
-        _ => false,
+        ) => {
+            println!(
+                ">>> CLASS CHECK: NON-WESTERN -> NON-WESTERN ({:?} -> {:?}) = BOUNDARY (default true)",
+                prev_class, curr_class
+            );
+            true
+        }
+        _ => {
+            println!(
+                ">>> CLASS CHECK: FALLBACK ({:?} -> {:?}) = NO BOUNDARY",
+                prev_class, curr_class
+            );
+            false
+        }
     }
 }
+
+// In src/stage/segment_words.rs
 
 #[inline]
 pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
     let mut prev_class: Option<CharClass> = None;
-    let mut prev_char: Option<char> = None; // Add this for virama check
+    let mut prev_char: Option<char> = None; // <-- KEEP this for Indic check
 
     for curr in text.chars() {
         if is_any_whitespace(curr) {
-            println!(">>> NEEDS SKIP WS: '{}' U+{:04X}", curr, curr as u32);
+            // ... (original logic)
             continue;
         }
 
         let curr_class = classify(curr);
 
-        if let Some(p_class) = prev_class {
-            if check_boundary_with_classes(p_class, curr_class, lang) {
+        // --- ADDED INDIC CHECK ---
+        if let Some(p_char) = prev_char {
+            let p_class = prev_class.unwrap();
+
+            // Check for the Golden Indic Rule: Prev is a Virama, followed by an Indic character
+            // (This prevents the early exit and forces the segment_chars iterator to run)
+            if p_class == Indic && is_virama(p_char) && curr_class == Indic {
                 println!(
-                    ">>> NEEDS BOUNDARY DETECTED: {:?} → {:?} ",
-                    p_class, curr_class
+                    ">>> NEEDS INDIC VIRAMA BOUNDARY FOUND: '{}' U+{:04X} -> '{}' U+{:04X}",
+                    p_char, p_char as u32, curr, curr as u32
                 );
                 return true;
-            } else {
-                println!(
-                    ">>> NEEDS NO CLASS BOUNDARY: {:?} → {:?} ",
-                    p_class, curr_class
-                );
+            }
+        }
+        // --- END ADDED INDIC CHECK ---
+
+        if let Some(p_class) = prev_class {
+            let boundary = check_boundary_with_classes(p_class, curr_class, lang);
+            // ... (original class boundary check logic)
+            if boundary {
+                return true;
             }
         }
 
-        // Virama check (temporary — will be permanent in fix)
-        if let (Some(p_class), Some(p_char)) = (prev_class, prev_char)
-            && p_class == Indic
-            && !is_virama(p_char)
-            && is_virama(curr)
-        {
-            println!(
-                ">>> NEEDS VIRAMA BOUNDARY DETECTED: '{}' → '{}' ",
-                p_char, curr
-            );
-            return true;
-        }
-
         prev_class = Some(curr_class);
-        prev_char = Some(curr); // Add this
+        prev_char = Some(curr); // <-- UPDATE this
     }
 
-    println!(">>> NEEDS: NO BOUNDARIES FOUND → RETURNING FALSE");
+    println!(">>> NEEDS: NO BOUNDARIES FOUND");
     false
 }
 
@@ -238,6 +246,16 @@ where
                 let curr = match self.inner.next() {
                     Some(c) => c,
                     None => {
+                        // First: emit pending delimiter if any
+                        if let Some(space) = self.pending_space.take() {
+                            println!(
+                                ">>> END OF INPUT → EMIT PENDING DELIMITER U+{:04X} ({})",
+                                space as u32,
+                                if space == zwsp() { "ZWSP" } else { "SPACE" }
+                            );
+                            return Some(space);
+                        }
+                        // Then: emit last buffered char
                         if let Some(last) = self.prev_char.take() {
                             println!(
                                 ">>> END OF INPUT → FLUSH LAST CHAR: '{}' U+{:04X}",
@@ -305,17 +323,17 @@ where
                         let from = format!("{:?}", prev_class);
                         let to = format!("{:?}", curr_class);
                         println!(
-                            ">>> SCRIPT BOUNDARY: {} → {} → INSERT {}",
-                            from,
-                            to,
-                            if prev_class == Indic || curr_class == Indic {
-                                "ZWSP"
-                            } else {
-                                "SPACE"
-                            }
+                            ">>> SCRIPT BOUNDARY: {} -> {} -> INSERT DELIMITER",
+                            from, to
                         );
                         need_boundary = true;
-                        use_zwsp = prev_class == Indic || curr_class == Indic;
+                        use_zwsp = prev_class == Indic && curr_class == Indic;
+                        println!(
+                            ">>> DELIM CHOICE: use_zwsp={} (prev_indic={} || curr_indic={})",
+                            use_zwsp,
+                            prev_class == Indic,
+                            curr_class == Indic
+                        );
                     } else {
                         println!(
                             ">>> NO BOUNDARY: prev='{}' U+{:04X} (virama={}) | curr='{}' U+{:04X} (virama={})",
@@ -402,14 +420,21 @@ mod tests {
     };
     use std::borrow::Cow;
 
-    fn debug_string(s: &str) {
-        println!("For {s}");
+    fn debug_string(label: &str, s: &str) {
+        println!("{}: {:?}", label, s);
+
         for (i, c) in s.chars().enumerate() {
-            print!(
-                "{}: U+{:04X} {} (virama: {})    ",
+            let display = match c {
+                '\u{200B}' => "ZWSP",
+                '\u{094D}' => "VIRAMA",
+                _ => &c.to_string(),
+            };
+
+            println!(
+                "{:02} | U+{:04X} | {:<5} | virama: {}",
                 i,
                 c as u32,
-                c,
+                display,
                 is_virama(c)
             );
         }
@@ -423,12 +448,47 @@ mod tests {
 
         for &(input, expected) in cases {
             let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-            if debug {
-                debug_string(input);
-                debug_string(expected);
-                debug_string(&out.clone());
+            if out != expected && debug {
+                eprintln!("\n====================================================");
+                eprintln!("❌ TEST FAILURE for language {:?}:", lang);
+                debug_string("INPUT", input);
+                debug_string("EXPECTED", expected);
+                debug_string("GOT", &out);
+                eprintln!("====================================================\n");
+
+                // Always show debug info for failing cases
+                debug_step_by_step(lang, input);
+
+                //panic!("Failed: {} → {}  (got {})", input, expected, out);
             }
+            // if debug {
+            //     debug_string("INPUT", input);
+            //     debug_string("EXPECTED", expected);
+            //     debug_string("GOT", &out);
+            // }
             assert_eq!(out, expected, "Failed: {} → {}", input, expected);
+        }
+    }
+
+    fn debug_step_by_step(lang: Lang, input: &str) {
+        let stage = SegmentWords;
+        let ctx = Context::new(lang);
+        println!("=== STEP BY STEP DEBUG ===");
+        println!("=== STAGE APPLY ===");
+        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        println!("INPUT:  {input}");
+        println!("OUTPUT: {out}");
+        println!("CHARS:  {:?}", out.chars().collect::<Vec<_>>());
+        println!("BYTES:  {:02X?}", out.as_bytes());
+
+        let iter = segment_chars(input.chars(), ctx.lang_entry);
+        println!("\n--- ITERATOR OUTPUT ---");
+        for c in iter {
+            if c == '\u{200B}' {
+                println!("INSERTED ZWSP U+200B");
+            } else {
+                println!("EMIT: {:<4} U+{:04X}", c, c as u32);
+            }
         }
     }
 
@@ -577,41 +637,6 @@ mod tests {
         run_cases(HIN, cases, true);
     }
 
-    #[test]
-    fn debug_step_by_step_hindi_patnee() {
-        let stage = SegmentWords;
-        let ctx = Context::new(HIN);
-        let input = "Helloपत्नी"; // NFC: प त ् न ी
-
-        println!("=== Stage apply ===");
-        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        println!("INPUT:  {input}");
-        println!("OUTPUT: {out}");
-        println!("CHARS:  {:?}", out.chars().collect::<Vec<_>>());
-        println!("BYTES:  {:02X?}", out.as_bytes());
-
-        println!("=== STEP BY STEP DEBUG ===");
-        for c in input.chars() {
-            println!(
-                "CHAR: {:<4} U+{:04X} | is_virama: {} | classify: {:?}",
-                c,
-                c as u32,
-                is_virama(c),
-                classify(c)
-            );
-        }
-
-        let iter = segment_chars(input.chars(), ctx.lang_entry);
-        println!("\n--- ITERATOR OUTPUT ---");
-        for c in iter {
-            if c == '\u{200B}' {
-                println!("INSERTED ZWSP U+200B");
-            } else {
-                println!("EMIT: {:<4} U+{:04X}", c, c as u32);
-            }
-        }
-    }
-
     // ============================================================
     // Tamil — ZWSP at puḷḷi boundaries
     // ============================================================
@@ -639,5 +664,101 @@ mod tests {
             ("विद्वत्", "विद्वत्"),    // final virama → no ZWSP
         ];
         run_cases(HIN, cases, false);
+    }
+
+    #[test]
+    fn debug_western_to_indic_no_virama() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+        let input = "Helloप"; // Simple transition: Western -> Indic consonant
+        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        println!("INPUT: {}", input);
+        println!("OUTPUT: {}", out);
+        println!("CHARS: {:?}", out.chars().collect::<Vec<_>>());
+        let iter = segment_chars(input.chars(), ctx.lang_entry);
+        for c in iter {
+            if c == '\u{200B}' {
+                println!("INSERTED ZWSP");
+            } else if c == ' ' {
+                println!("INSERTED SPACE");
+            } else {
+                println!("EMIT: '{}' U+{:04X}", c, c as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn debug_isolated_virama_hindi() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+        let input = "पत्"; // प त ् - consonant + virama at end
+        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        println!("INPUT: {}", input);
+        println!("OUTPUT: {}", out);
+        println!("CHARS: {:?}", out.chars().collect::<Vec<_>>());
+        let iter = segment_chars(input.chars(), ctx.lang_entry);
+        for c in iter {
+            if c == '\u{200B}' {
+                println!("INSERTED ZWSP");
+            } else {
+                println!("EMIT: '{}' U+{:04X}", c, c as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn debug_tamil_transition() {
+        let stage = SegmentWords;
+        let ctx = Context::new(TAM);
+        let input = "Helloபற்"; // Western -> Tamil consonant + puḷḷi (virama U+0BCD)
+        let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        println!("INPUT: {}", input);
+        println!("OUTPUT: {}", out);
+        println!("CHARS: {:?}", out.chars().collect::<Vec<_>>());
+        let iter = segment_chars(input.chars(), ctx.lang_entry);
+        for c in iter {
+            if c == '\u{200B}' {
+                println!("INSERTED ZWSP");
+            } else if c == ' ' {
+                println!("INSERTED SPACE");
+            } else {
+                println!("EMIT: '{}' U+{:04X}", c, c as u32);
+            }
+        }
+    }
+
+    #[test]
+    fn debug_delimiter_choice_pure_transition() {
+        let stage = SegmentWords;
+        let ctx = Context::new(HIN);
+        let cases = &[
+            ("Helloप", "Hello प"), // Should be visible space
+            ("पHello", "प Hello"), // Should be visible space
+            ("पत्", "पत्"),          // No delimiter
+            ("पत्नी", "पत्नी"),      // ZWSP inside
+        ];
+        for &(input, expected) in cases {
+            let out = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            println!("INPUT:  {:20} → {}", input, out);
+            println!("EXPECT: {:20}   diff: {}", expected, out != expected);
+            println!("---");
+        }
+    }
+
+    #[test]
+    fn debug_virama_trigger_direction() {
+        let ctx = Context::new(HIN);
+        println!(
+            "needs_segmentation(प्त्नी) = {}",
+            needs_segmentation("प्त्नी", ctx.lang_entry)
+        );
+        println!(
+            "needs_segmentation(पत्)     = {}",
+            needs_segmentation("पत्", ctx.lang_entry)
+        );
+        println!(
+            "needs_segmentation(पत्नी)   = {}",
+            needs_segmentation("पत्नी", ctx.lang_entry)
+        );
     }
 }

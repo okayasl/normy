@@ -41,6 +41,8 @@ macro_rules! define_languages {
                 mod [<$code:lower _data>] {
                     use super::*;
 
+                    pub static CODE: &str = $code_str;
+
                     pub static CASE: &[CaseMap] = &[
                         $(CaseMap { from: $cfrom, to: $cto }),*
                     ];
@@ -80,6 +82,7 @@ macro_rules! define_languages {
             pub(crate) static LANG_TABLE: Map<&'static str, LangEntry> = phf_map! {
                 $(
                     $code_str => LangEntry {
+                        code: [<$code:lower _data>]::CODE,
                         case_map: [<$code:lower _data>]::CASE,
                         fold_map: [<$code:lower _data>]::FOLD,
                         transliterate_map: [<$code:lower _data>]::TRANSLITERATE,
