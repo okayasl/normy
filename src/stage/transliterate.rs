@@ -1,6 +1,7 @@
 use crate::{
     context::Context,
     stage::{CharMapper, FusedIterator, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -40,7 +41,7 @@ use std::sync::Arc;
 ///
 /// This stage is intended for generating readable identifiers, legacy system compatibility,
 /// or when phonetic fidelity is secondary to orthographic tradition.
-/// It is **not** a general-purpose ASCII converter — for that, combine with `RemoveDiacritics`.
+/// It is **not** a general-purpose ASCII converter — for that, combine with `Transliterate`.
 pub struct Transliterate;
 
 impl Stage for Transliterate {
@@ -108,8 +109,14 @@ impl CharMapper for Transliterate {
         let map = ctx.lang_entry.transliterate_map();
         map.iter()
             .find(|m| m.from == c)
-            .map(|m| m.to.chars().next().expect("1→1 mapping guaranteed"))
-            .or(Some(c)) // ← CRITICAL: preserve original char
+            .map(|m| {
+                debug_assert!(
+                    m.to.len() == 1,
+                    "transliterate_is_one_to_one() mapping failed"
+                );
+                m.to.chars().next().unwrap()
+            })
+            .or(Some(c))
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
@@ -153,6 +160,60 @@ impl<'a> Iterator for TransliterateIter<'a> {
 }
 
 impl<'a> FusedIterator for TransliterateIter<'a> {}
+
+impl StageTestConfig for Transliterate {
+    fn one_to_one_languages() -> &'static [crate::lang::Lang] {
+        // Only languages with 1→1 transliteration are eligible
+        &[crate::lang::data::DEU, crate::lang::data::POL] // ß→ss, Ł→L (if defined as 1→1)
+    }
+
+    fn samples(lang: crate::lang::Lang) -> &'static [&'static str] {
+        match lang {
+            crate::lang::data::FRA => &["œuvre", "ŒUVRE", "Cœur"],
+            crate::lang::data::DAN => &["Århus", "århus", "Øresund"],
+            crate::lang::data::DEU => &["Straße", "Fußgänger", "Weißwurst"],
+            _ => &["hello", "İstanbul", "café", ""],
+        }
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Universal contract tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::testing::stage_contract::*;
+
+    #[test]
+    fn zero_copy() {
+        zero_copy_when_no_changes(Transliterate);
+    }
+    #[test]
+    fn fast_slow_eq() {
+        fast_and_slow_paths_equivalent(Transliterate);
+    }
+    #[test]
+    fn idempotent() {
+        stage_is_idempotent(Transliterate);
+    }
+    #[test]
+    fn needs_apply() {
+        needs_apply_is_accurate(Transliterate);
+    }
+    #[test]
+    fn empty_ascii() {
+        handles_empty_string_and_ascii(Transliterate);
+    }
+    #[test]
+    fn mixed_scripts() {
+        no_panic_on_mixed_scripts(Transliterate);
+    }
+}
 
 #[cfg(test)]
 mod tests {

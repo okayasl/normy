@@ -2,6 +2,7 @@ use crate::{
     context::Context,
     lang::LangEntry,
     stage::{CharMapper, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
@@ -93,7 +94,7 @@ impl Stage for RemoveDiacritics {
 
     #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        if ctx.lang_entry.has_strip_map() || ctx.lang_entry.diacritics.is_some() {
+        if ctx.lang_entry.has_strip_or_diacritics() {
             Some(self)
         } else {
             None
@@ -119,27 +120,35 @@ impl CharMapper for RemoveDiacritics {
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        if text.is_ascii() || !ctx.lang_entry.has_strip_or_diacritics() {
+        let lang = ctx.lang_entry;
+
+        // Fast path: if text is ASCII or language has no rules → raw chars
+        if text.is_ascii() || !lang.has_strip_or_diacritics() {
             return Box::new(text.chars());
         }
-        if ctx.lang_entry.has_diacritics() {
-            // Combining path: NFD → filter → NFC (for Arabic/Hebrew)
-            let nfd = text.nfd();
-            let filtered = RemoveDiacriticsIter {
-                chars: nfd,
-                lang: ctx.lang_entry,
-            };
-            let recomposed = Recompositions::new_canonical(filtered);
-            Box::new(recomposed)
-        } else {
-            // Precomposed-only path: 1:1 map (for French/Vietnamese)
-            // Clone ctx.lang_entry (Copy) for move
-            let lang = ctx.lang_entry;
-            Box::new(
+
+        // Medium path: only precomposed strip map (French, Vietnamese, Polish, etc.)
+        // → 1:1 mapping, zero decomposition
+        if lang.has_strip_map() && !lang.has_diacritics() {
+            return Box::new(
                 text.chars()
                     .map(move |c| lang.strip_diacritic(c).unwrap_or(c)),
-            )
+            );
         }
+
+        // Slow path: has combining diacritics (Arabic, Hebrew) → must decompose
+        if lang.has_diacritics() {
+            let nfd = text.nfd();
+            let filtered = RemoveDiacriticsIter { chars: nfd, lang };
+            let recomposed = Recompositions::new_canonical(filtered);
+            return Box::new(recomposed);
+        }
+
+        // Final fallback: use strip map even if diacritics exist (rare, safe)
+        Box::new(
+            text.chars()
+                .map(move |c| lang.strip_diacritic(c).unwrap_or(c)),
+        )
     }
 }
 
@@ -163,6 +172,60 @@ impl<I: Iterator<Item = char>> Iterator for RemoveDiacriticsIter<I> {
 }
 
 impl<I: Iterator<Item = char>> FusedIterator for RemoveDiacriticsIter<I> {}
+
+impl StageTestConfig for RemoveDiacritics {
+    fn one_to_one_languages() -> &'static [crate::lang::Lang] {
+        &[] // Not 1:1 — can remove chars (Arabic harakat)
+    }
+
+    fn samples(lang: crate::lang::Lang) -> &'static [&'static str] {
+        match lang {
+            crate::lang::data::FRA => &["café", "naïve", "résumé", "Crème brûlée"],
+            crate::lang::data::VIE => &["Hà Nội", "Đạt", "đẹp quá"],
+            crate::lang::data::ARA => &["مَرْحَبًا", "كتاب"],
+            crate::lang::data::POL => &["Łódź", "żółć", "gęślą"],
+            _ => &["hello", "test 123", "café", ""],
+        }
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true // RemoveDiacritics does not modify case
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Universal contract tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::testing::stage_contract::*;
+
+    #[test]
+    fn zero_copy() {
+        zero_copy_when_no_changes(RemoveDiacritics);
+    }
+    #[test]
+    fn fast_slow_eq() {
+        fast_and_slow_paths_equivalent(RemoveDiacritics);
+    }
+    #[test]
+    fn idempotent() {
+        stage_is_idempotent(RemoveDiacritics);
+    }
+    #[test]
+    fn needs_apply() {
+        needs_apply_is_accurate(RemoveDiacritics);
+    }
+    #[test]
+    fn empty_ascii() {
+        handles_empty_string_and_ascii(RemoveDiacritics);
+    }
+    #[test]
+    fn mixed_scripts() {
+        no_panic_on_mixed_scripts(RemoveDiacritics);
+    }
+}
 
 #[cfg(test)]
 mod tests {

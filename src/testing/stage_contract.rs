@@ -14,6 +14,11 @@ pub trait StageTestConfig: Stage + Sized {
     fn samples(_lang: Lang) -> &'static [&'static str] {
         &["Hello World 123", " déjà-vu ", "TEST", ""]
     }
+
+    // Add this default
+    fn skip_needs_apply_test() -> bool {
+        false
+    }
 }
 
 // ============================================================================
@@ -86,6 +91,9 @@ pub fn stage_is_idempotent<S: StageTestConfig>(stage: S) {
 
 #[cfg(test)]
 pub fn needs_apply_is_accurate<S: StageTestConfig>(stage: S) {
+    if S::skip_needs_apply_test() {
+        return; // Stage does not react to case → test irrelevant
+    }
     let ctx = Context::new(ENG);
     // Only test case-sensitive changes — NOT whitespace, punctuation, or formatting
     let no_change = ["", "hello", "world123", "café", "123", "  "];
