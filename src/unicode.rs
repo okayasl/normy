@@ -1,9 +1,17 @@
-// Unicode character classification utilities for Normy.
-//
-// - Single source of truth for language-agnostic character categories
-// - Zero-cost abstractions, inlined for optimized segmentation pipelines
-// - Includes script detection, whitespace categories, fullwidth/halfwidth ranges,
-//   punctuation normalization, and control/format character checks.
+/// Unicode character classification utilities for Normy.
+///
+/// # Design Philosophy
+///
+/// Normy is a **zero-allocation**, **zero-copy** normalization layer for production NLP pipelines.
+/// It deliberately sacrifices full UCD compliance for extreme performance and predictability.
+///
+/// - Covers >95% of characters in real-world multilingual web text
+/// - Historical, constructed, and regional scripts (Deseret, Gothic, Ethiopic, Tifinagh, etc.)
+///   are classified as `Other` → no unnecessary word breaks → preserves zero-copy path
+/// - Extensibility: add missing scripts via `Context::with_modified` or custom stages
+///
+/// If you need 100% UCD fidelity, compose with `unicode-segmentation` as a dynamic stage.
+/// Normy is not a Unicode museum. It is a tokenizer accelerator.
 use phf::{phf_map, phf_set};
 
 // Format control characters (General Category = Cf) and selected
