@@ -1,17 +1,16 @@
-//! Unicode character classification utilities for Normy.
-//!
-//! - Single source of truth for language-agnostic character categories
-//! - Zero-cost abstractions, inlined for optimized segmentation pipelines
-//! - Includes script detection, whitespace categories, fullwidth/halfwidth ranges,
-//!   punctuation normalization, and control/format character checks.
-
+// Unicode character classification utilities for Normy.
+//
+// - Single source of truth for language-agnostic character categories
+// - Zero-cost abstractions, inlined for optimized segmentation pipelines
+// - Includes script detection, whitespace categories, fullwidth/halfwidth ranges,
+//   punctuation normalization, and control/format character checks.
 use phf::{phf_map, phf_set};
 
-/// Format control characters (General Category = Cf) and selected
-/// zero-width characters relevant to text normalization.
-///
-/// These are removed by `RemoveFormatControls` and commonly appear
-/// in user-generated content, especially in mixed-script environments.
+// Format control characters (General Category = Cf) and selected
+// zero-width characters relevant to text normalization.
+//
+// These are removed by `RemoveFormatControls` and commonly appear
+// in user-generated content, especially in mixed-script environments.
 static FORMAT_CONTROLS: phf::Set<char> = phf_set! {
     '\u{200B}', // Zero-width space
     '\u{200C}', // Zero-width non-joiner
@@ -41,9 +40,9 @@ static FORMAT_CONTROLS: phf::Set<char> = phf_set! {
     '\u{FEFF}', // Zero-width no-break space / BOM
 };
 
-/// Unicode whitespace characters excluding ASCII space, tab, LF, CR.
-///
-/// These are normalized to plain ASCII space when `normalize_unicode = true`.
+// Unicode whitespace characters excluding ASCII space, tab, LF, CR.
+//
+// These are normalized to plain ASCII space when `normalize_unicode = true`.
 static UNICODE_WHITESPACE: phf::Set<char> = phf_set! {
     '\u{00A0}', // No-break space
     '\u{1680}', // Ogham space mark
@@ -78,69 +77,20 @@ pub fn is_any_whitespace(c: char) -> bool {
     c.is_whitespace() || is_unicode_whitespace(c)
 }
 
-// /// Basic Latin + Latin-1 Supplement + Latin Extended-A/B.
-// #[inline(always)]
-// pub fn is_latin_letter(c: char) -> bool {
-//     matches!(c as u32,
-//         0x0041..=0x005A |   // A–Z
-//         0x0061..=0x007A |   // a–z
-//         0x00C0..=0x00FF |   // Latin-1 Supplement
-//         0x0100..=0x02AF     // Latin Extended A/B
-//     )
-// }
-
-// #[inline(always)]
-// pub fn is_japanese_kana(c: char) -> bool {
-//     is_hiragana(c) || is_katakana(c) || is_kana_supplement(c)
-// }
-
-// /// Characters treated as “script units” for word segmentation.
-// #[inline(always)]
-// pub fn is_segmentation_script_char(c: char) -> bool {
-//     is_cjk_han_or_kana(c) || is_hangul(c) || is_se_asian_script(c)
-// }
-
-// /// ASCII alphabetic only.
-// #[inline(always)]
-// pub fn is_ascii_letter(c: char) -> bool {
-//     matches!(c as u32,
-//         0x0041..=0x005A | // A–Z
-//         0x0061..=0x007A   // a–z
-//     )
-// }
-// #[inline(always)]
-// pub fn is_virama_to_skip(c: char) -> bool {
-//     matches!(
-//         c as u32,
-//         0x094D | // Devanagari
-//         0x09CD | // Bengali
-//         0x0A4D | // Gurmukhi
-//         0x0ACD | // Gujarati
-//         0x0B4D | // Oriya
-//         0x0BCD | // Tamil
-//         0x0C4D | // Telugu
-//         0x0CCD | // Kannada
-//         0x0D4D | // Malayalam
-//         0x0DCA | // Sinhala
-//         0x17D2 | // Khmer coeng
-//         0x103A // Myanmar asat
-//     )
-// }
-
-/// Control characters (Category Cc). Format controls (Cf) are handled separately.
+// Control characters (Category Cc). Format controls (Cf) are handled separately.
 #[inline(always)]
 pub fn is_control(c: char) -> bool {
     let cp = c as u32;
     cp <= 0x1F || (0x7F..=0x9F).contains(&cp)
 }
 
-/// Fast scan to check for any format controls.
+// Fast scan to check for any format controls.
 #[inline]
 pub fn contains_format_controls(text: &str) -> bool {
     text.chars().any(is_format_control)
 }
 
-/// Fullwidth Latin punctuation/letters in FF01–FF5E plus ideographic space.
+// Fullwidth Latin punctuation/letters in FF01–FF5E plus ideographic space.
 #[inline(always)]
 pub fn is_fullwidth(c: char) -> bool {
     let cp = c as u32;
@@ -175,7 +125,7 @@ pub fn normalize_punctuation_char(c: char) -> char {
     PUNCT_NORM.get(&c).copied().unwrap_or(c)
 }
 
-/// Hangul syllables + jamo + compatibility + extended ranges.
+// Hangul syllables + jamo + compatibility + extended ranges.
 #[inline(always)]
 pub fn is_hangul(c: char) -> bool {
     matches!(c as u32,
@@ -187,13 +137,13 @@ pub fn is_hangul(c: char) -> bool {
     )
 }
 
-/// Hiragana block.
+// Hiragana block.
 #[inline(always)]
 pub fn is_hiragana(c: char) -> bool {
     matches!(c as u32, 0x3040..=0x309F)
 }
 
-/// Katakana + small extensions.
+// Katakana + small extensions.
 #[inline(always)]
 pub fn is_katakana(c: char) -> bool {
     matches!(c as u32,
@@ -202,13 +152,13 @@ pub fn is_katakana(c: char) -> bool {
     )
 }
 
-/// Kana Supplement (U+1B000+).
+// Kana Supplement (U+1B000+).
 #[inline(always)]
 pub fn is_kana_supplement(c: char) -> bool {
     matches!(c as u32, 0x1B000..=0x1B16F)
 }
 
-/// Unified Han blocks + extensions A–G + compatibility block.
+// Unified Han blocks + extensions A–G + compatibility block.
 #[inline(always)]
 pub fn is_cjk_unified_ideograph(c: char) -> bool {
     matches!(c as u32,
@@ -229,7 +179,7 @@ pub fn is_kangxi_radical(c: char) -> bool {
     matches!(c as u32, 0x2F00..=0x2FDF)
 }
 
-/// Han/Kana cluster excluding Hangul.
+// Han/Kana cluster excluding Hangul.
 #[inline(always)]
 pub fn is_cjk_han_or_kana(c: char) -> bool {
     is_cjk_unified_ideograph(c)
@@ -239,7 +189,7 @@ pub fn is_cjk_han_or_kana(c: char) -> bool {
         || is_kangxi_radical(c)
 }
 
-/// Southeast Asian scripts with syllable-based segmentation.
+// Southeast Asian scripts with syllable-based segmentation.
 #[inline(always)]
 pub fn is_se_asian_script(c: char) -> bool {
     matches!(c as u32,
@@ -304,6 +254,11 @@ pub fn zwsp() -> char {
     '\u{200B}'
 }
 
+#[inline(always)]
+pub fn is_extended_latin(c: char) -> bool {
+    matches!(c as u32, 0x00C0..=0x02AF) // Latin-1 Supplement + Extended A/B
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum CharClass {
@@ -343,7 +298,7 @@ pub fn classify(c: char) -> CharClass {
     if is_indic_script(c) {
         return CharClass::Indic;
     }
-    if ('\u{00C0}'..='\u{02AF}').contains(&c) {
+    if is_extended_latin(c) {
         return CharClass::Western;
     }
     if c.is_alphabetic() {
@@ -376,20 +331,6 @@ mod tests {
         assert!(is_unicode_whitespace('\u{3000}'));
         assert!(!is_unicode_whitespace(' '));
     }
-
-    // #[test]
-    // fn latin_letters() {
-    //     assert!(is_latin_letter('é'));
-    //     assert!(is_latin_letter('Ĝ'));
-    //     assert!(!is_latin_letter('あ'));
-    // }
-
-    // #[test]
-    // fn ideographic_characters() {
-    //     assert!(is_ideographic('漢'));
-    //     assert!(is_ideographic('가'));
-    //     assert!(!is_ideographic('A'));
-    // }
 
     #[test]
     fn control_characters() {
@@ -435,5 +376,75 @@ mod tests {
         for c in &['\u{200B}', '🎉', '©', '™'] {
             assert_eq!(classify(*c), CharClass::Other, "Failed for {:?}", c);
         }
+    }
+
+    #[test]
+    fn classify_is_exhaustive_and_correct() {
+        use CharClass::*;
+
+        // Helper macro to reduce repetition
+        macro_rules! assert_class {
+            ($c:expr, $expected:expr) => {
+                assert_eq!(
+                    classify($c),
+                    $expected,
+                    "U+{:04X} '{}' misclassified",
+                    $c as u32,
+                    $c
+                );
+            };
+        }
+
+        // --- ASCII ---
+        assert_class!('A', Western);
+        assert_class!('5', Western);
+        assert_class!('!', Western);
+
+        // --- Extended Latin (the hard-coded range!) ---
+        assert_class!('À', Western); // U+00C0
+        assert_class!('ÿ', Western); // U+00FF
+        assert_class!('Ā', Western); // U+0100
+        assert_class!('ſ', Western); // U+017F long s
+        assert_class!('Ə', Western); // U+018F schwa (Azeri/Turkish)
+        assert_class!('ǃ', Western); // U+01C3 click (Khoisan orthographies)
+
+        // --- Other Latin edge cases that must NOT be Western ---
+        assert_class!('Ꝛ', NonCJKScript); // U+A75A (medieval abbreviations)
+
+        // --- Full CJK coverage ---
+        assert_class!('𐐀', Cjk); // Deseret (sometimes mistaken)
+        assert_class!('𠀀', Cjk); // CJK Ext B
+        assert_class!('𪚥', Cjk); // CJK Ext F
+        assert_class!('豈', Cjk); // Compatibility F900
+
+        // --- Full Indic coverage ---
+        assert_class!('অ', Indic); // Bengali
+        assert_class!('ਅ', Indic); // Gurmukhi
+        assert_class!('અ', Indic); // Gujarati
+        assert_class!('ଅ', Indic); // Oriya
+        assert_class!('అ', Indic); // Telugu
+        assert_class!('ಕ', Indic); // Kannada
+        assert_class!('മ', Indic); // Malayalam
+        assert_class!('අ', Indic); // Sinhala
+
+        // --- Myanmar extended ---
+        assert_class!('ꩠ', SEAsian); // Myanmar Ext B
+
+        // --- Khmer symbols ---
+        assert_class!('᧠', SEAsian); // Khmer symbol
+
+        // --- Non-alphabetic scripts that must NOT be NonCJKScript ---
+        assert_class!('★', Other);
+        assert_class!('☭', Other);
+        assert_class!('𐍈', Other); // Gothic
+
+        // --- Zero-width & format controls ---
+        assert_class!('\u{200B}', Other); // ZWSP
+        assert_class!('\u{2060}', Other); // Word joiner
+        assert_class!('\u{FEFF}', Other); // BOM
+
+        // --- Whitespace edge cases ---
+        assert_class!('\u{1680}', Whitespace); // Ogham space mark
+        assert_class!('\u{2028}', Whitespace); // Line separator (treated as whitespace by is_whitespace())
     }
 }
