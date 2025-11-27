@@ -45,21 +45,18 @@ use crate::{
 ///
 /// # Indic Script Handling (Linguistic Heuristic)
 ///
-/// For Hindi, Tamil, and other Indic scripts, segmentation applies a **zero-dictionary heuristic**
-/// to manage word-break opportunities while preserving legitimate conjuncts.
+/// For Indic scripts, segmentation applies a character-based rule to manage word-break opportunities.
 ///
 /// The rules operate as follows:
 ///
-/// 1.  **ZWSP Insertion (Tamil & Hindi exceptions):** A ZWSP (U+200B) is inserted after a **virama**
-///     when followed by a consonant (e.g., in **Tamil** or **Hindi** words like **`पत्नी`**) to create
-///     break points for tokenization and line wrapping.
-/// 2.  **Conjunct Preservation (Hindi):** For Devanagari (**Hindi**), a minimal, zero-cost **heuristic**
-///     prevents ZWSP insertion where the **virama** is followed by a consonant known to form a mandatory,
-///     non-breaking **conjunct** (e.g., **`र`**, **`य`**, **`व`**, **`ह`**). This ensures words like **`विद्वत्`** remain unsegmented.
+/// 1.  **Universal ZWSP Break:** A ZWSP (U+200B) is inserted after a **virama** when followed by a consonant (e.g., in **Tamil** and other Indic scripts).
+///     This provides essential break points for tokenization and line wrapping.
+/// 2.  **Devanagari (Hindi) Exception:** For **Devanagari (Hindi)**, a minimal, zero-cost **heuristic** prevents the ZWSP insertion
+///     where the **virama** is followed by a consonant known to form a mandatory, non-breaking **conjunct** (e.g., **`र`**, **`य`**, **`व`**, **`ह`**).
+///     This ensures complex words like **`विद्वत्`** remain unsegmented, resolving a major flaw found in naive segmenters.
 /// 3.  **Script Transitions:** A standard space (U+0020) is inserted at script transitions (Indic ↔ Western).
 ///
-/// This approach provides consistent word-break opportunities without preventing ligature rendering or
-/// linguistically incorrect segmentation of compound consonants.
+/// This approach prioritizes **performance** and **Devanagari linguistic accuracy**, treating the generic **virama** break as correct for all other supported Indic scripts.
 ///
 /// # Performance Characteristics
 ///
