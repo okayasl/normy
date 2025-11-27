@@ -1,7 +1,9 @@
 use crate::{
+    CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
-    lang::LangEntry,
+    lang::{Lang, LangEntry},
     stage::{CharMapper, FusedIterator, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
 use std::sync::Arc;
@@ -156,160 +158,168 @@ impl<'a> Iterator for CaseFoldIter<'a> {
 
 impl<'a> FusedIterator for CaseFoldIter<'a> {}
 
+impl StageTestConfig for CaseFold {
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[ENG, FRA, SPA, ITA, POR, DAN, NOR, SWE, ISL, CAT]
+    }
+
+    fn samples(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            TUR => &["İSTANBUL", "I", "İ", "ısı", "i"],
+            DEU => &["Straße", "GROẞ"],
+            NLD => &["IJssel", "Ĳssel", "ijssel"],
+            ELL => &["ΣΟΦΟΣ", "ΟΔΟΣ"],
+            LIT => &["JIS", "Jį"],
+            _ => &["Hello WORLD", "Test 123", " café ", "NAÏVE"],
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Universal contract tests (zero-cost, full coverage)
+// ─────────────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
-mod tests {
+mod contract_tests {
     use super::*;
-    use crate::lang::data::{DEU, ENG, FRA, NLD, TUR};
+    use crate::testing::stage_contract::*;
 
     #[test]
-    fn test_english_basic() {
-        let stage = CaseFold;
+    fn zero_copy() {
+        zero_copy_when_no_changes(CaseFold);
+    }
+    #[test]
+    fn fast_slow_eq() {
+        fast_and_slow_paths_equivalent(CaseFold);
+    }
+    #[test]
+    fn idempotent() {
+        stage_is_idempotent(CaseFold);
+    }
+    #[test]
+    fn needs_apply() {
+        needs_apply_is_accurate(CaseFold);
+    }
+    #[test]
+    fn empty_ascii() {
+        handles_empty_string_and_ascii(CaseFold);
+    }
+    #[test]
+    fn mixed_scripts() {
+        no_panic_on_mixed_scripts(CaseFold);
+    }
+}
+
+#[cfg(test)]
+mod language_specific_tests {
+    use crate::{DEU, ELL, LIT, NLD, TUR};
+
+    use super::*;
+
+    #[test]
+    fn case_fold_english_basic() {
         let ctx = Context::new(ENG);
-        assert!(stage.needs_apply("HELLO", &ctx).unwrap());
-        assert!(!stage.needs_apply("hello", &ctx).unwrap());
-        let result = stage.apply(Cow::Borrowed("HELLO"), &ctx).unwrap();
-        assert_eq!(result, "hello");
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("HELLO"), &ctx).unwrap(),
+            "hello"
+        ); // ← fixed
     }
 
     #[test]
-    fn test_french_basic() {
-        let stage = CaseFold;
-        let ctx = Context::new(FRA);
-        assert!(stage.needs_apply("Café", &ctx).unwrap());
-        let result = stage.apply(Cow::Borrowed("Café"), &ctx).unwrap();
-        assert_eq!(result, "café");
-    }
-
-    #[test]
-    fn test_german_eszett() {
-        let stage = CaseFold;
-        let ctx = Context::new(DEU);
-        let result = stage.apply(Cow::Borrowed("Straße"), &ctx).unwrap();
-        assert_eq!(result, "strasse");
-        let result = stage.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap();
-        assert_eq!(result, "gross");
-    }
-
-    #[test]
-    fn test_dutch_ij_uppercase() {
-        let stage = CaseFold;
-        let ctx = Context::new(NLD);
-        // Two-char sequence "IJ"
-        let result = stage.apply(Cow::Borrowed("IJssel"), &ctx).unwrap();
-        assert_eq!(result, "ijssel");
-        let result = stage.apply(Cow::Borrowed("IJZER"), &ctx).unwrap();
-        assert_eq!(result, "ijzer");
-    }
-
-    #[test]
-    fn test_dutch_ij_lowercase() {
-        let stage = CaseFold;
-        let ctx = Context::new(NLD);
-        // Already lowercase
-        let result = stage.apply(Cow::Borrowed("ijssel"), &ctx).unwrap();
-        assert_eq!(result, "ijssel");
-    }
-
-    #[test]
-    fn test_dutch_ij_ligature() {
-        let stage = CaseFold;
-        let ctx = Context::new(NLD);
-        // Ligature 'Ĳ' (U+0132)
-        let result = stage.apply(Cow::Borrowed("Ĳssel"), &ctx).unwrap();
-        assert_eq!(result, "ijssel");
-    }
-
-    #[test]
-    fn test_dutch_ij_not_sequence() {
-        let stage = CaseFold;
-        let ctx = Context::new(NLD);
-        // "IK" should not trigger peek-ahead
-        let result = stage.apply(Cow::Borrowed("IK"), &ctx).unwrap();
-        assert_eq!(result, "ik");
-    }
-
-    #[test]
-    fn test_dutch_ij_idempotency() {
-        let stage = CaseFold;
-        let ctx = Context::new(NLD);
-        let text = "IJssel";
-        let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        let second = stage.apply(Cow::Borrowed(&first), &ctx).unwrap();
-        assert_eq!(first, "ijssel");
-        assert_eq!(first, second, "Should be idempotent");
-    }
-
-    #[test]
-    fn test_char_mapper_eligibility() {
-        let stage = CaseFold;
-        // English: 1→1, no peek-ahead → CharMapper eligible
-        let ctx = Context::new(ENG);
-        assert!(stage.as_char_mapper(&ctx).is_some());
-        // Turkish: 1→1, no peek-ahead → CharMapper eligible
+    fn case_fold_turkish_dotted_i_capital_i() {
         let ctx = Context::new(TUR);
-        assert!(stage.as_char_mapper(&ctx).is_some());
-        // German: multi-char (ß→ss) → NOT eligible
+        assert_eq!(CaseFold.apply(Cow::Borrowed("I"), &ctx).unwrap(), "ı");
+    }
+
+    #[test]
+    fn case_fold_turkish_dotted_capital_i() {
+        let ctx = Context::new(TUR);
+        assert_eq!(CaseFold.apply(Cow::Borrowed("İ"), &ctx).unwrap(), "i");
+    }
+
+    #[test]
+    fn case_fold_turkish_istanbul() {
+        let ctx = Context::new(TUR);
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("İSTANBUL"), &ctx).unwrap(),
+            "istanbul"
+        );
+    }
+
+    #[test]
+    fn case_fold_german_eszett_lowercase() {
         let ctx = Context::new(DEU);
-        assert!(stage.as_char_mapper(&ctx).is_none());
-        // Dutch: peek-ahead required → NOT eligible
-        let ctx = Context::new(NLD);
-        assert!(stage.as_char_mapper(&ctx).is_none());
-    }
-
-    #[test]
-    fn test_dutch_ij_uppercase_needs_apply() {
-        let stage = CaseFold;
-        let ctx = Context::new(NLD); // Dutch requires peek-ahead for "IJ"
-        // "IJ" is a two-character sequence that must be folded to "ij"
-        let text = "IJssel";
-        assert!(
-            stage.needs_apply(text, &ctx).unwrap(),
-            "needs_apply must return true for 'IJssel' in Dutch"
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("straße"), &ctx).unwrap(),
+            "strasse"
         );
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "ijssel");
     }
 
     #[test]
-    fn test_dutch_ligature_needs_apply() {
-        let stage = CaseFold;
-        let ctx = Context::new(NLD);
-        let text = "Ĳssel"; // Ĳ (U+0132) is the single-char ligature → must fold to "ijssel"
-        assert!(stage.needs_apply(text, &ctx).unwrap()); // Passes if slice contains
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "ijssel");
-    }
-
-    #[test]
-    fn test_german_eszett_lowercase_needs_apply() {
-        let stage = CaseFold;
+    fn case_fold_german_eszett_capital() {
         let ctx = Context::new(DEU);
-        let text = "straße"; // All lowercase, but 'ß' → "ss" for case-fold
-        assert!(stage.needs_apply(text, &ctx).unwrap()); // Passes
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "strasse");
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap(),
+            "gross"
+        );
     }
 
     #[test]
-    fn test_dutch_ij_lowercase_needs_apply() {
-        let stage = CaseFold;
+    fn case_fold_dutch_ij_sequence_uppercase() {
         let ctx = Context::new(NLD);
-        let text = "ijssel"; // Already "ij", but if peek_ahead_fold checks lowercase
-        assert!(!stage.needs_apply(text, &ctx).unwrap()); // Should be false
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("IJssel"), &ctx).unwrap(),
+            "ijssel"
+        );
     }
 
     #[test]
-    fn test_dutch_german_charmapper_contract() {
-        let ctx_nld = Context::new(NLD);
-        let ctx_deu = Context::new(DEU);
-        // These MUST be None or CharMapper will break
-        assert!(
-            CaseFold.as_char_mapper(&ctx_nld).is_none(),
-            "CRITICAL: Dutch needs peek-ahead, cannot use CharMapper"
+    fn case_fold_dutch_ij_ligature() {
+        let ctx = Context::new(NLD);
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("Ĳssel"), &ctx).unwrap(),
+            "ijssel"
         );
-        assert!(
-            CaseFold.as_char_mapper(&ctx_deu).is_none(),
-            "CRITICAL: German has multi-char folds, cannot use CharMapper"
-        );
+    }
+
+    #[test]
+    fn case_fold_dutch_ij_already_lowercase() {
+        let ctx = Context::new(NLD);
+        let result = CaseFold.apply(Cow::Borrowed("ijssel"), &ctx).unwrap();
+        assert_eq!(result, "ijssel");
+        assert!(!CaseFold.needs_apply("ijssel", &ctx).unwrap());
+    }
+
+    #[test]
+    fn case_fold_greek_final_sigma() {
+        let ctx = Context::new(ELL);
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("ΣΟΦΟΣ"), &ctx).unwrap(),
+            "σοφοσ"
+        ); // ← ς not σ
+        assert_eq!(CaseFold.apply(Cow::Borrowed("ΟΔΟΣ"), &ctx).unwrap(), "οδοσ");
+    }
+
+    #[test]
+    fn case_fold_lithuanian_i_without_dot() {
+        let ctx = Context::new(LIT);
+        assert_eq!(CaseFold.apply(Cow::Borrowed("JIS"), &ctx).unwrap(), "jis");
+    }
+
+    #[test]
+    fn case_fold_char_mapper_eligibility() {
+        // 1:1 languages → Some
+        assert!(CaseFold.as_char_mapper(&Context::new(ENG)).is_some());
+        assert!(CaseFold.as_char_mapper(&Context::new(FRA)).is_some());
+        assert!(CaseFold.as_char_mapper(&Context::new(SPA)).is_some());
+
+        // via lowercase → Some
+        assert!(CaseFold.as_char_mapper(&Context::new(LIT)).is_some()); // contextual I
+        assert!(CaseFold.as_char_mapper(&Context::new(TUR)).is_some()); // Turkish is 1:1!
+
+        // Contextual or multi-char → None
+        assert!(CaseFold.as_char_mapper(&Context::new(DEU)).is_none()); // ß → ss
+        assert!(CaseFold.as_char_mapper(&Context::new(NLD)).is_none()); // IJ peek-ahead
+        assert!(CaseFold.as_char_mapper(&Context::new(ELL)).is_none()); // final sigma
     }
 }
