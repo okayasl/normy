@@ -7,6 +7,7 @@ pub mod lang;
 pub mod process;
 pub mod profile;
 pub mod stage;
+pub mod testing;
 
 pub use lang::data::*;
 pub use normy::{DynamicNormyBuilder, Normy, NormyBuilder}; // All languages auto-exported

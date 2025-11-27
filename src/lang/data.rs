@@ -118,6 +118,15 @@ macro_rules! define_languages {
                 _ => None,
             }
         }
+        /// All supported languages — for testing and introspection
+        pub const fn all_langs() -> &'static [Lang] {
+            &[
+                // 2. Collect all the $code identifiers into an array
+                $(
+                    $code
+                ),*
+            ]
+        }
     };
 }
 
