@@ -170,6 +170,7 @@ pub fn is_cjk_unified_ideograph(c: char) -> bool {
         0x2B820..=0x2CEAF | // Ext E
         0x2CEB0..=0x2EBEF | // Ext F
         0x30000..=0x3134F | // Ext G
+        0x31350..=0x323AF | // Extension I (Unicode 16.0)
         0xF900..=0xFAFF     // Compatibility
     )
 }
@@ -208,13 +209,20 @@ pub fn is_se_asian_script(c: char) -> bool {
 pub fn is_indic_script(c: char) -> bool {
     matches!(c as u32,
         0x0900..=0x097F | // Devanagari
-        0xA8E0..=0xA8FF | // Devanagari Extended
+        0x0980..=0x09FF | // Bengali
+        0x0A00..=0x0A7F | // Gurmukhi
+        0x0A80..=0x0AFF | // Gujarati
+        0x0B00..=0x0B7F | // Oriya
         0x0B80..=0x0BFF | // Tamil
+        0x0C00..=0x0C7F | // Telugu
+        0x0C80..=0x0CFF | // Kannada
+        0x0D00..=0x0D7F | // Malayalam
+        0x0D80..=0x0DFF | // Sinhala
+        0xA8E0..=0xA8FF | // Devanagari Extended
         0x11FC0..=0x11FFF // Tamil Supplement
     )
 }
 
-#[inline(always)]
 pub const fn is_virama(c: char) -> bool {
     matches!(
         c as u32,
@@ -228,10 +236,10 @@ pub const fn is_virama(c: char) -> bool {
         0x0CCD | // Kannada
         0x0D4D | // Malayalam
         0x0DCA | // Sinhala
-        0x17D2 | // Khmer
         0x103A | // Myanmar
-        0x1B44 | // Balinese
-        0xAAD // Tai Tham
+        0x17D2 | // Khmer
+        0x1BAA | // Tai Tham
+        0x1B44 // Balinese
     )
 }
 
@@ -246,6 +254,23 @@ pub const fn should_prevent_indic_break(c: char) -> bool {
         0x092F | // Devanagari 'य' (ya)
         0x0935 | // Devanagari 'व' (va)
         0x0939 // Devanagari 'ह' (ha)
+    )
+}
+
+#[inline(always)]
+const fn is_modern_alphabetic_script(cp: u32) -> bool {
+    matches!(cp,
+        0x0370..=0x03FF | // Greek + Coptic
+        0x0400..=0x052F | // Cyrillic + Supplement
+        0x0530..=0x058F | // Armenian
+        0x0590..=0x05FF | // Hebrew
+        0x0600..=0x06FF | // Arabic + Syriac
+        0x0700..=0x074F | // Syriac
+        0x0750..=0x077F | // Arabic Supplement
+        0x0870..=0x089F | // Arabic Extended-B
+        0x08A0..=0x08FF | // Arabic Extended-A
+        0x10A0..=0x10FF | // Georgian
+        0x13A0..=0x13FF   // Cherokee
     )
 }
 
@@ -274,7 +299,10 @@ pub enum CharClass {
 
 #[inline(always)]
 pub fn classify(c: char) -> CharClass {
-    if c.is_ascii() {
+    let cp = c as u32;
+
+    // Fast path: pure ASCII → zero-copy golden path
+    if cp < 0x80 {
         if c.is_ascii_whitespace() {
             return CharClass::Whitespace;
         }
@@ -283,6 +311,7 @@ pub fn classify(c: char) -> CharClass {
         }
         return CharClass::Other;
     }
+
     if is_any_whitespace(c) {
         return CharClass::Whitespace;
     }
@@ -301,10 +330,12 @@ pub fn classify(c: char) -> CharClass {
     if is_extended_latin(c) {
         return CharClass::Western;
     }
-    if c.is_alphabetic() {
+
+    if is_modern_alphabetic_script(cp) {
         return CharClass::NonCJKScript;
     }
-    CharClass::Other
+
+    CharClass::Other // Ancient scripts, symbols, emojis, medieval Latin
 }
 
 #[cfg(test)]
@@ -342,39 +373,40 @@ mod tests {
 
     #[test]
     fn char_classification() {
-        // --- Western ASCII
-        for c in &['h', '5', '!', 'é'] {
-            assert_eq!(classify(*c), CharClass::Western, "Failed for {}", c);
+        // Western zero-copy path
+        for c in ['h', '5', '!', 'é', 'Ā', 'ſ', 'Ə', 'ǃ'] {
+            assert_eq!(
+                classify(c),
+                CharClass::Western,
+                "Western failed U+{:04X}",
+                c as u32
+            );
         }
 
-        // --- Whitespace
-        for c in &[' ', '\t', '\u{00A0}', '\u{3000}'] {
-            assert_eq!(classify(*c), CharClass::Whitespace, "Failed for {:?}", c);
+        // Modern scripts that need script transitions
+        for c in ['Я', 'α', 'מ', 'م', 'ა', 'Բ', 'ܐ'] {
+            // Cyrillic, Greek, Hebrew, Arabic, Georgian, Armenian, Syriac
+            assert_eq!(
+                classify(c),
+                CharClass::NonCJKScript,
+                "Modern script failed U+{:04X}",
+                c as u32
+            );
         }
 
-        // --- CJK
-        for c in &['日', 'ア', '漢'] {
-            assert_eq!(classify(*c), CharClass::Cjk, "Failed for {}", c);
+        // Historical, ancient, symbols → Other (no breaks)
+        for c in ['𐍈', 'Ꝛ', 'ᚠ', '☭', '𐤀', '𒀀', '𐌰', 'አ', '\u{200B}'] {
+            assert_eq!(
+                classify(c),
+                CharClass::Other,
+                "Should be Other U+{:04X}",
+                c as u32
+            );
         }
 
-        // --- Hangul
-        for c in &['가', '각', '똠'] {
-            assert_eq!(classify(*c), CharClass::Hangul, "Failed for {}", c);
-        }
-
-        // --- Southeast Asian scripts
-        for c in &['ก', 'ข', 'ກ', 'ຂ', 'က', 'ခ'] {
-            assert_eq!(classify(*c), CharClass::SEAsian, "Failed for {}", c);
-        }
-
-        // --- Non-CJK scripts (Greek, Cyrillic, Arabic, etc.)
-        for c in &['Я', 'α', 'م'] {
-            assert_eq!(classify(*c), CharClass::NonCJKScript, "Failed for {}", c);
-        }
-
-        // --- Other (symbols, ZWSP, emojis)
-        for c in &['\u{200B}', '🎉', '©', '™'] {
-            assert_eq!(classify(*c), CharClass::Other, "Failed for {:?}", c);
+        // Whitespace
+        for c in [' ', '\t', '\u{00A0}', '\u{3000}', '\u{1680}'] {
+            assert_eq!(classify(c), CharClass::Whitespace);
         }
     }
 
@@ -408,14 +440,12 @@ mod tests {
         assert_class!('Ə', Western); // U+018F schwa (Azeri/Turkish)
         assert_class!('ǃ', Western); // U+01C3 click (Khoisan orthographies)
 
-        // --- Other Latin edge cases that must NOT be Western ---
-        assert_class!('Ꝛ', NonCJKScript); // U+A75A (medieval abbreviations)
-
         // --- Full CJK coverage ---
-        assert_class!('𐐀', Cjk); // Deseret (sometimes mistaken)
-        assert_class!('𠀀', Cjk); // CJK Ext B
-        assert_class!('𪚥', Cjk); // CJK Ext F
-        assert_class!('豈', Cjk); // Compatibility F900
+        assert_class!('𱁬', Cjk); // CJK Ext H (U+3106C) — very new
+        assert_class!('𲁨', Cjk); // CJK Ext I (U+32068)
+        assert_class!('豈', Cjk); // Compatibility Ideograph F900
+        assert_class!('㐀', Cjk); // CJK Compatibility (U+3400)
+        assert_class!('㐀', Cjk); // CJK Ext A (U+3400)
 
         // --- Full Indic coverage ---
         assert_class!('অ', Indic); // Bengali
@@ -434,6 +464,9 @@ mod tests {
         assert_class!('᧠', SEAsian); // Khmer symbol
 
         // --- Non-alphabetic scripts that must NOT be NonCJKScript ---
+        assert_class!('𐐧', Other); // U+10427 Deseret long I
+        assert_class!('𐐀', Other); // U+10400 Deseret capital H
+        assert_class!('Ꝛ', Other); // U+A75A (medieval abbreviations)
         assert_class!('★', Other);
         assert_class!('☭', Other);
         assert_class!('𐍈', Other); // Gothic
