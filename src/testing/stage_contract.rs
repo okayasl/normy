@@ -47,9 +47,8 @@ pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
 #[cfg(test)]
 pub fn fast_and_slow_paths_equivalent<S: StageTestConfig>(stage: S) {
     for &lang in S::one_to_one_languages() {
-        use std::borrow::Cow;
-
         use crate::context::Context;
+        use std::borrow::Cow;
 
         let ctx = Context::new(lang);
         let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
@@ -57,16 +56,11 @@ pub fn fast_and_slow_paths_equivalent<S: StageTestConfig>(stage: S) {
         let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
 
         if let Some(mapper) = stage.as_char_mapper(&ctx) {
-            let mut via_fast = String::with_capacity(input.len());
-            for c in mapper.bind(input, &ctx) {
-                via_fast.push(c);
-            }
+            let via_fast = mapper.bind(input, &ctx).collect::<Cow<'_, str>>();
 
             assert_eq!(
-                via_apply,
-                Cow::<str>::Owned(via_fast.clone()),
-                "fast ≠ slow path in {lang:?}\n  apply(): {via_apply:?}\n  mapper(): {:?}",
-                Cow::<str>::Owned(via_fast)
+                via_apply, via_fast,
+                "fast ≠ slow path in {lang:?}\n   apply(): {via_apply:?}\n   mapper(): {via_fast:?}"
             );
         }
     }
