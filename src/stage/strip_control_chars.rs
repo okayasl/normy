@@ -1,15 +1,32 @@
 use crate::{
     context::Context,
+    lang::Lang,
     stage::{CharMapper, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
     unicode::is_control,
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
-/// This stage filters out all Unicode control characters (category Cc) from text.
-/// Format controls (Cf) are **not** removed. Useful for cleaning input, logs,
-/// or text streams that may contain non-printable characters.
+/// Remove all Unicode control characters (General Category `Cc`)
+///
+/// This stage strips **C0 and C1 control characters** (`U+0000`–`U+001F`, `U+007F`–`U+009F`)
+/// which are never visible and often represent corruption, logging artifacts,
+/// or malicious injection in text streams.
+///
+/// ### Use Cases
+/// - Cleaning scraped web text
+/// - Sanitizing user input from legacy systems
+/// - Removing terminal control sequences (BEL, ESC, etc.)
+/// - Preparing logs for indexing
+///
+/// ### Important Notes
+/// - **Format controls (Cf)** like ZWSP, ZWJ, RLM are **not** removed → use `StripFormatControls`
+/// - **Zero-copy** when no control characters present
+/// - **CharMapper path** → fully fused, zero-allocation pipeline capable
+///
+/// This stage is **language-agnostic** and **idempotent**.
 pub struct StripControlChars;
 
 impl Stage for StripControlChars {
@@ -50,6 +67,32 @@ impl CharMapper for StripControlChars {
 
     fn bind<'a>(&self, text: &'a str, _ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(text.chars().filter(|&c| !is_control(c)))
+    }
+}
+
+impl StageTestConfig for StripControlChars {
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // 1→0 mapping (filter), not 1→1
+    }
+
+    fn samples(_lang: crate::lang::Lang) -> &'static [&'static str] {
+        &[
+            "hello\u{0001}world\u{007F}",
+            "clean text only",
+            "\u{001F}start",
+            "end\u{009F}",
+            "",
+        ]
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::assert_stage_contract;
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(StripControlChars);
     }
 }
 

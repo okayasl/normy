@@ -1,7 +1,8 @@
 use crate::{
-    COLLAPSE_WHITESPACE_ONLY, CaseFold, CjkUnigram, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL,
-    RemoveDiacritics, StripControlChars, StripFormatControls, StripHtml, StripMarkdown, UnifyWidth,
-    process::Process, profile::Profile, stage::normalize_punctuation::NormalizePunctuation,
+    COLLAPSE_WHITESPACE_ONLY, CaseFold, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL,
+    RemoveDiacritics, SegmentWords, StripControlChars, StripFormatControls, StripHtml,
+    StripMarkdown, UnifyWidth, process::Process, profile::Profile,
+    stage::normalize_punctuation::NormalizePunctuation,
 };
 
 /// Ultra-fast path for clean or ASCII-only text
@@ -56,7 +57,7 @@ pub fn search() -> Profile<impl Process> {
         .add_stage(StripMarkdown)
         .add_stage(StripFormatControls)
         .add_stage(NORMALIZE_WHITESPACE_FULL)
-        .add_stage(CjkUnigram)
+        .add_stage(SegmentWords)
         .build()
 }
 
@@ -68,7 +69,7 @@ pub fn cjk_search() -> Profile<impl Process> {
         .add_stage(StripFormatControls)
         .add_stage(StripControlChars)
         .add_stage(NORMALIZE_WHITESPACE_FULL)
-        .add_stage(CjkUnigram) // Critical for CJK tokenization
+        .add_stage(SegmentWords) // Critical for CJK tokenization
         .build()
 }
 
@@ -94,7 +95,7 @@ pub fn maximum() -> Profile<impl Process> {
         .add_stage(StripControlChars)
         .add_stage(UnifyWidth)
         .add_stage(NORMALIZE_WHITESPACE_FULL)
-        .add_stage(CjkUnigram)
+        .add_stage(SegmentWords)
         .build()
 }
 

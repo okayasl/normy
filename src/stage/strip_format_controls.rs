@@ -1,30 +1,30 @@
 use crate::{
     context::Context,
     stage::{CharMapper, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
     unicode::{contains_format_controls, is_format_control},
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
-/// Removes Unicode format control characters.
+/// Remove all Unicode format control characters (General Category `Cf`)
 ///
-/// This stage removes invisible formatting characters that affect text
-/// rendering but not content, including:
+/// Strips invisible presentation controls that affect rendering but not content:
 /// - Zero-width spaces (ZWSP, ZWNJ, ZWJ)
-/// - Bidirectional formatting (LRM, RLM, LRE, RLE, PDF, etc.)
-/// - Other format controls (word joiner, invisible operators, etc.)
+/// - Bidirectional overrides (LRM, RLM, LRE, PDF, etc.)
+/// - Byte Order Mark (BOM U+FEFF)
+/// - Tag characters, interlinear annotation, etc.
 ///
-/// # When to Use
-/// - Preparing text for search indexing
-/// - Cleaning text for machine learning
-/// - Normalizing text for database storage
-/// - API input sanitization
+/// ### Critical for:
+/// - Search indexing (prevents hidden text attacks)
+/// - ML training data cleaning
+/// - API input normalization
+/// - Tokenization consistency
 ///
-/// # Language Independence
-/// This stage removes format controls **regardless of language**. Format
-/// controls are presentation hints, not content, and are typically unwanted
-/// in normalized text pipelines.
+/// Zero-copy when clean. CharMapper path → fully fused pipeline.
+///
+/// **Language-agnostic. Idempotent.**
 pub struct StripFormatControls;
 
 impl Stage for StripFormatControls {
@@ -70,6 +70,32 @@ impl CharMapper for StripFormatControls {
 
     fn bind<'a>(&self, text: &'a str, _ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(text.chars().filter(|&c| !is_format_control(c)))
+    }
+}
+
+impl StageTestConfig for StripFormatControls {
+    fn one_to_one_languages() -> &'static [crate::lang::Lang] {
+        &[]
+    }
+
+    fn samples(_lang: crate::lang::Lang) -> &'static [&'static str] {
+        &[
+            "hello\u{200B}world",
+            "\u{FEFF}bommed",
+            "Arabic\u{200F}text",
+            "a\u{2066}b\u{2069}c",
+            "clean text",
+        ]
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::assert_stage_contract;
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(StripFormatControls);
     }
 }
 

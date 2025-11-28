@@ -1,6 +1,9 @@
 use crate::{
+    all_langs,
     context::Context,
+    lang::Lang,
     stage::{CharMapper, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
     unicode::normalize_punctuation_char,
 };
 use std::borrow::Cow;
@@ -79,6 +82,54 @@ impl CharMapper for NormalizePunctuation {
             let n = normalize_punctuation_char(c);
             if n == '\0' { None } else { Some(n) }
         }))
+    }
+}
+
+impl StageTestConfig for NormalizePunctuation {
+    fn one_to_one_languages() -> &'static [Lang] {
+        all_langs() // Lang-independent, but test across all for coverage
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true // needs_apply() detects fancy punctuation, not case changes
+    }
+
+    fn samples(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "Hello “World” 123",
+            " déjà-vu… ",
+            "TEST—",
+            "",
+            "“‘–…”", // Heavy punctuation sample
+        ]
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::{ENG, assert_stage_contract};
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(NormalizePunctuation);
+    }
+
+    #[test]
+    fn test_apply_mixed_punctuation() {
+        let stage = NormalizePunctuation;
+        let result = stage
+            .apply(Cow::Borrowed("“Hello”—‘world’…•‹›"), &Context::new(ENG))
+            .unwrap();
+        assert_eq!(result, "\"Hello\"-'world'.*<>");
+    }
+
+    #[test]
+    fn test_char_mapper_handles_unchanged() {
+        let stage = NormalizePunctuation;
+        let mapper: &dyn CharMapper = &stage;
+        assert_eq!(mapper.map('A', &Context::new(ENG)), Some('A'));
+        assert_eq!(mapper.map(' ', &Context::new(ENG)), Some(' '));
+        assert_eq!(mapper.map('1', &Context::new(ENG)), Some('1'));
     }
 }
 

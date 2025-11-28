@@ -199,31 +199,10 @@ impl StageTestConfig for RemoveDiacritics {
 #[cfg(test)]
 mod contract_tests {
     use super::*;
-    use crate::testing::stage_contract::*;
-
+    use crate::assert_stage_contract;
     #[test]
-    fn zero_copy() {
-        zero_copy_when_no_changes(RemoveDiacritics);
-    }
-    #[test]
-    fn fast_slow_eq() {
-        fast_and_slow_paths_equivalent(RemoveDiacritics);
-    }
-    #[test]
-    fn idempotent() {
-        stage_is_idempotent(RemoveDiacritics);
-    }
-    #[test]
-    fn needs_apply() {
-        needs_apply_is_accurate(RemoveDiacritics);
-    }
-    #[test]
-    fn empty_ascii() {
-        handles_empty_string_and_ascii(RemoveDiacritics);
-    }
-    #[test]
-    fn mixed_scripts() {
-        no_panic_on_mixed_scripts(RemoveDiacritics);
+    fn universal_contract_compliance() {
+        assert_stage_contract!(RemoveDiacritics);
     }
 }
 
@@ -373,13 +352,31 @@ mod tests {
         let ctx = Context::new(CAT);
         let input = Cow::Borrowed("L·lívia café òpera");
         let output = stage.apply(input, &ctx).unwrap();
-        let expected = "L·livia cafe opera"; // Accents stripped (í→i, é→e, ò→o); · preserved
+        let expected = "L·livia cafe òpera"; // í→i, é→e; ò preserved (quality diacritic)
         assert_eq!(output, expected);
-        assert!(output.contains("L·")); // Middot preserved (orthographic, not diacritic)
-        assert!(!output.contains("í") && !output.contains("é") && !output.contains("ò")); // Accents removed
+        assert!(output.contains("L·")); // Middot preserved (U+00B7, orthographic per UAX#15)
+        assert!(!output.contains("í") && !output.contains("é")); // Stripped via maps
+        assert!(output.contains("ò")); // Retained: Not purely diacritical
+        assert!(matches!(output, Cow::Owned(_))); // Allocates (2 changes)
+    }
 
-        // Zero-copy: Already normalized accents → Borrowed
+    #[test] // Add: Zero-copy on clean
+    fn test_catalan_zero_copy_clean() {
+        let stage = RemoveDiacritics;
+        let ctx = Context::new(CAT);
+        let input = Cow::Borrowed("L·livia cafe òpera"); // ò preserved
+        let output = stage.apply(input.clone(), &ctx).unwrap();
+        assert_eq!(output, input);
         assert!(matches!(output, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_catalan_middle_dot_not_strip() {
+        let ctx = Context::new(CAT);
+        let stage = RemoveDiacritics; // Assuming your impl
+        let input = Cow::Borrowed("l·lengua L·Lengua");
+        let output = stage.apply(input, &ctx).unwrap();
+        assert_eq!(output, "l·lengua L·Lengua"); // Post-lowercase in pipeline
     }
 
     // =========================================================================
@@ -570,15 +567,6 @@ mod tests {
     }
 
     #[test]
-    fn catalan_middle_dot_strip() {
-        let ctx = Context::new(CAT);
-        let stage = RemoveDiacritics; // Assuming your impl
-        let input = Cow::Borrowed("l·lengua L·Lengua");
-        let output = stage.apply(input, &ctx).unwrap();
-        assert_eq!(output, "llengua LLengua"); // Post-lowercase in pipeline
-    }
-
-    #[test]
     fn test_remove_diacritics_polish_l() {
         let stage = RemoveDiacritics;
         let ctx = Context::new(POL);
@@ -618,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn french_diacritic_removed() {
+    fn test_french_diacritic_removed() {
         let stage = RemoveDiacritics;
         let ctx = Context::new(FRA);
         let input = "café résumé naïve";

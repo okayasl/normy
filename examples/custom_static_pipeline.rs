@@ -1,7 +1,6 @@
 use normy::{
-    CaseFold, CjkUnigram, DEU, ENG, FRA, NFKC, NLD, NORMALIZE_WHITESPACE_FULL, NormyBuilder,
-    RemoveDiacritics, StripFormatControls, StripHtml, StripMarkdown, TUR, ZHO,
-    profile::ProfileBuilder,
+    CaseFold, DEU, ENG, FRA, NFKC, NLD, NORMALIZE_WHITESPACE_FULL, NormyBuilder, RemoveDiacritics,
+    SegmentWords, StripFormatControls, StripHtml, StripMarkdown, TUR, ZHO, profile::ProfileBuilder,
 };
 use std::borrow::Cow;
 
@@ -20,7 +19,7 @@ fn main() {
         .add_stage(StripMarkdown)
         .add_stage(StripFormatControls)
         .add_stage(NORMALIZE_WHITESPACE_FULL)
-        .add_stage(CjkUnigram) // ← only active for ZHO, JPN, etc.
+        .add_stage(SegmentWords) // ← only active for ZHO, JPN, etc.
         .build();
 
     let cases = &[

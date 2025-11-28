@@ -21,6 +21,33 @@ pub trait StageTestConfig: Stage + Sized {
     }
 }
 
+/// Assert that a stage satisfies **all seven universal contracts** defined in the Normy white paper.
+///
+/// This macro is the **single source of truth** for stage correctness. Every stage must pass it.
+/// It is deliberately exhaustive and unforgiving — because production NLP pipelines demand it.
+///
+/// ### The Seven Universal Contracts:
+/// 1. `zero_copy_when_no_changes` → no allocation when input == output
+/// 2. `fast_and_slow_paths_equivalent` → CharMapper and apply() produce identical results
+/// 3. `stage_is_idempotent` → applying twice yields same result as once
+/// 4. `needs_apply_is_accurate` → correctly predicts whether apply() would change text
+/// 5. `handles_empty_string_and_ascii` → graceful on edge cases
+/// 6. `no_panic_on_mixed_scripts` → survives pathological real-world input
+/// 7. (Implicit) `Send + Sync + 'static` → required by trait bounds
+///
+/// Failure of any contract is a **critical bug**.
+#[macro_export]
+macro_rules! assert_stage_contract {
+    ($stage:expr) => {
+        $crate::testing::stage_contract::zero_copy_when_no_changes($stage);
+        $crate::testing::stage_contract::fast_and_slow_paths_equivalent($stage);
+        $crate::testing::stage_contract::stage_is_idempotent($stage);
+        $crate::testing::stage_contract::needs_apply_is_accurate($stage);
+        $crate::testing::stage_contract::handles_empty_string_and_ascii($stage);
+        $crate::testing::stage_contract::no_panic_on_mixed_scripts($stage);
+    };
+}
+
 // ============================================================================
 // Universal contract tests
 // ============================================================================
@@ -89,47 +116,76 @@ pub fn stage_is_idempotent<S: StageTestConfig>(stage: S) {
     }
 }
 
+// src/testing/stage_contract.rs
 #[cfg(test)]
 pub fn needs_apply_is_accurate<S: StageTestConfig>(stage: S) {
-    if S::skip_needs_apply_test() {
-        return; // Stage does not react to case → test irrelevant
-    }
-    let ctx = Context::new(ENG);
-    // Only test case-sensitive changes — NOT whitespace, punctuation, or formatting
-    let no_change = ["", "hello", "world123", "café", "123", "  "];
-    let has_change = ["Hello", "WORLD", "İSTANBUL", "Straße", "IJssel"];
-    for &s in &no_change {
-        use std::borrow::Cow;
+    // Test in *every* language that the stage claims to support.
+    // Stages that are language-agnostic (whitespace, NFC, …) will just be tested once.
+    let languages = if S::one_to_one_languages().is_empty() {
+        all_langs()
+    } else {
+        S::one_to_one_languages()
+    };
 
-        let processed = stage.apply(Cow::Borrowed(s), &ctx).unwrap();
-        assert!(
-            !stage.needs_apply(&processed, &ctx).unwrap(),
-            "needs_apply() false positive on already-processed text: `{s}`"
-        );
+    for &lang in languages {
+        let ctx = Context::new(lang);
+
+        // 1. Stage-provided samples (these are the most important ones)
+        for &sample in S::samples(lang) {
+            check_accuracy(&stage, sample, &ctx, sample);
+        }
+
+        // 2. Explicit “must not trigger” set – only characters that the stage
+        //     is guaranteed never to touch (pure ASCII without control chars)
+        let must_not_touch = ["", "hello", "world123", " !@#"];
+        for &clean in &must_not_touch {
+            check_accuracy(&stage, clean, &ctx, clean);
+        }
     }
-    for &s in &has_change {
-        assert!(
-            stage.needs_apply(s, &ctx).unwrap(),
-            "needs_apply() missed required case change on `{s}`"
-        );
-    }
+}
+
+#[cfg(test)]
+#[inline(always)]
+fn check_accuracy<S: Stage>(stage: &S, input: &str, ctx: &Context, display: &str) {
+    let predicted = stage.needs_apply(input, ctx).expect("needs_apply errored");
+
+    // NOTE: we deliberately clone the input into an Owned Cow so that
+    //       stages that always allocate (e.g. NFKC) are not penalised.
+    let output = stage
+        .apply(Cow::Owned(input.to_owned()), ctx)
+        .expect("apply errored");
+
+    // Semantic equality – this is the only thing the pipeline cares about
+    let actually_changes = output != input;
+
+    assert_eq!(
+        predicted,
+        actually_changes,
+        "needs_apply() mismatch for stage `{}` in {lang:?} on `{display}`\n\
+         predicted: {predicted}\n\
+         actual   : {actually_changes} (output = {output:?})",
+        stage.name(),
+        lang = ctx.lang
+    );
 }
 
 #[cfg(test)]
 pub fn handles_empty_string_and_ascii<S: StageTestConfig>(stage: S) {
     let ctx = Context::new(ENG);
+
+    // Empty string must survive round-trip
     let empty: &str = "";
-    // Since needs_apply("") == false → pipeline skips → returns Borrowed
-    // But if called directly, apply() may allocate — this is acceptable
-    // So we test the *pipeline* behavior via a tiny manual chain
-    let result = if stage.needs_apply(empty, &ctx).unwrap() {
+    let result_empty = if stage.needs_apply(empty, &ctx).unwrap() {
         stage.apply(Cow::Borrowed(empty), &ctx).unwrap()
     } else {
         Cow::Borrowed(empty)
     };
+    assert_eq!(result_empty.as_ref(), "");
 
-    assert!(result.is_empty());
-    assert!(matches!(result, Cow::Borrowed(_)));
+    // Pure ASCII must not be semantically altered
+    let ascii = "hello world 123 !@#";
+    let result_ascii = stage.apply(Cow::Borrowed(ascii), &ctx).unwrap();
+    assert_eq!(result_ascii.as_ref(), ascii);
 }
 
 #[cfg(test)]

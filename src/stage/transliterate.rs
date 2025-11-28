@@ -187,31 +187,10 @@ impl StageTestConfig for Transliterate {
 #[cfg(test)]
 mod contract_tests {
     use super::*;
-    use crate::testing::stage_contract::*;
-
+    use crate::assert_stage_contract;
     #[test]
-    fn zero_copy() {
-        zero_copy_when_no_changes(Transliterate);
-    }
-    #[test]
-    fn fast_slow_eq() {
-        fast_and_slow_paths_equivalent(Transliterate);
-    }
-    #[test]
-    fn idempotent() {
-        stage_is_idempotent(Transliterate);
-    }
-    #[test]
-    fn needs_apply() {
-        needs_apply_is_accurate(Transliterate);
-    }
-    #[test]
-    fn empty_ascii() {
-        handles_empty_string_and_ascii(Transliterate);
-    }
-    #[test]
-    fn mixed_scripts() {
-        no_panic_on_mixed_scripts(Transliterate);
+    fn universal_contract_compliance() {
+        assert_stage_contract!(Transliterate);
     }
 }
 

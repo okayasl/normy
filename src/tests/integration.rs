@@ -2,11 +2,12 @@
 mod integration_tests {
 
     use crate::{
-        ARA, DEU, CaseFold, JPN, LowerCase, NLD, Normy, TUR,TRIM_WHITESPACE_ONLY,COLLAPSE_WHITESPACE_ONLY,
+        ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, JPN, LowerCase, NLD, Normy,
+        TRIM_WHITESPACE_ONLY, TUR, ZHO,SegmentWords,
         stage::{
-            normalize_punctuation::NormalizePunctuation, strip_control_chars::StripControlChars,
-            remove_diacritics::RemoveDiacritics, unify_width::UnifyWidth,
-            cjk_unigram::CjkUnigram,
+            normalize_punctuation::NormalizePunctuation,
+            remove_diacritics::RemoveDiacritics, strip_control_chars::StripControlChars,
+            unify_width::UnifyWidth,
         },
     };
 
@@ -142,12 +143,27 @@ mod integration_tests {
         let normy = Normy::builder()
             .lang(JPN)
             .modify_lang(|lang| lang.unigram_cjk = true)
-            .add_stage(CjkUnigram)
+            .add_stage(SegmentWords)
             .build();
 
         let text = "最高の言語";
         let result = normy.normalize(text).unwrap();
         assert_eq!(&*result, "最 高 の 言 語");
+    }
+
+    #[test]
+    fn test_unigram_cjk_off_for_chinese_works() {
+        use crate::Normy;
+
+        let normy = Normy::builder()
+            .lang(ZHO)
+            .modify_lang(|lang| lang.unigram_cjk = false)
+            .add_stage(SegmentWords)
+            .build();
+
+        let text = "Hello中华人民共和国";
+        let result = normy.normalize(text).unwrap();
+        assert_eq!(&*result, "Hello 中华人民共和国");
     }
 
     // #[test]

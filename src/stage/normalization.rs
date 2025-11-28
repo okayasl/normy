@@ -1,6 +1,8 @@
 use crate::{
     context::Context,
+    lang::Lang,
     stage::{Stage, StageError},
+    testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
 use unicode_normalization::{
@@ -108,6 +110,50 @@ impl Stage for NormalizationStage {
     #[inline(always)]
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(self.normalize(text))
+    }
+}
+
+impl StageTestConfig for NormalizationStage {
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // No CharMapper implementation
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true // needs_apply() is based on quick_check, not case changes
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::assert_stage_contract;
+
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(NFC);
+        assert_stage_contract!(NFD);
+        assert_stage_contract!(NFKC);
+        assert_stage_contract!(NFKD);
+    }
+
+    #[test]
+    fn samples_include_decomposed() {
+        let c = Context::default();
+        let decomposed = "cafe\u{0301}"; // e + combining acute
+        let nfc = NFC.apply(Cow::Borrowed(decomposed), &c).unwrap();
+        assert_eq!(nfc, "café");
+        let nfd = NFD.apply(Cow::Borrowed(&nfc), &c).unwrap();
+        assert_eq!(nfd, decomposed);
+    }
+
+    #[test]
+    fn compatibility_decomposes_ligatures() {
+        let c = Context::default();
+        let ligature = "ﬁ"; // fi ligature
+        let nfkc = NFKC.apply(Cow::Borrowed(ligature), &c).unwrap();
+        assert_eq!(nfkc, "fi");
+        let nfkd = NFKD.apply(Cow::Borrowed(ligature), &c).unwrap();
+        assert_eq!(nfkd, "fi");
     }
 }
 

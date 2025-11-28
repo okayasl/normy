@@ -14,7 +14,6 @@ pub use normy::{DynamicNormyBuilder, Normy, NormyBuilder}; // All languages auto
 
 // All stages — flat, zero nesting
 pub use stage::case_fold::CaseFold;
-pub use stage::cjk_unigram::CjkUnigram;
 pub use stage::lower_case::LowerCase;
 pub use stage::normalization::{NFC, NFD, NFKC, NFKD};
 pub use stage::normalize_punctuation::NormalizePunctuation;

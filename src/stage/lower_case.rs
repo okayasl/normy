@@ -61,10 +61,21 @@ impl Stage for LowerCase {
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let mut out = String::with_capacity(text.len());
+        let mut changed = false;
+
         for c in text.chars() {
-            out.push(ctx.lang_entry.lowercase_char(c));
+            let lower = ctx.lang_entry.lowercase_char(c);
+            if lower != c {
+                changed = true;
+            }
+            out.push(lower);
         }
-        Ok(Cow::Owned(out))
+
+        if changed {
+            Ok(Cow::Owned(out))
+        } else {
+            Ok(text) // ← ZERO-COPY — pure, unassailable
+        }
     }
 
     #[inline]
@@ -139,31 +150,10 @@ impl StageTestConfig for LowerCase {
 #[cfg(test)]
 mod contract_tests {
     use super::*;
-    use crate::testing::stage_contract::*;
-
+    use crate::assert_stage_contract;
     #[test]
-    fn zero_copy() {
-        zero_copy_when_no_changes(LowerCase);
-    }
-    #[test]
-    fn fast_slow_eq() {
-        fast_and_slow_paths_equivalent(LowerCase);
-    }
-    #[test]
-    fn idempotent() {
-        stage_is_idempotent(LowerCase);
-    }
-    #[test]
-    fn needs_apply() {
-        needs_apply_is_accurate(LowerCase);
-    }
-    #[test]
-    fn empty_ascii() {
-        handles_empty_string_and_ascii(LowerCase);
-    }
-    #[test]
-    fn mixed_scripts() {
-        no_panic_on_mixed_scripts(LowerCase);
+    fn universal_contract_compliance() {
+        assert_stage_contract!(LowerCase);
     }
 }
 

@@ -22,7 +22,6 @@
 //! allocation path, which is the correct, safe behaviour.
 
 pub mod case_fold;
-pub mod cjk_unigram;
 pub mod lower_case;
 pub mod normalization;
 pub mod normalize_punctuation;
@@ -100,6 +99,10 @@ pub trait Stage: Send + Sync {
 pub trait CharMapper: Send + Sync {
     /// Map a single Unicode scalar value.
     /// Return `None` if the character should be **removed**.
+    /// Note: `CharMapper::map` returning `Some(c)` (identity) is perfectly valid
+    /// even when the stage inserts characters (e.g. spaces, ZWSPs). The insertion
+    /// logic lives in `bind()`, not `map()`. `map()` is only a **hint** for simple
+    /// 1:1 stages — it is **not** required to describe all transformations.
     fn map(&self, c: char, ctx: &Context) -> Option<char>;
 
     /// Bind the mapper to a concrete `&str`.  The returned iterator must be

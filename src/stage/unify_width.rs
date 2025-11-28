@@ -1,23 +1,35 @@
-//! stage/replace_fullwidth.rs
-//! Convert full-width Latin, digits, and punctuation → half-width ASCII equivalents
-//! Essential for CJK ↔ Latin search equivalence (e.g. "ＡＢＣ" → "ABC")
-//! Zero-copy when no full-width chars present
-//! CharMapper path: pure 1→1 mapping
-
 use crate::{
+    JPN, KOR, ZHO,
     context::Context,
+    lang::Lang,
     stage::{CharMapper, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
     unicode::{fullwidth_to_halfwidth, is_fullwidth},
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
 
+/// Convert full-width (wide) ASCII forms → half-width (narrow) equivalents
+///
+/// Maps:
+/// - Full-width Latin letters `Ａ−Ｚａ−ｚ` → `A−Za−z`
+/// - Full-width digits `０−９` → `0−9`
+/// - Full-width punctuation `！＂＃＄％＆＇（）＊＋，－．／：；＜＝＞？＠［＼］＾＿｀｛｜｝～` → ASCII
+///
+/// Essential for CJK ↔ Latin search equivalence and input normalization.
+///
+/// ### Use Cases
+/// - Japanese/Chinese search queries
+/// - User input from mobile IMEs
+/// - Cross-platform text alignment
+///
+/// Zero-copy when no full-width present. **Pure 1→1 CharMapper** → maximum performance.
 pub struct UnifyWidth;
 
 impl Stage for UnifyWidth {
     fn name(&self) -> &'static str {
-        "replace_fullwidth"
+        "unifyWidth"
     }
 
     #[inline(always)]
@@ -58,6 +70,30 @@ impl CharMapper for UnifyWidth {
 
     fn bind<'a>(&self, text: &'a str, _ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(text.chars().map(fullwidth_to_halfwidth))
+    }
+}
+
+impl StageTestConfig for UnifyWidth {
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[JPN, ZHO, KOR] // Critical for East Asian search
+    }
+
+    fn samples(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            JPN => &["Ｈｅｌｌｏ　Ｗｏｒｌｄ！", "１２３４５円"],
+            ZHO => &["你好　Ｗｏｒｌｄ", "全角１２３"],
+            _ => &["Full-width ABC１２３！", "Normal text"],
+        }
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::assert_stage_contract;
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(UnifyWidth);
     }
 }
 

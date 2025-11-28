@@ -1,6 +1,8 @@
 use crate::{
     context::Context,
+    lang::Lang,
     stage::{Stage, StageError},
+    testing::stage_contract::StageTestConfig,
     unicode::is_unicode_whitespace,
 };
 use std::borrow::Cow;
@@ -173,6 +175,83 @@ fn has_sequential_whitespace(text: &str) -> bool {
         }
     }
     false
+}
+
+impl StageTestConfig for NormalizeWhitespace {
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // No CharMapper implementation
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true // needs_apply() detects whitespace patterns, not case changes
+    }
+
+    fn samples(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "Hello World 123",
+            " déjà-vu ",
+            "TEST",
+            "",
+            "hello \t\n world \u{00A0}\u{3000}", // Heavy whitespace sample
+        ]
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::{ENG, assert_stage_contract};
+
+    #[test]
+    fn universal_contract_tests() {
+        assert_stage_contract!(NORMALIZE_WHITESPACE_FULL);
+        assert_stage_contract!(COLLAPSE_WHITESPACE_ONLY);
+        assert_stage_contract!(TRIM_WHITESPACE_ONLY);
+    }
+
+    // —————————————————————————————————————————————————
+    // Surgical, doctrine-compliant specific tests
+    // —————————————————————————————————————————————————
+
+    #[test]
+    fn ascii_tab_is_not_normalized_to_space() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+        let input = "hello\tworld";
+        let output = stage
+            .apply(Cow::Borrowed(input), &Context::new(ENG))
+            .unwrap();
+        assert_eq!(output, "hello\tworld"); // ← This is correct!
+    }
+
+    #[test]
+    fn unicode_whitespace_is_normalized_to_space() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+        let input = "hello\u{00A0}\u{3000}world";
+        let output = stage
+            .apply(Cow::Borrowed(input), &Context::new(ENG))
+            .unwrap();
+        assert_eq!(output, "hello world");
+    }
+
+    #[test]
+    fn sequential_ascii_whitespace_is_collapsed_when_enabled() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+        let input = "a   \t \n  b";
+        let output = stage
+            .apply(Cow::Borrowed(input), &Context::new(ENG))
+            .unwrap();
+        assert_eq!(output, "a b");
+    }
+
+    #[test]
+    fn zero_copy_when_only_ascii_spaces_and_no_collapse_needed() {
+        let stage = COLLAPSE_WHITESPACE_ONLY;
+        let input = "hello world";
+        let output = stage
+            .apply(Cow::Borrowed(input), &Context::new(ENG))
+            .unwrap();
+        assert!(matches!(output, Cow::Borrowed(_)));
+    }
 }
 
 #[cfg(test)]

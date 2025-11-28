@@ -1,10 +1,11 @@
 use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use crate::{
-    HIN,
+    ENG, HIN, JPN, ZHO,
     context::Context,
-    lang::{LangEntry, SegmentRule},
+    lang::{Lang, LangEntry, SegmentRule},
     stage::{CharMapper, Stage, StageError},
+    testing::stage_contract::StageTestConfig,
     unicode::{
         CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
         classify, is_any_whitespace, is_virama, should_prevent_indic_break, zwsp,
@@ -241,18 +242,22 @@ pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
     let mut prev_char: Option<char> = None;
 
     for curr in text.chars() {
-        if is_any_whitespace(curr) {
+        if curr == ' ' || curr == zwsp() {
+            prev_class = None;
+            prev_char = None;
             continue;
         }
 
         let curr_class = classify(curr);
 
-        // Check for Indic virama boundary
-        if let Some(p_char) = prev_char {
-            let p_class = prev_class.unwrap();
-            if p_class == Indic && is_virama(p_char) && curr_class == Indic {
-                return true;
-            }
+        // Virama + consonant → needs ZWSP
+        if let Some(p_char) = prev_char
+            && prev_class == Some(Indic)
+            && is_virama(p_char)
+            && curr_class == Indic
+            && !(lang.code == HIN.code && should_prevent_indic_break(curr))
+        {
+            return true;
         }
 
         if let Some(p_class) = prev_class
@@ -260,11 +265,9 @@ pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
         {
             return true;
         }
-
         prev_class = Some(curr_class);
         prev_char = Some(curr);
     }
-
     false
 }
 
@@ -310,17 +313,14 @@ where
                     }
                 };
 
-                // Handle whitespace - flush prev_char, reset state, then return whitespace
-                if is_any_whitespace(curr) {
+                if is_any_whitespace(curr) || curr == zwsp() {
                     if let Some(prev) = self.prev_char.take() {
-                        // Reset state
                         self.prev_class = None;
-                        self.prev_is_virama = false; // CHANGED
-                        // Queue the whitespace to be returned next
-                        self.pending_space = Some(curr);
+                        self.prev_is_virama = false;
+                        self.pending_space = Some(curr); // ← preserve ZWSP!
                         return Some(prev);
                     }
-                    return Some(curr);
+                    return Some(curr); // ← don't skip ZWSP
                 }
 
                 // Ignore ZWJ/ZWNJ (transparent joiners)
@@ -411,6 +411,42 @@ impl Iterator for SegmentWordIterator {
 
 impl FusedIterator for SegmentWordIterator {}
 
+impl StageTestConfig for SegmentWords {
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // Not 1:1 (inserts spaces/ZWSP), skip fast/slow equivalence
+    }
+
+    fn skip_idempotency() -> &'static [Lang] {
+        &[] // Idempotent: twice doesn't add extra delimiters
+    }
+
+    fn samples(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            ENG => &["Hello world", "123 !@#", "", " "],    // No-op
+            ZHO => &["你好世界", "Hello世界", "AI+区块链"], // Unigram + transitions
+            JPN => &["こんにちは世界", "Rustは最高", "東京2025年"], // Transitions only
+            HIN => &["पत्नी", "विद्वत्", "Helloपत्नी"],         // ZWSP + transitions
+            _ => &["Hello World 123", " déjà-vu ", "TEST", ""],
+        }
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true // SegmentWords does not react to case
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Universal contract tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::assert_stage_contract;
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(SegmentWords);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
