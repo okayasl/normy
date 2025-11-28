@@ -1,5 +1,8 @@
 use crate::{
-    context::Context, lang::Lang, stage::{Stage, StageError}, testing::stage_contract::StageTestConfig
+    context::Context,
+    lang::Lang,
+    stage::{Stage, StageError},
+    testing::stage_contract::StageTestConfig,
 };
 use memchr::memchr;
 use std::borrow::Cow;
@@ -33,7 +36,24 @@ impl Stage for StripHtml {
     }
 
     fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(!text.is_empty() && (contains_html_tag(text) || contains_entities(text)))
+        if text.is_empty() {
+            return Ok(false);
+        }
+
+        // Quick check: if it has tags, we definitely need to apply
+        if contains_html_tag(text) {
+            return Ok(true);
+        }
+
+        // If it has '&', check if there are actual decodable entities
+        if contains_entities(text) {
+            // Do a quick entity decode to see if anything would actually change
+            let mut decoded = String::with_capacity(text.len());
+            html_escape::decode_html_entities_to_string(text, &mut decoded);
+            return Ok(decoded != text);
+        }
+
+        Ok(false)
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
@@ -49,20 +69,29 @@ impl Stage for StripHtml {
             return Ok(text);
         }
 
-        // Decode HTML entities into a new buffer
-        let mut decoded = String::with_capacity(text.len());
-        html_escape::decode_html_entities_to_string(&text, &mut decoded);
+        // Step 1: Decode entities first
+        let decoded = if has_entities {
+            let mut decoded_str = String::with_capacity(text.len());
+            html_escape::decode_html_entities_to_string(&text, &mut decoded_str);
 
-        // If only entities present (no tags), return decoded text
-        if !has_tags {
             // Check if decoding actually changed anything
-            if decoded == text.as_ref() {
-                return Ok(text); // No entities were actually decoded
+            if decoded_str == text.as_ref() {
+                text // No changes, keep original
+            } else {
+                Cow::Owned(decoded_str)
             }
-            return Ok(Cow::Owned(decoded));
+        } else {
+            text
+        };
+
+        // Step 2: Check for tags in the decoded text (entities might have revealed tags!)
+        let has_tags_after_decode = has_tags || contains_html_tag(&decoded);
+
+        if !has_tags_after_decode {
+            return Ok(decoded);
         }
 
-        // Strip tags from the decoded text
+        // Step 3: Strip HTML tags from decoded text
         let mut result = String::with_capacity(decoded.len());
         let mut chars = decoded.chars().peekable();
         let mut state = ParseState::Text;
@@ -74,7 +103,7 @@ impl Stage for StripHtml {
                         // Peek ahead to determine tag type
                         match chars.peek() {
                             Some(&'!') => {
-                                // Could be comment <!--, Cdata <![Cdata[, or DOCTYPE <!DOCTYPE
+                                // Could be comment <!--, CDATA <![CDATA[, or DOCTYPE <!DOCTYPE
                                 if chars.clone().nth(1) == Some('-')
                                     && chars.clone().nth(2) == Some('-')
                                 {
@@ -85,11 +114,11 @@ impl Stage for StripHtml {
                                 } else if chars.clone().nth(1) == Some('[')
                                     && chars.clone().nth(2) == Some('C')
                                 {
-                                    // Cdata section - include content
+                                    // CDATA section - include content
                                     state = ParseState::Cdata;
                                     chars.next(); // !
                                     chars.next(); // [
-                                    // Consume "Cdata["
+                                    // Consume "CDATA["
                                     for _ in 0..6 {
                                         chars.next();
                                     }
@@ -100,16 +129,24 @@ impl Stage for StripHtml {
                             }
                             Some(&'s') | Some(&'S') => {
                                 // Check for <script> or <style>
-                                let tag_name = peek_tag_name(&chars); // ← Remove &mut, just peek
+                                let tag_name = peek_tag_name(&chars);
                                 if tag_name.eq_ignore_ascii_case("script")
                                     || tag_name.eq_ignore_ascii_case("style")
                                 {
                                     let tag_len = tag_name.len();
-                                    state = ParseState::ScriptOrStyle(tag_name);
-                                    // NOW consume the tag name
+                                    // Consume tag name
                                     for _ in 0..tag_len {
                                         chars.next();
                                     }
+                                    // Now we need to consume the rest of the opening tag until '>'
+                                    // This handles cases like <script src="...">
+                                    for ch in chars.by_ref() {
+                                        if ch == '>' {
+                                            break;
+                                        }
+                                    }
+                                    // NOW enter the script/style content state
+                                    state = ParseState::ScriptOrStyle(tag_name);
                                 } else {
                                     state = ParseState::Tag;
                                 }
@@ -127,7 +164,7 @@ impl Stage for StripHtml {
                     if c == '>' {
                         state = ParseState::Text;
                     }
-                    // Inside tag: skip everything (including quotes, which we handle implicitly)
+                    // Inside tag: skip everything
                 }
 
                 ParseState::Comment => {
@@ -141,42 +178,42 @@ impl Stage for StripHtml {
                 }
 
                 ParseState::Cdata => {
-                    // Inside <![Cdata[, looking for ]]>
+                    // Inside <![CDATA[, looking for ]]>
                     if c == ']' && chars.peek() == Some(&']') && chars.clone().nth(1) == Some('>') {
                         state = ParseState::Text;
                         chars.next(); // consume second ']'
                         chars.next(); // consume '>'
                     } else {
-                        // Cdata content is preserved
+                        // CDATA content is preserved
                         result.push(c);
                     }
                 }
 
                 ParseState::ScriptOrStyle(ref tag_name) => {
-                    // Inside <script> or <style>, looking for </script> or </style>
+                    // Inside <script> or <style> content, looking for </script> or </style>
                     if c == '<' && chars.peek() == Some(&'/') {
                         let mut temp_chars = chars.clone();
                         temp_chars.next(); // skip '/'
                         if check_closing_tag(&temp_chars, tag_name) {
                             let tag_len = tag_name.len();
-                            state = ParseState::Tag;
+                            state = ParseState::Tag; // Enter Tag state to consume </script> or </style>
                             chars.next(); // consume '/'
                             // Consume tag name
                             for _ in 0..tag_len {
                                 chars.next();
                             }
+                            // Tag state will consume the '>'
                         }
                     }
-                    // Skip script/style content
+                    // Skip script/style content (don't push to result)
                 }
             }
         }
 
-        // Check if result is identical to input (no changes made)
-        if result == text.as_ref() {
-            Ok(text)
+        // Check if stripping changed anything
+        if result == decoded.as_ref() {
+            Ok(decoded)
         } else if result.is_empty() {
-            // All content was stripped - return empty owned string
             Ok(Cow::Owned(String::new()))
         } else {
             Ok(Cow::Owned(result))
@@ -234,7 +271,6 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
     true
 }
 
-
 // UNIVERSAL CONTRACT COMPLIANCE
 impl StageTestConfig for StripHtml {
     /// This stage is language-agnostic — works identically in all languages
@@ -271,7 +307,6 @@ mod contract_tests {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,11 +342,12 @@ mod tests {
             stage.apply(Cow::Borrowed("caf&eacute;"), &ctx).unwrap(),
             "café"
         );
+        // Entity-encoded script tags are decoded then stripped (content too)
         assert_eq!(
             stage
                 .apply(Cow::Borrowed("&lt;script&gt;alert(1)&lt;/script&gt;"), &ctx)
                 .unwrap(),
-            "<script>alert(1)</script>"
+            "" // Script content is stripped
         );
     }
 
