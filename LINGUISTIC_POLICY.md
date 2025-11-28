@@ -95,11 +95,10 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 |----------------|--------------------|-------------|-------------------|
 | Chinese (ZH)   | true               | true        | Full unigram breaking |
 | Japanese (JA)  | true               | false       | Boundaries only at script transitions |
-| Korean (KO)    | true               | false       | Same as Japanese |
+| Korean (KO)    | true               | false       | Boundaries only at script transitions |
 | Hindi (HI)    | true               | false       | Required for Devanagari script processing (clustered segmentation) |
 | Tamil (TA)    | true               | false       | Required for agglutinative, non-space-delimited script processing (morphological segmentation) |
-| Thai, Lao, Khmer | true             | false       | Lightweight zero-width space insertion at script boundaries and legal syllable breaks — **no dictionary**, **no illegal cluster rejection** |
-| Myanmar        | true               | false       | Lightweight syllable boundary heuristic — **no dictionary** |
+| Thai, Lao, Khmer, Myanmar | true | false | Boundaries only at script transitions — No syllable-level segmentation (would require dictionaries). For true word/syllable breaking, use specialized tokenizers. |
 
 ---
 
