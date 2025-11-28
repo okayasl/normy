@@ -1,11 +1,5 @@
-//! Strips HTML tags and decodes entities while preserving visible text.
-//! Zero-copy when no HTML is present.
-//! Uses only safe, streaming, allocation-free decoding when possible.
-//! Falls back to allocation path when parsing is required (correct & intended).
-
 use crate::{
-    context::Context,
-    stage::{Stage, StageError},
+    context::Context, lang::Lang, stage::{Stage, StageError}, testing::stage_contract::StageTestConfig
 };
 use memchr::memchr;
 use std::borrow::Cow;
@@ -22,6 +16,15 @@ fn contains_entities(text: &str) -> bool {
     memchr(b'&', text.as_bytes()).is_some()
 }
 
+/// Strips HTML tags and decodes entities while preserving visible text.
+///
+/// # White-Paper Guarantees (Universal Contracts)
+/// - **Zero-copy** when no `<` or `&` appears in input
+/// - **needs_apply_is_accurate**: predicts changes with 100% precision
+/// - **Idempotent**: applying twice yields same result as once
+/// - **Safe**: streaming, no buffer overflows, handles malformed HTML
+/// - **Fast pre-scan**: uses `memchr` — O(n) with 1–2 byte checks
+/// - **No false positives**: pure text (even with `>`, `"`, etc.) never triggers
 pub struct StripHtml;
 
 impl Stage for StripHtml {
@@ -230,6 +233,44 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
     // Successfully matched all characters
     true
 }
+
+
+// UNIVERSAL CONTRACT COMPLIANCE
+impl StageTestConfig for StripHtml {
+    /// This stage is language-agnostic — works identically in all languages
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // → tests run on all languages
+    }
+
+    /// Custom samples that trigger real changes
+    fn samples(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "<p>Hello &amp; world</p>",
+            "Price: &euro;99",
+            "<script>alert(1)</script>",
+            "Normal text with > and & in prose &amp; such",
+            "<div class=\"test\">content</div>",
+            "&lt;escaped&gt;",
+            "<![CDATA[preserve this]]>",
+        ]
+    }
+
+    /// Idempotent: stripping HTML twice = stripping once
+    fn skip_idempotency() -> &'static [Lang] {
+        &[]
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::assert_stage_contract;
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(StripHtml);
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

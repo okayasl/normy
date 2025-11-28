@@ -1,21 +1,8 @@
-//! Strips Markdown formatting while preserving visible text and logical structure.
-//!
-//! # Behavior
-//! - **Formatting**: `**bold**` → `bold`, `_italic_` → `italic`, `~~strike~~` → `strike`
-//! - **Structure**: Headers, paragraphs, and block quotes are separated by newlines to prevent word-gluing.
-//! - **Lists**: Bullets are removed, but items are separated by newlines. Task lists (`[x]`) are preserved as text.
-//! - **Tables**: Converted to space-separated text to preserve word boundaries (e.g., `| A | B |` → `A B`).
-//! - **Links/Images**: `[text](url)` → `text`, `![alt](url)` → `alt`.
-//! - **Passthrough**: HTML tags (`<div>`), Inline Math (`$E=mc^2$`), and Display Math are preserved for subsequent stages.
-//!
-//! # Performance
-//! - **Zero-copy**: Uses a fast byte scan (`memchr`) to skip processing if no Markdown syntax is detected.
-//! - **Streaming**: Uses `pulldown-cmark` event iterator, avoiding intermediate AST allocation.
-//! - **Allocation**: Allocates a new string only when Markdown syntax is actually removed or modified.
-
 use crate::{
     context::Context,
+    lang::Lang,
     stage::{Stage, StageError},
+    testing::stage_contract::StageTestConfig,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::borrow::Cow;
@@ -34,6 +21,14 @@ fn contains_markdown_bytes(text: &str) -> bool {
         || memchr::memchr2(b'-', b'+', bytes).is_some()
 }
 
+/// Strips Markdown formatting while preserving visible text and logical structure.
+///
+/// # White-Paper Guarantees (Universal Contracts)
+/// - **Zero-copy** when no Markdown syntax bytes are present
+/// - **needs_apply_is_accurate** via aggressive `memchr3`/`memchr2` pre-scan
+/// - **Idempotent** by design (formatting is fully removed)
+/// - **Streaming**: uses `pulldown-cmark` event stream — no AST
+/// - **Preserves**: HTML, math, task list status, word boundaries
 pub struct StripMarkdown;
 
 impl Stage for StripMarkdown {
@@ -169,6 +164,37 @@ impl Stage for StripMarkdown {
         _ctx: &Context,
     ) -> Option<std::sync::Arc<dyn crate::stage::CharMapper>> {
         None
+    }
+}
+
+impl StageTestConfig for StripMarkdown {
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // Language-agnostic
+    }
+
+    fn samples(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "# Title\n\nParagraph **bold** _italic_",
+            "- [x] Task list\n- [ ] Pending",
+            "| A | B |\n| - | - |\n| 1 | 2 |",
+            "[link](https://example.com) and ![img](x.png)",
+            "> Blockquote\n\nWith `code` and $E=mc^2$",
+            "Normal text with - hyphen and # hash in prose",
+        ]
+    }
+
+    fn skip_idempotency() -> &'static [Lang] {
+        &[]
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::assert_stage_contract;
+    #[test]
+    fn universal_contract_compliance() {
+        assert_stage_contract!(StripMarkdown);
     }
 }
 
