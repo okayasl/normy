@@ -1,8 +1,4 @@
-use std::{
-    borrow::Cow,
-    iter::{FusedIterator, Peekable},
-    sync::Arc,
-};
+use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use crate::{
     HIN,
@@ -194,9 +190,10 @@ where
     // The Seg struct remains unchanged
     struct Seg<I: Iterator> {
         lang: LangEntry,
-        inner: Peekable<I>,
+        inner: I, // CHANGED: Removed Peekable
         prev_char: Option<char>,
         prev_class: Option<CharClass>,
+        prev_is_virama: bool, // CHANGED: Added cache
         pending_space: Option<char>,
     }
 
@@ -215,11 +212,9 @@ where
                 let curr = match self.inner.next() {
                     Some(c) => c,
                     None => {
-                        // Emit pending delimiter if any
                         if let Some(space) = self.pending_space.take() {
                             return Some(space);
                         }
-                        // Emit last buffered char
                         return self.prev_char.take();
                     }
                 };
@@ -229,36 +224,33 @@ where
                     if let Some(prev) = self.prev_char.take() {
                         // Reset state
                         self.prev_class = None;
+                        self.prev_is_virama = false; // CHANGED
                         // Queue the whitespace to be returned next
                         self.pending_space = Some(curr);
                         return Some(prev);
                     }
-                    // No buffered char, return whitespace directly
                     return Some(curr);
                 }
 
                 // Ignore ZWJ/ZWNJ (transparent joiners)
                 if curr == '\u{200D}' || curr == '\u{200C}' {
                     if self.prev_char.is_some() {
-                        // Keep prev buffered, skip this joiner
                         continue;
                     }
                     return Some(curr);
                 }
 
                 let curr_class = classify(curr);
-                let curr_is_virama = is_virama(curr);
+                let curr_is_virama = is_virama(curr); // Computed once
 
                 let (mut need_boundary, mut use_zwsp) = (false, false);
 
                 if let (Some(prev), Some(prev_class)) = (self.prev_char, self.prev_class) {
-                    let prev_is_virama = is_virama(prev);
-
                     // Golden Indic Rule: Insert ZWSP after virama + consonant
                     if prev_class == Indic
-                        && prev_is_virama
-                        && !curr_is_virama
-                        && curr_class == Indic
+                    && self.prev_is_virama  // CHANGED: Use cached value
+                    && !curr_is_virama
+                    && curr_class == Indic
                     {
                         if !(self.lang.code == HIN.code && should_prevent_indic_break(curr)) {
                             need_boundary = true;
@@ -279,6 +271,7 @@ where
                     // Update buffer for next iteration
                     self.prev_char = Some(curr);
                     self.prev_class = Some(curr_class);
+                    self.prev_is_virama = curr_is_virama; // CHANGED: Cache for next iteration
 
                     return Some(prev);
                 }
@@ -286,15 +279,17 @@ where
                 // First non-whitespace character — buffer it
                 self.prev_char = Some(curr);
                 self.prev_class = Some(curr_class);
+                self.prev_is_virama = curr_is_virama; // CHANGED: Initialize cache
             }
         }
     }
 
     Seg {
         lang,
-        inner: chars.peekable(),
+        inner: chars, // CHANGED: Removed .peekable()
         prev_char: None,
         prev_class: None,
+        prev_is_virama: false, // CHANGED: Initialize
         pending_space: None,
     }
 }
@@ -365,6 +360,10 @@ mod tests {
                 ("世", "世"),
                 ("Rustは世界2025年", "Rust は世界 2025 年"),
                 ("\u{3000}こんにちは\u{3000}", "\u{3000}こんにちは\u{3000}"),
+                ("こんにちは世界", "こんにちは世界"), // ← FIX: No space expected
+                ("Rustは最高", "Rust は最高"),
+                ("人工知能", "人工知能"),
+                ("私は学生です", "私は学生です"), // ← FIX: No space expected
             ],
         );
     }
@@ -381,6 +380,28 @@ mod tests {
                 ("A", "A"),
                 ("中", "中"),
                 ("Hello你好World世界", "Hello 你 好 World 世 界"),
+                ("中华人民共和国", "中 华 人 民 共 和 国"),
+                ("人工智能是未来", "人 工 智 能 是 未 来"),
+                ("我爱你", "我 爱 你"),
+                ("今天天气很好", "今 天 天 气 很 好"),
+                // Mixed Latin + CJK — only break inside CJK blocks
+                ("Rust编程语言", "Rust 编 程 语 言"),
+                ("2025年北京奥运", "2025 年 北 京 奥 运"),
+                // CJK punctuation should NOT trigger extra breaks (treated as Other)
+                ("你好，世界！", "你 好 ， 世 界 ！"),
+                ("「你好」他说道", "「 你 好 」 他 说 道"),
+                // Edge cases
+                ("", ""),
+                ("  ", "  "),       // whitespace preserved
+                ("中", "中"),       // single ideograph → no space
+                ("Hello", "Hello"), // pure Western → zero-copy
+                ("中中中", "中 中 中"),
+                ("  你好  世界  ", "  你 好  世 界  "), // whitespace preserved
+                ("AI+区块链=未来", "AI+ 区 块 链 = 未 来"),
+                ("2025年，你好！", "2025 年 ， 你 好 ！"),
+                ("Rust×中文＝强大", "Rust× 中 文 ＝ 强 大"),
+                ("「人工智能」2025", "「 人 工 智 能 」 2025"),
+                ("Hello,世界!", "Hello, 世 界 !"),
             ],
         );
     }
@@ -397,6 +418,10 @@ mod tests {
                 ("가", "가"),
                 ("Hello가World", "Hello 가 World"),
                 ("안녕Hello세상World", "안녕 Hello 세상 World"),
+                ("안녕하세요세계", "안녕하세요세계"),
+                ("서울2025년", "서울 2025 년"),
+                ("인공지능", "인공지능"),
+                ("저는학생입니다", "저는학생입니다"),
             ],
         );
     }
@@ -475,76 +500,6 @@ mod tests {
                 ("அக்கா", "அக்\u{200B}கா"),
                 ("Helloதமிழ்", "Hello தமிழ்"),
                 ("தமிழ்World", "தமிழ் World"),
-            ],
-        );
-    }
-
-    #[test]
-    fn test_cjk_unigram_breaking_zh() {
-        // Chinese (Simplified & Traditional) — unigram_cjk = true
-        // Must insert space between every consecutive CJK ideograph
-        run_cases(
-            ZHO, // or ZHT if you have separate Traditional entry
-            &[
-                // Pure CJK — every ideograph becomes a separate token
-                ("你好世界", "你 好 世 界"),
-                ("中华人民共和国", "中 华 人 民 共 和 国"),
-                ("人工智能是未来", "人 工 智 能 是 未 来"),
-                ("我爱你", "我 爱 你"),
-                ("今天天气很好", "今 天 天 气 很 好"),
-                // Mixed Latin + CJK — only break inside CJK blocks
-                ("Hello世界", "Hello 世 界"),
-                ("世界Hello", "世 界 Hello"),
-                ("Rust编程语言", "Rust 编 程 语 言"),
-                ("2025年北京奥运", "2025 年 北 京 奥 运"),
-                // CJK punctuation should NOT trigger extra breaks (treated as Other)
-                ("你好，世界！", "你 好 ， 世 界 ！"),
-                ("「你好」他说道", "「 你 好 」 他 说 道"),
-                // Edge cases
-                ("", ""),
-                ("  ", "  "),       // whitespace preserved
-                ("中", "中"),       // single ideograph → no space
-                ("Hello", "Hello"), // pure Western → zero-copy
-                ("中中中", "中 中 中"),
-                ("  你好  世界  ", "  你 好  世 界  "), // whitespace preserved
-            ],
-        );
-    }
-
-    #[test]
-    fn test_cjk_no_unigram_for_japanese_korean() {
-        run_cases(
-            JPN,
-            &[
-                ("こんにちは世界", "こんにちは世界"), // ← FIX: No space expected
-                ("東京2025年", "東京 2025 年"),
-                ("Rustは最高", "Rust は最高"),
-                ("人工知能", "人工知能"),
-                ("私は学生です", "私は学生です"), // ← FIX: No space expected
-            ],
-        );
-
-        run_cases(
-            KOR,
-            &[
-                ("안녕하세요세계", "안녕하세요세계"), // ← FIX: No space expected
-                ("서울2025년", "서울 2025 년"),
-                ("인공지능", "인공지능"),
-                ("저는학생입니다", "저는학생입니다"), // ← FIX: No space expected
-            ],
-        );
-    }
-
-    #[test]
-    fn test_cjk_unigram_with_mixed_scripts_and_punctuation() {
-        run_cases(
-            ZHO,
-            &[
-                ("AI+区块链=未来", "AI+ 区 块 链 = 未 来"),
-                ("2025年，你好！", "2025 年 ， 你 好 ！"),
-                ("Rust×中文＝强大", "Rust× 中 文 ＝ 强 大"),
-                ("「人工智能」2025", "「 人 工 智 能 」 2025"),
-                ("Hello,世界!", "Hello, 世 界 !"),
             ],
         );
     }
