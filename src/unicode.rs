@@ -454,6 +454,8 @@ mod tests {
         assert_class!('豈', Cjk); // Compatibility Ideograph F900
         assert_class!('㐀', Cjk); // CJK Compatibility (U+3400)
         assert_class!('㐀', Cjk); // CJK Ext A (U+3400)
+        assert_class!('世', Cjk);
+        assert_class!('界', Cjk);
 
         // --- Full Indic coverage ---
         assert_class!('অ', Indic); // Bengali

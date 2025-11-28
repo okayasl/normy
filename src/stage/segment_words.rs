@@ -89,10 +89,6 @@ impl Stage for SegmentWords {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if !ctx.lang_entry.needs_segmentation() || !self.needs_apply(&text, ctx)? {
-            return Ok(text);
-        }
-
         if let Some(mapper) = self.as_char_mapper(ctx) {
             let mapped: String = mapper.bind(&text, ctx).collect();
             return Ok(Cow::Owned(mapped));
@@ -130,6 +126,10 @@ fn check_boundary_with_classes(
     curr_class: CharClass,
     lang: LangEntry,
 ) -> bool {
+    if prev_class == Cjk && curr_class == Cjk && lang.unigram_cjk {
+        return true;
+    }
+
     if prev_class == curr_class {
         return false;
     }
@@ -220,25 +220,27 @@ where
                             return Some(space);
                         }
                         // Emit last buffered char
-                        if let Some(last) = self.prev_char.take() {
-                            return Some(last);
-                        }
-                        return None;
+                        return self.prev_char.take();
                     }
                 };
 
-                // Skip whitespace
+                // Handle whitespace - flush prev_char, reset state, then return whitespace
                 if is_any_whitespace(curr) {
                     if let Some(prev) = self.prev_char.take() {
+                        // Reset state
+                        self.prev_class = None;
+                        // Queue the whitespace to be returned next
+                        self.pending_space = Some(curr);
                         return Some(prev);
                     }
+                    // No buffered char, return whitespace directly
                     return Some(curr);
                 }
 
                 // Ignore ZWJ/ZWNJ (transparent joiners)
                 if curr == '\u{200D}' || curr == '\u{200C}' {
                     if self.prev_char.is_some() {
-                        // Discard and continue to next character
+                        // Keep prev buffered, skip this joiner
                         continue;
                     }
                     return Some(curr);
@@ -252,15 +254,12 @@ where
                 if let (Some(prev), Some(prev_class)) = (self.prev_char, self.prev_class) {
                     let prev_is_virama = is_virama(prev);
 
-                    // The first debug print is removed here.
-
                     // Golden Indic Rule: Insert ZWSP after virama + consonant
                     if prev_class == Indic
                         && prev_is_virama
                         && !curr_is_virama
                         && curr_class == Indic
                     {
-                        // This is the linguistic exception filter. Only applies to Hindi (Devanagari) for  most common non-breaking conjunct initial consonants
                         if !(self.lang.code == HIN.code && should_prevent_indic_break(curr)) {
                             need_boundary = true;
                             use_zwsp = true;
@@ -375,13 +374,13 @@ mod tests {
         run_cases(
             ZHO,
             &[
-                ("Hello世界", "Hello 世界"),
-                ("世界Hello", "世界 Hello"),
-                ("你好世界", "你好世界"),
+                ("Hello世界", "Hello 世 界"),
+                ("世界Hello", "世 界 Hello"),
+                ("你好世界", "你 好 世 界"),
                 ("", ""),
                 ("A", "A"),
                 ("中", "中"),
-                ("Hello你好World世界", "Hello 你好 World 世界"),
+                ("Hello你好World世界", "Hello 你 好 World 世 界"),
             ],
         );
     }
@@ -476,6 +475,76 @@ mod tests {
                 ("அக்கா", "அக்\u{200B}கா"),
                 ("Helloதமிழ்", "Hello தமிழ்"),
                 ("தமிழ்World", "தமிழ் World"),
+            ],
+        );
+    }
+
+    #[test]
+    fn test_cjk_unigram_breaking_zh() {
+        // Chinese (Simplified & Traditional) — unigram_cjk = true
+        // Must insert space between every consecutive CJK ideograph
+        run_cases(
+            ZHO, // or ZHT if you have separate Traditional entry
+            &[
+                // Pure CJK — every ideograph becomes a separate token
+                ("你好世界", "你 好 世 界"),
+                ("中华人民共和国", "中 华 人 民 共 和 国"),
+                ("人工智能是未来", "人 工 智 能 是 未 来"),
+                ("我爱你", "我 爱 你"),
+                ("今天天气很好", "今 天 天 气 很 好"),
+                // Mixed Latin + CJK — only break inside CJK blocks
+                ("Hello世界", "Hello 世 界"),
+                ("世界Hello", "世 界 Hello"),
+                ("Rust编程语言", "Rust 编 程 语 言"),
+                ("2025年北京奥运", "2025 年 北 京 奥 运"),
+                // CJK punctuation should NOT trigger extra breaks (treated as Other)
+                ("你好，世界！", "你 好 ， 世 界 ！"),
+                ("「你好」他说道", "「 你 好 」 他 说 道"),
+                // Edge cases
+                ("", ""),
+                ("  ", "  "),       // whitespace preserved
+                ("中", "中"),       // single ideograph → no space
+                ("Hello", "Hello"), // pure Western → zero-copy
+                ("中中中", "中 中 中"),
+                ("  你好  世界  ", "  你 好  世 界  "), // whitespace preserved
+            ],
+        );
+    }
+
+    #[test]
+    fn test_cjk_no_unigram_for_japanese_korean() {
+        run_cases(
+            JPN,
+            &[
+                ("こんにちは世界", "こんにちは世界"), // ← FIX: No space expected
+                ("東京2025年", "東京 2025 年"),
+                ("Rustは最高", "Rust は最高"),
+                ("人工知能", "人工知能"),
+                ("私は学生です", "私は学生です"), // ← FIX: No space expected
+            ],
+        );
+
+        run_cases(
+            KOR,
+            &[
+                ("안녕하세요세계", "안녕하세요세계"), // ← FIX: No space expected
+                ("서울2025년", "서울 2025 년"),
+                ("인공지능", "인공지능"),
+                ("저는학생입니다", "저는학생입니다"), // ← FIX: No space expected
+            ],
+        );
+    }
+
+    #[test]
+    fn test_cjk_unigram_with_mixed_scripts_and_punctuation() {
+        run_cases(
+            ZHO,
+            &[
+                ("AI+区块链=未来", "AI+ 区 块 链 = 未 来"),
+                ("2025年，你好！", "2025 年 ， 你 好 ！"),
+                ("Rust×中文＝强大", "Rust× 中 文 ＝ 强 大"),
+                ("「人工智能」2025", "「 人 工 智 能 」 2025"),
+                ("Hello,世界!", "Hello, 世 界 !"),
             ],
         );
     }
