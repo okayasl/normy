@@ -220,9 +220,9 @@ define_languages! {
         fold: [],  // NO alif folding - explicitly rejected in validation
         transliterate: [],
         precomposed_to_base: [],
-        spacing_diacritics: [
+        spacing_diacritics: [ // U+0651 SHADDA REMOVED - phonemically significant
             '\u{064B}', '\u{064C}', '\u{064D}', '\u{064E}', '\u{064F}',
-            '\u{0650}', '\u{0651}', '\u{0652}', '\u{0653}', '\u{0654}',
+            '\u{0650}', '\u{0652}', '\u{0653}', '\u{0654}',
             '\u{0655}', '\u{0656}', '\u{0657}', '\u{0658}', '\u{0670}'
         ],
         needs_word_segmentation: false,
@@ -267,7 +267,7 @@ define_languages! {
             'Ỳ' => 'Y', 'ỳ' => 'y', 'Ý' => 'Y', 'ý' => 'y', 'Ỷ' => 'Y', 'ỷ' => 'y', 'Ỹ' => 'Y', 'ỹ' => 'y', 'Ỵ' => 'Y', 'ỵ' => 'y',
             'Đ' => 'D', 'đ' => 'd'
         ],
-        spacing_diacritics: ['\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}'],  // ADDED: Five Vietnamese tone marks
+        spacing_diacritics: ['\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}'],  // ADDED: Five Vietnamese tone marks. Policy exception: Vietnamese tone marks are stripped despite NFC precomposed forms
         needs_word_segmentation: false,
         requires_peek_ahead: false,
         peek_pairs: [],
@@ -275,10 +275,7 @@ define_languages! {
         unigram_cjk: false,
 
     FRA, "FRA", "French",
-        case: [
-            'Œ' => 'œ',
-            'Æ' => 'æ',
-        ],
+        case: [],
         fold: [],
         transliterate: [
             'Œ' => "oe", 'œ' => "oe",
@@ -347,7 +344,7 @@ define_languages! {
     // Catalan l·l → L·L is a case mapping rule, not a fold, The rule says: "Catalan preserves middle dot contextually" → this refers to case mapping, not search folding.
     // This behavior should be handled in a dedicated CaseMap stage, not in fold logic.
     CAT, "CAT", "Catalan",
-        case: ['Ç' => 'ç', 'Ï' => 'ï'],
+        case: [],
         fold: [],
         transliterate: [ 'Ç' => "c", 'ç' => "c",],
         precomposed_to_base: [
@@ -437,6 +434,14 @@ define_languages! {
 
     // Greek (ELL) Addition: Added Greek to requires_peek_ahead to mandate
     // the necessary lookahead for handling the contextual final sigma (σ/ς).[1]
+    // Final sigma: Lowercase Σ → ς if no next char (word-end); else σ
+    // In map impl: if current=='Σ' && next.is_none() { Some("ς") } else { Some('σ') }
+    // But for PeekPair: Use a sentinel for EOF, or extend LangEntry to handle None explicitly.
+    // Quick fix: Add pair for 'Σ' with b='\0' (null char) as EOF sentinel → "ς"
+    // Better: In lang.rs PeekPair, add variant for EOF, but to keep current design:
+    // Handle in case_fold.rs: If requires_peek_ahead && next.is_none() && current=='Σ' { return Some('ς') }
+    // For now, populate minimally to trigger logic:
+    //    ('Σ', '\0' => "ς"),  // \0 as EOF sentinel; filter in impl
     ELL, "ELL", "Greek",
         case: [],
         fold: [],
@@ -444,17 +449,8 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{0301}', '\u{0308}', '\u{0342}', '\u{0313}', '\u{0314}', '\u{0345}' ],
         needs_word_segmentation: false,
-        requires_peek_ahead: true,  // CHANGED: true for sigma handling (σ/ς)
-        peek_pairs: [
-        // Final sigma: Lowercase Σ → ς if no next char (word-end); else σ
-        // In map impl: if current=='Σ' && next.is_none() { Some("ς") } else { Some('σ') }
-        // But for PeekPair: Use a sentinel for EOF, or extend LangEntry to handle None explicitly.
-        // Quick fix: Add pair for 'Σ' with b='\0' (null char) as EOF sentinel → "ς"
-        // Better: In lang.rs PeekPair, add variant for EOF, but to keep current design:
-        // Handle in case_fold.rs: If requires_peek_ahead && next.is_none() && current=='Σ' { return Some('ς') }
-        // For now, populate minimally to trigger logic:
-        ('Σ', '\0' => "ς"),  // \0 as EOF sentinel; filter in impl
-        ],
+        requires_peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 

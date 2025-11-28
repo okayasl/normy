@@ -368,14 +368,18 @@ mod tests {
     }
 
     #[test]
-    fn test_catalan_accents() {
+    fn test_catalan_accents_preserve_punctuation() {
         let stage = RemoveDiacritics;
         let ctx = Context::new(CAT);
+        let input = Cow::Borrowed("L·lívia café òpera");
+        let output = stage.apply(input, &ctx).unwrap();
+        let expected = "L·livia cafe opera"; // Accents stripped (í→i, é→e, ò→o); · preserved
+        assert_eq!(output, expected);
+        assert!(output.contains("L·")); // Middot preserved (orthographic, not diacritic)
+        assert!(!output.contains("í") && !output.contains("é") && !output.contains("ò")); // Accents removed
 
-        let input = "L·lívia café òpera";
-        let expected = "L·livia cafe òpera";
-        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
-        assert!(expected.contains("L·")); // Middot preserved
+        // Zero-copy: Already normalized accents → Borrowed
+        assert!(matches!(output, Cow::Borrowed(_)));
     }
 
     // =========================================================================
@@ -563,6 +567,15 @@ mod tests {
             stage.apply(Cow::Borrowed("ď"), &Context::new(CES)).unwrap(),
             "d"
         );
+    }
+
+    #[test]
+    fn catalan_middle_dot_strip() {
+        let ctx = Context::new(CAT);
+        let stage = RemoveDiacritics; // Assuming your impl
+        let input = Cow::Borrowed("l·lengua L·Lengua");
+        let output = stage.apply(input, &ctx).unwrap();
+        assert_eq!(output, "llengua LLengua"); // Post-lowercase in pipeline
     }
 
     #[test]
