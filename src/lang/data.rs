@@ -308,7 +308,22 @@ define_languages! {
         case: [],
         fold: [],
         transliterate: [],
-        precomposed_to_base: [ 'Á' => 'A', 'á' => 'a', 'Č' => 'C', 'č' => 'c', 'Ď' => 'D', 'ď' => 'd', 'É' => 'E', 'é' => 'e', 'Ě' => 'E', 'ě' => 'e', 'Í' => 'I', 'í' => 'i', 'Ň' => 'N', 'ň' => 'n', 'Ó' => 'O', 'ó' => 'o', 'Ř' => 'R', 'ř' => 'r', 'Š' => 'S', 'š' => 's', 'Ť' => 'T', 'ť' => 't', 'Ú' => 'U', 'ú' => 'u', 'Ů' => 'U', 'ů' => 'u', 'Ý' => 'Y', 'ý' => 'y', 'Ž' => 'Z', 'ž' => 'z' ],
+        precomposed_to_base: [
+            // ONLY true diacritics — háček (caron) and kroužek (ring)
+            'Č' => 'C', 'č' => 'c',
+            'Ď' => 'D', 'ď' => 'd',
+            'Ě' => 'E', 'ě' => 'e',   // ě is special: háček on e → strip
+            'Ň' => 'N', 'ň' => 'n',
+            'Ř' => 'R', 'ř' => 'r',
+            'Š' => 'S', 'š' => 's',
+            'Ť' => 'T', 'ť' => 't',
+            'Ž' => 'Z', 'ž' => 'z',
+            'Ů' => 'U', 'ů' => 'u',   // ring u → strip (conventional in search)
+
+            // CRITICAL: All acute-accented vowels (Á, É, Í, Ó, Ú, Ý) are EXCLUDED.
+            // á é í ó ú ý  — these are native, phonemically distinct graphemes
+            // Stripping them would be lossy and break zero-copy on native text
+        ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
         requires_peek_ahead: false,
@@ -320,7 +335,33 @@ define_languages! {
         case: [],
         fold: [],
         transliterate: [],
-        precomposed_to_base: [ 'Á' => 'A', 'á' => 'a', 'Ä' => 'A', 'ä' => 'a', 'Č' => 'C', 'č' => 'c', 'Ď' => 'D', 'ď' => 'd', 'É' => 'E', 'é' => 'e', 'Í' => 'I', 'í' => 'i', 'Ĺ' => 'L', 'ĺ' => 'l', 'Ľ' => 'L', 'ľ' => 'l', 'Ň' => 'N', 'ň' => 'n', 'Ó' => 'O', 'ó' => 'o', 'Ô' => 'O', 'ô' => 'o', 'Ŕ' => 'R', 'ŕ' => 'r', 'Š' => 'S', 'š' => 's', 'Ť' => 'T', 'ť' => 't', 'Ú' => 'U', 'ú' => 'u', 'Ý' => 'Y', 'ý' => 'y', 'Ž' => 'Z', 'ž' => 'z' ],
+        precomposed_to_base: [
+            // ONLY true orthographic diacritics — carons (mäkčeň)
+            'Č' => 'C', 'č' => 'c',
+            'Ď' => 'D', 'ď' => 'd',
+            'Ľ' => 'L', 'ľ' => 'l',
+            'Ň' => 'N', 'ň' => 'n',
+            'Š' => 'S', 'š' => 's',
+            'Ť' => 'T', 'ť' => 't',
+            'Ž' => 'Z', 'ž' => 'z',
+
+            // Syllabic consonants with acute — these ARE diacritics
+            'Ĺ' => 'L', 'ĺ' => 'l',
+            'Ŕ' => 'R', 'ŕ' => 'r',
+
+            // ô is a diphthong marker (vokáň) — conventionally stripped
+            'Ô' => 'O', 'ô' => 'o',
+
+            // ä is NOT a diacritic — it is a separate vowel phoneme /æ/
+            // → MUST NOT be stripped → REMOVE from table
+            // 'Ä' => 'A', 'ä' => 'a',   ← DELETE THESE LINES
+
+            // All acute long vowels á é í ó ú ý are phonemically distinct
+            // → MUST NOT be stripped → REMOVE from table
+            // 'Á' => 'A', 'á' => 'a',   ← DELETE
+            // 'É' => 'E', 'é' => 'e',   ← DELETE
+            // etc.
+        ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
         requires_peek_ahead: false,

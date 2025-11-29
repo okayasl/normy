@@ -18,6 +18,7 @@
 | Remove marks | Arabic, Hebrew | Yes | **No** | fatḥa removed |
 
 \* *Folding is technically lossy (ß→"ss" is not reversible) but linguistically valid for search.*
+\* *If a character is phonemically or orthographically meaningful in native text, it MUST NOT appear in precomposed_to_base. Inclusion signals accepted semantic loss.*
 
 ---
 
@@ -52,6 +53,7 @@ Populate **only** for **official**, **native**, one-to-many equivalences used **
 > - The sequence `I + J` (or `i + j`) is **never** treated as a ligature in `fold`.  
 > - Normy never infers linguistic ligatures from separate codepoints.  
 > - Dutch titlecasing of IJ (e.g., "IJsselmeer") is **not** performed — left to user logic.
+> - Only precomposed ligature characters are folded; sequences of separate codepoints are never treated as ligatures.
 
 ---
 
@@ -77,6 +79,7 @@ Populate **only** when documented in **official pre-1980** contexts.
 - Ч → "č"
 
 > Strip removes marks; transliterate replaces letters. They never conflict — **transliterate always wins**.
+> Transliteration is distinct from diacritic stripping; always overrides precomposed_to_base.
 
 ---
 
@@ -93,7 +96,8 @@ Populate **only** when marks are pronunciation-based and commonly omitted.
 | German, Dutch, Nordic, Icelandic          | No             | Ä, Ĳ, Å, Æ, Ø are **distinct letters** |
 | Turkish, Hungarian, Romanian              | No             | ğ, ş, ț are distinct phonemes |
 
-> **Spanish ñ/Ñ must never be stripped** — it is a separate letter in the Spanish alphabet, not an accented N.  
+> **Spanish ñ/Ñ must never be stripped** — it is a separate letter in the Spanish alphabet, not an accented N.
+> Any character that is phonemically or orthographically meaningful in native text must never appear here. Inclusion implies acceptance of semantic loss.  
 > By default, `precomposed_to_base` is **disabled**. Normy is **non-destructive** out of the box.
 
 ---
@@ -119,6 +123,7 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 - Shadda (◌ّ) doubles consonants: مُعَلِّم "muʿallim" (teacher) vs مُعَلِم "muʿalim" (instructor/one who teaches)
 - Removing it fundamentally changes pronunciation and meaning
 - Unlike vowel points (fatḥa, kasra, ḍamma), shadda is not optional in vocalized text
+- Only pure spacing diacritics appear here; any phonemically meaningful mark is excluded.
 
 ---
 

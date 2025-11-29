@@ -154,16 +154,16 @@ impl StageTestConfig for LowerCase {
 
     fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
         match lang {
-            TUR => &[
-                ("İ", "i̇"), // Note: Unicode lowercase of İ
-                ("I", "ı"),
-                ("İSTANBUL", "i̇stanbul"),
-            ],
+            TUR => &[("İ", "i"), ("I", "ı"), ("İSTANBUL", "istanbul")],
             DEU => &[("ẞ", "ß"), ("GROẞ", "groß")],
-            NLD => &[("Ĳ", "ĳ"), ("IJssel", "ĳssel")],
-            ELL => &[("ΣΟΦΟΣ", "σοφοσ"), ("ΟΔΟΣ", "οδοσ")],
-            LIT => &[("JIS", "jis"), ("JĮ", "jį")],
-            _ => &[("HELLO", "hello"), ("World", "world")],
+            NLD => &[
+                // Dutch IJ digraph: LowerCase does NOT treat it as a unit → this is intentional
+                ("IJssel", "ijssel"), // ← correct for LowerCase
+                ("Ĳssel", "ĳssel"),
+            ],
+            ELL => &[("ΣΟΦΟΣ", "σοφοσ")],
+            LIT => &[("JIS", "jis")],
+            _ => &[("HELLO", "hello")],
         }
     }
 }

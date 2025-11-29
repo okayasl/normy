@@ -31,19 +31,20 @@ pub struct ChainedProcess<S: Stage, P: Process> {
 impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
     #[inline(always)]
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let current: Cow<'_, str> = self.previous.process(text, ctx)?;
-        if !self.stage.needs_apply(&current, ctx)? {
-            return Ok(current);
+        let prev = self.previous.process(text, ctx)?;
+
+        if !self.stage.needs_apply(&prev, ctx)? {
+            return Ok(prev); // ← ZERO COST PATH
         }
+
         if let Some(mapper) = self.stage.as_char_mapper(ctx) {
-            let iter = mapper.bind(&current, ctx);
-            let mut out = String::with_capacity(current.len());
-            for c in iter {
-                out.push(c);
-            }
-            return Ok(Cow::Owned(out));
+            let iter = mapper.bind(&prev, ctx);
+            let mut out = String::with_capacity(prev.len());
+            out.extend(iter);
+            Ok(Cow::Owned(out))
+        } else {
+            self.stage.apply(prev, ctx)
         }
-        self.stage.apply(current, ctx)
     }
 }
 #[derive(Default)]

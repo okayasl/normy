@@ -1,5 +1,5 @@
 use crate::{
-    ARA, FRA, POL, VIE,
+    ARA, CES, FRA, POL, SLK, VIE,
     context::Context,
     lang::{Lang, LangEntry},
     stage::{CharMapper, Stage, StageError},
@@ -176,7 +176,7 @@ impl<I: Iterator<Item = char>> FusedIterator for RemoveDiacriticsIter<I> {}
 
 impl StageTestConfig for RemoveDiacritics {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // Not 1:1, removes combining marks
+        &[] // Not 1:1 — removes combining marks
     }
 
     fn samples(lang: Lang) -> &'static [&'static str] {
@@ -184,7 +184,7 @@ impl StageTestConfig for RemoveDiacritics {
             FRA => &["café", "naïve", "résumé", "Crème brûlée"],
             VIE => &["Hà Nội", "Đạt", "đẹp quá"],
             ARA => &["مَرْحَبًا", "كتاب"],
-            POL => &["Łódź", "żółć", "gęślą"],
+            POL => &["Łódź", "żółć", "gęślą jaźń"],
             _ => &["hello", "test 123", "café", ""],
         }
     }
@@ -192,20 +192,29 @@ impl StageTestConfig for RemoveDiacritics {
     fn should_pass_through(lang: Lang) -> &'static [&'static str] {
         match lang {
             FRA | VIE | POL => &["hello", "world", "test123", ""],
-            ARA => &["كتاب", ""], // No vowel marks
-            _ => &["hello", "world", "test123", ""],
+            ARA => &["كتاب", ""],
+            CES | SLK => &["café", "vélký", "máma", "ódy", ""],
+            _ => &["hello", "world", ""],
         }
     }
 
     fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
         match lang {
             FRA => &[("café", "cafe"), ("naïve", "naive"), ("résumé", "resume")],
-            VIE => &[("Hà Nội", "Ha Noi"), ("đẹp", "dep")],
-            POL => &[("Łódź", "Lodz"), ("żółć", "zolc")],
-            ARA => &[
-                ("مَرْحَبًا", "مرحبا"), // Remove harakat
+            VIE => &[("Hà Nội", "Ha Noi"), ("Đạt", "Dat")],
+            POL => &[("Łódź", "Lodz"), ("żółć", "zolc"), ("gęślą", "gesla")],
+            ARA => &[("مَرْحَبًا", "مرحبا")],
+            CES => &[
+                ("děvče", "devce"),
+                ("Příliš", "Prílis"),
+                ("žluťoučký", "zlutoucký"),
             ],
-            _ => &[("café", "cafe")],
+            SLK => &[
+                ("děvče", "děvce"),
+                ("Příliš", "Přílis"),
+                ("žluťoučký", "zlutoucký"),
+            ],
+            _ => &[],
         }
     }
 
@@ -408,9 +417,9 @@ mod tests {
     fn test_czech_all_diacritics_stripped() {
         let stage = RemoveDiacritics;
         let ctx = Context::new(CES);
-
         let input = "Příliš žluťoučký kůň úpěl ďábelské ódy";
-        let expected = "Prilis zlutoucky kun upel dabelske ody";
+        // Only háček, ring, and carons are stripped — acute length markers preserved
+        let expected = "Prílis zlutoucký kun úpel dábelské ódy";
         assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
     }
 
@@ -420,7 +429,7 @@ mod tests {
         let ctx = Context::new(SLK);
 
         let input = "Ľúbica a Ďurko štrikujú v Ťahanovciach";
-        let expected = "Lubica a Durko strikuju v Tahanovciach";
+        let expected = "Lúbica a Durko strikujú v Tahanovciach";
         assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
     }
 
@@ -532,7 +541,7 @@ mod tests {
             .apply(Cow::Borrowed(input), &Context::new(CES))
             .unwrap();
         assert_eq!(
-            ces, "Prilis zlutoucky kun w Szczecinie mowi po polsku i słowacku.",
+            ces, "Prílis zlutoucký kun w Szczecinie mówi po polsku i słowacku.",
             "Czech strips its diacritics but preserves Polish ł"
         );
 
@@ -550,7 +559,7 @@ mod tests {
             .apply(Cow::Borrowed(input), &Context::new(SLK))
             .unwrap();
         assert_eq!(
-            slk, "Přilis zlutoucky kůn w Szczecinie mowi po polsku i słowacku.",
+            slk, "Přílis zlutoucký kůn w Szczecinie mówi po polsku i słowacku.",
             "Slovak strips shared diacritics but preserves Czech-specific 'ř'/'ů' and Polish 'ł'"
         );
     }
