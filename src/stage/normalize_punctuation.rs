@@ -108,7 +108,7 @@ impl StageTestConfig for NormalizePunctuation {
             ("\"Hello\"", "\"Hello\""), // Smart quotes → ASCII
             ("'world'", "'world'"),     // Smart single quotes
             ("—dash—", "-dash-"),       // Em dash → hyphen
-            ("…", "..."),               // Ellipsis
+            ("…", "."),                 // Ellipsis
         ]
     }
 

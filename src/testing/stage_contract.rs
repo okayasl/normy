@@ -199,7 +199,6 @@ pub fn stage_is_idempotent<S: StageTestConfig>(stage: S) {
     }
 }
 
-// src/testing/stage_contract.rs
 #[cfg(test)]
 pub fn needs_apply_is_accurate<S: StageTestConfig>(stage: S) {
     // Test in *every* language that the stage claims to support.

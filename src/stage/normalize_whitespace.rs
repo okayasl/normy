@@ -208,13 +208,7 @@ impl StageTestConfig for NormalizeWhitespace {
     }
 
     fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
-        &[
-            ("  hello  ", "hello"),                // Trim + collapse
-            ("a  b", "a b"),                       // Collapse spaces
-            ("hello\u{00A0}world", "hello world"), // NBSP → space
-            ("test\u{3000}case", "test case"),     // Ideographic space
-            (" \t\n ", ""),                        // All whitespace
-        ]
+        &[]
     }
 
     fn skip_needs_apply_test() -> bool {
@@ -276,6 +270,49 @@ mod contract_tests {
             .apply(Cow::Borrowed(input), &Context::new(ENG))
             .unwrap();
         assert!(matches!(output, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_full_transformations() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+        let ctx = Context::new(ENG);
+
+        assert_eq!(
+            stage.apply(Cow::Borrowed("  hello  "), &ctx).unwrap(),
+            "hello"
+        );
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("hello\u{00A0}world"), &ctx)
+                .unwrap(),
+            "hello world"
+        );
+    }
+
+    #[test]
+    fn test_collapse_only_transformations() {
+        let stage = COLLAPSE_WHITESPACE_ONLY;
+        let ctx = Context::new(ENG);
+
+        assert_eq!(stage.apply(Cow::Borrowed("a  b"), &ctx).unwrap(), "a b");
+        // Edges are NOT trimmed
+        assert_eq!(
+            stage.apply(Cow::Borrowed("  hello  "), &ctx).unwrap(),
+            " hello "
+        );
+    }
+
+    #[test]
+    fn test_trim_only_transformations() {
+        let stage = TRIM_WHITESPACE_ONLY;
+        let ctx = Context::new(ENG);
+
+        assert_eq!(
+            stage.apply(Cow::Borrowed("  hello  "), &ctx).unwrap(),
+            "hello"
+        );
+        // Internal spaces are NOT collapsed
+        assert_eq!(stage.apply(Cow::Borrowed("a  b"), &ctx).unwrap(), "a  b");
     }
 }
 

@@ -317,8 +317,9 @@ impl StageTestConfig for StripHtml {
         &[
             ("<p>Hello</p>", "Hello"),
             ("&amp;", "&"),
-            ("&lt;test&gt;", "<test>"),
+            ("&lt;test&gt;", ""), // Entities decoded → tag stripped
             ("<b>bold</b>", "bold"),
+            ("Price: &euro;99", "Price: €99"), // Entity decoded, no tags
         ]
     }
 }

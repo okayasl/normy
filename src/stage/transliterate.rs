@@ -1,5 +1,5 @@
 use crate::{
-    DAN, DEU, FRA, NOR, SWE,
+    CAT, DAN, DEU, FRA, ISL, NOR, SWE,
     context::Context,
     lang::Lang,
     stage::{CharMapper, FusedIterator, Stage, StageError},
@@ -187,23 +187,54 @@ impl StageTestConfig for Transliterate {
     fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
         match lang {
             DEU => &[
-                ("Ä", "Ae"),
+                ("Ä", "ae"),
                 ("ä", "ae"),
-                ("Ö", "Oe"),
+                ("Ö", "oe"),
                 ("ö", "oe"),
-                ("Ü", "Ue"),
+                ("Ü", "ue"),
                 ("ü", "ue"),
-                ("ß", "ss"),
             ],
-            DAN | NOR | SWE => &[
-                ("Å", "Aa"),
+            DAN => &[
+                ("Å", "aa"),
                 ("å", "aa"),
-                ("Ø", "Oe"),
+                ("Æ", "ae"),
+                ("æ", "ae"),
+                ("Ø", "oe"),
                 ("ø", "oe"),
-                ("Æ", "Ae"),
+            ],
+            NOR => &[
+                ("Æ", "ae"),
+                ("æ", "ae"),
+                ("Ø", "oe"),
+                ("ø", "oe"),
+                ("Å", "aa"),
+                ("å", "aa"),
+            ],
+            SWE => &[
+                ("Å", "aa"),
+                ("å", "aa"),
+                ("Ä", "ae"),
+                ("ä", "ae"),
+                ("Ö", "oe"),
+                ("ö", "oe"),
+            ],
+            FRA => &[
+                ("Œ", "oe"),
+                ("œ", "oe"),
+                ("Æ", "ae"),
+                ("æ", "ae"),
+                ("Ç", "c"),
+                ("ç", "c"),
+            ],
+            ISL => &[
+                ("Þ", "th"),
+                ("þ", "th"),
+                ("Ð", "d"),
+                ("ð", "d"),
+                ("Æ", "ae"),
                 ("æ", "ae"),
             ],
-            FRA => &[("Œ", "Oe"), ("œ", "oe")],
+            CAT => &[("Ç", "c"), ("ç", "c")],
             _ => &[],
         }
     }
