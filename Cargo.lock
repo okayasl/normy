@@ -298,6 +298,7 @@ dependencies = [
  "phf",
  "proptest",
  "pulldown-cmark",
+ "rand",
  "simdutf8",
  "smallvec",
  "thiserror",
