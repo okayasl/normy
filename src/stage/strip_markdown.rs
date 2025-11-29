@@ -32,13 +32,6 @@ fn contains_markdown_bytes(text: &str) -> bool {
 /// - Uses fast `memchr` pre-scan - O(n) with SIMD acceleration
 /// - Zero-copy when input contains no markdown syntax bytes
 /// - May have false positives for plain text with `-`, `#`, etc. (handled gracefully)
-///
-/// # Examples
-/// ```
-/// "**bold** and _italic_" → "bold and italic"
-/// "- [x] Task" → "[x] Task"
-/// "$E=mc^2$" → "$E=mc^2$" (preserved)
-/// ```
 pub struct StripMarkdown;
 
 impl Stage for StripMarkdown {

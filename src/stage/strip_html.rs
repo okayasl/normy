@@ -103,29 +103,35 @@ impl Stage for StripHtml {
                         // Peek ahead to determine tag type
                         match chars.peek() {
                             Some(&'!') => {
-                                // Could be comment <!--, CDATA <![CDATA[, or DOCTYPE <!DOCTYPE
+                                // <!-- comment -->
                                 if chars.clone().nth(1) == Some('-')
                                     && chars.clone().nth(2) == Some('-')
                                 {
                                     state = ParseState::Comment;
-                                    chars.next(); // !
-                                    chars.next(); // -
-                                    chars.next(); // -
-                                } else if chars.clone().nth(1) == Some('[')
-                                    && chars.clone().nth(2) == Some('C')
-                                {
-                                    // CDATA section - include content
-                                    state = ParseState::Cdata;
-                                    chars.next(); // !
-                                    chars.next(); // [
-                                    // Consume "CDATA["
-                                    for _ in 0..6 {
-                                        chars.next();
-                                    }
-                                } else {
-                                    // Other declaration like DOCTYPE - skip
-                                    state = ParseState::Tag;
+                                    chars.next(); // consume '!'
+                                    chars.next(); // consume first '-'
+                                    chars.next(); // consume second '-'
+                                    continue;
                                 }
+
+                                // <![CDATA[ ... ]]>
+                                let mut probe = chars.clone();
+                                probe.next(); // skip the '!' we already peeked
+                                if probe.next() == Some('[') {
+                                    let chunk: String = probe.clone().take(6).collect();
+                                    if chunk.eq_ignore_ascii_case("CDATA[") {
+                                        state = ParseState::Cdata;
+                                        chars.next(); // '!'
+                                        chars.next(); // '['
+                                        for _ in 0..6 {
+                                            let _ = chars.next();
+                                        } // "CDATA["
+                                        continue;
+                                    }
+                                }
+
+                                // Anything else starting with <! is a declaration/doctype → skip
+                                state = ParseState::Tag;
                             }
                             Some(&'s') | Some(&'S') => {
                                 // Check for <script> or <style>
@@ -161,9 +167,21 @@ impl Stage for StripHtml {
                 }
 
                 ParseState::Tag => {
-                    if c == '>' {
+                    if c == '"' || c == '\'' {
+                        // Skip over quoted attribute values (including escaped quotes)
+                        let quote = c;
+                        while let Some(ch) = chars.next() {
+                            if ch == '\\' {
+                                // Skip escaped character
+                                let _ = chars.next();
+                            } else if ch == quote {
+                                break;
+                            }
+                        }
+                    } else if c == '>' {
                         state = ParseState::Text;
                     }
+                    // otherwise just skip the character
                     // Inside tag: skip everything
                 }
 
@@ -267,8 +285,11 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
             _ => return false,
         }
     }
-    // Successfully matched all characters
-    true
+    // After the tag name we must see whitespace or '>'
+    matches!(
+        temp_chars.peek(),
+        Some('>') | Some(' ') | Some('\t') | Some('\n') | Some('\r') | None
+    )
 }
 
 // UNIVERSAL CONTRACT COMPLIANCE
