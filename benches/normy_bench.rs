@@ -231,16 +231,22 @@ fn benches_main(c: &mut Criterion) {
 const ASCII_SAFE: &str =
     "Hello simple ascii no accents 12345 - Keep this lightweight and already-normalized";
 // NFC-clean composed latin characters (no decomposition needed)
-const LATIN_COMPOSED: &str = "Café with precomposed e-acute (U+00E9) and no other changes";
+const LATIN_COMPOSED: &str = "Café with precomposed e-acute (U+00E9) and simple ASCII suffix";
 // ── Dedicated zero-copy microbench
 fn bench_zero_copy_micro(c: &mut Criterion) {
     let mut group = c.benchmark_group("Normy Zero-Copy Microbench");
+
+    // Minimal pipeline to allow zero-copy on clean ASCII
+    let fast_ascii_pipeline = NormyBuilder::default()
+        .lang(ENG)
+        .add_stage(TRIM_WHITESPACE_ONLY) // no transformations
+        .build();
 
     let pipeline = NormyBuilder::default()
         .lang(ENG)
         .add_stage(NFC)
         .add_stage(LowerCase)
-        // Avoid CaseFold here so we can exercise zero-copy on simple inputs
+        // Avoid CaseFold to allow zero-copy hits
         .add_stage(TRIM_WHITESPACE_ONLY)
         .build();
 
@@ -261,6 +267,25 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
         rate = tracker_ascii.hit_rate_pct(),
         hits = tracker_ascii.hits,
         total = tracker_ascii.total
+    );
+
+    // Fast-path Normy Search for clean ASCII (should hit zero-copy)
+    let mut tracker_fast = ZeroCopyTracker::default();
+    group.throughput(Throughput::Bytes(ASCII_SAFE.len() as u64));
+    group.bench_function("Normy Search fast-path / ascii-safe", |b| {
+        b.iter(|| {
+            let r = fast_ascii_pipeline
+                .normalize(black_box(ASCII_SAFE))
+                .expect("normy failed");
+            tracker_fast.record(ASCII_SAFE, &r);
+            r
+        });
+    });
+    println!(
+        "Fast-path Normy Search zero-copy hit rate: {rate:.2}% ({hits}/{total})",
+        rate = tracker_fast.hit_rate_pct(),
+        hits = tracker_fast.hits,
+        total = tracker_fast.total
     );
 
     let mut tracker_composed = ZeroCopyTracker::default();
