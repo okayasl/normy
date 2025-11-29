@@ -122,11 +122,12 @@ impl Stage for NormalizeWhitespace {
         let mut result = String::with_capacity(text.len());
         let mut prev_was_whitespace = false;
         let mut started = false; // Track if we've seen non-whitespace yet
+        let mut changed = false;
 
         for c in text.chars() {
             let is_ws = c.is_whitespace();
-
-            let normalized_char = if is_ws && self.normalize_unicode {
+            let normalized_char = if is_ws && self.normalize_unicode && c != ' ' {
+                changed = true;
                 ' '
             } else {
                 c
@@ -134,13 +135,13 @@ impl Stage for NormalizeWhitespace {
 
             if is_ws {
                 if self.trim_edges && !started {
+                    changed = true;
                     continue;
                 }
-
                 if self.collapse_sequential && prev_was_whitespace {
+                    changed = true;
                     continue;
                 }
-
                 result.push(normalized_char);
                 prev_was_whitespace = true;
             } else {
@@ -154,10 +155,15 @@ impl Stage for NormalizeWhitespace {
             let trimmed = result.trim_end();
             if trimmed.len() != result.len() {
                 result.truncate(trimmed.len());
+                changed = true;
             }
         }
 
-        Ok(Cow::Owned(result))
+        if changed {
+            Ok(Cow::Owned(result))
+        } else {
+            Ok(text) // ← ZERO-COPY — even if needs_apply was true
+        }
     }
 }
 
@@ -182,18 +188,37 @@ impl StageTestConfig for NormalizeWhitespace {
         &[] // No CharMapper implementation
     }
 
-    fn skip_needs_apply_test() -> bool {
-        true // needs_apply() detects whitespace patterns, not case changes
-    }
-
     fn samples(_lang: Lang) -> &'static [&'static str] {
         &[
             "Hello World 123",
             " déjà-vu ",
             "TEST",
             "",
-            "hello \t\n world \u{00A0}\u{3000}", // Heavy whitespace sample
+            "hello \t\n world \u{00A0}\u{3000}",
         ]
+    }
+
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "hello world", // Already normalized
+            "test",
+            "abc def",
+            "",
+        ]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("  hello  ", "hello"),                // Trim + collapse
+            ("a  b", "a b"),                       // Collapse spaces
+            ("hello\u{00A0}world", "hello world"), // NBSP → space
+            ("test\u{3000}case", "test case"),     // Ideographic space
+            (" \t\n ", ""),                        // All whitespace
+        ]
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true
     }
 }
 

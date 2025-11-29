@@ -1,5 +1,6 @@
 use crate::{
     context::Context,
+    lang::Lang,
     stage::{CharMapper, Stage, StageError},
     testing::stage_contract::StageTestConfig,
     unicode::{contains_format_controls, is_format_control},
@@ -74,17 +75,29 @@ impl CharMapper for StripFormatControls {
 }
 
 impl StageTestConfig for StripFormatControls {
-    fn one_to_one_languages() -> &'static [crate::lang::Lang] {
+    fn one_to_one_languages() -> &'static [Lang] {
         &[]
     }
 
-    fn samples(_lang: crate::lang::Lang) -> &'static [&'static str] {
+    fn samples(_lang: Lang) -> &'static [&'static str] {
         &[
             "hello\u{200B}world",
             "\u{FEFF}bommed",
             "Arabic\u{200F}text",
             "a\u{2066}b\u{2069}c",
             "clean text",
+        ]
+    }
+
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &["clean text", "hello world", "test123", ""]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("hello\u{200B}world", "helloworld"), // Remove ZWSP
+            ("\u{FEFF}text", "text"),             // Remove BOM
+            ("a\u{200E}b", "ab"),                 // Remove LRM
         ]
     }
 }

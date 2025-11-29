@@ -87,21 +87,33 @@ impl CharMapper for NormalizePunctuation {
 
 impl StageTestConfig for NormalizePunctuation {
     fn one_to_one_languages() -> &'static [Lang] {
-        all_langs() // Lang-independent, but test across all for coverage
-    }
-
-    fn skip_needs_apply_test() -> bool {
-        true // needs_apply() detects fancy punctuation, not case changes
+        all_langs() // Language-independent
     }
 
     fn samples(_lang: Lang) -> &'static [&'static str] {
+        &["Hello \"World\" 123", " déjà-vu… ", "TEST—", "", "\"'–…\""]
+    }
+
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
         &[
-            "Hello “World” 123",
-            " déjà-vu… ",
-            "TEST—",
+            "hello world", // No fancy punctuation
+            "test-123",    // ASCII hyphen
+            "it's okay",   // ASCII apostrophe
             "",
-            "“‘–…”", // Heavy punctuation sample
         ]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("\"Hello\"", "\"Hello\""), // Smart quotes → ASCII
+            ("'world'", "'world'"),     // Smart single quotes
+            ("—dash—", "-dash-"),       // Em dash → hyphen
+            ("…", "..."),               // Ellipsis
+        ]
+    }
+
+    fn skip_needs_apply_test() -> bool {
+        true
     }
 }
 

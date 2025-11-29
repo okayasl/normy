@@ -50,12 +50,13 @@ impl Stage for CaseFold {
         Ok(false)
     }
 
-    // case_fold.rs — FINAL, WHITE-PAPER-COMPLIANT
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        // Handle peek-ahead languages
         if ctx.lang_entry.requires_peek_ahead() {
             return apply_with_peek_ahead(text, ctx);
         }
 
+        // Pre-allocate capacity based on expected expansions
         let (_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
         let mut out = String::with_capacity(text.len() + extra_bytes);
         let mut changed = false;
@@ -63,7 +64,10 @@ impl Stage for CaseFold {
         for c in text.chars() {
             if let Some(folded) = ctx.lang_entry.fold_char(c) {
                 out.push(folded);
-                changed = true;
+                // Only mark as changed if the character actually changed
+                if folded != c {
+                    changed = true;
+                }
             } else if let Some(m) = ctx.lang_entry.fold_map().iter().find(|m| m.from == c) {
                 out.push_str(m.to);
                 changed = true;
@@ -108,7 +112,8 @@ fn apply_with_peek_ahead<'a>(
     ctx: &Context,
 ) -> Result<Cow<'a, str>, StageError> {
     let fold_map = ctx.lang_entry.fold_map();
-    let (foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text); // Reuse helper
+    let (foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
+
     let mut out = String::with_capacity(
         text.len()
             + extra_bytes
@@ -118,20 +123,58 @@ fn apply_with_peek_ahead<'a>(
                 0
             },
     );
+
+    let mut changed = false;
     let mut chars = text.chars().peekable();
+
     while let Some(c) = chars.next() {
+        // Check for peek-ahead rules (e.g., Dutch IJ → ij)
         if let Some(target) = ctx.lang_entry.peek_ahead_fold(c, chars.peek().copied()) {
-            chars.next();
+            let next_char = chars.next().unwrap(); // We know it exists from peek
+
+            // Build what the original two-char sequence was
+            let mut original = String::with_capacity(8);
+            original.push(c);
+            original.push(next_char);
+
+            // Only mark as changed if the target differs from original
+            if target != original.as_str() {
+                changed = true;
+            }
+
             out.push_str(target);
             continue;
         }
+
+        // Check fold_map for multi-char expansions
         if let Some(m) = fold_map.iter().find(|m| m.from == c) {
             out.push_str(m.to);
+            // Check if the mapping actually changes the character
+            if m.to.len() != 1 || !m.to.starts_with(c) {
+                changed = true;
+            }
+            continue;
+        }
+
+        // Fallback to Unicode lowercase
+        let lowercase = c.to_lowercase();
+        let first_lower = lowercase.clone().next();
+
+        if first_lower != Some(c) {
+            // Character changes when lowercased
+            out.extend(lowercase);
+            changed = true;
         } else {
-            out.extend(c.to_lowercase());
+            // Character unchanged
+            out.push(c);
         }
     }
-    Ok(Cow::Owned(out))
+
+    if changed {
+        Ok(Cow::Owned(out))
+    } else {
+        Ok(text) // ← ZERO-COPY for peek-ahead too!
+    }
 }
 
 impl CharMapper for CaseFold {
@@ -182,6 +225,40 @@ impl StageTestConfig for CaseFold {
             ELL => &["ΣΟΦΟΣ", "ΟΔΟΣ"],
             LIT => &["JIS", "Jį"],
             _ => &["Hello WORLD", "Test 123", " café ", "NAÏVE"],
+        }
+    }
+
+    fn should_pass_through(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            TUR => &["ısı", "i", "istanbul", "hello"], // Already lowercase Turkish
+            DEU => &["strasse", "gross", "hello"],     // Already folded German
+            NLD => &["ijssel", "hello", "world"],      // Already lowercase Dutch
+            ELL => &["σοφοσ", "οδοσ"],                 // Already lowercase Greek
+            LIT => &["jis", "jį", "hello"],            // Already lowercase Lithuanian
+            _ => &["hello", "world", "test123", ""],   // Simple lowercase
+        }
+    }
+
+    fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
+        match lang {
+            TUR => &[
+                ("İ", "i"), // Turkish dotted I
+                ("I", "ı"), // Turkish dotless I
+                ("İSTANBUL", "istanbul"),
+            ],
+            DEU => &[
+                ("ẞ", "ss"), // Capital Eszett
+                ("Straße", "strasse"),
+                ("GROẞ", "gross"),
+            ],
+            NLD => &[
+                ("Ĳ", "ij"), // Dutch IJ ligature U+0132
+                ("ĳ", "ij"), // Dutch ij ligature U+0133
+                ("Ĳssel", "ijssel"),
+            ],
+            ELL => &[("Σ", "σ"), ("ΣΟΦΟΣ", "σοφοσ"), ("ΟΔΟΣ", "οδοσ")],
+            LIT => &[("JIS", "jis"), ("JĮ", "jį")],
+            _ => &[("HELLO", "hello"), ("World", "world"), ("NAÏVE", "naïve")],
         }
     }
 }
@@ -315,21 +392,35 @@ mod language_specific_tests {
 
     #[test]
     fn test_needs_apply_for_french() {
-        // let ctx = Context::new(FRA);
-        // assert!(CaseFold.needs_apply("café", &ctx).is_ok());
         let ctx = Context::new(ENG);
         let needs_apply = CaseFold.needs_apply(" café ", &ctx).unwrap();
-        println!("{needs_apply}");
         assert!(!needs_apply);
     }
 
-    // #[test]
-    // fn cafe_should_not_trigger_case_fold() {
-    //     let stage = CaseFold;
-    //     let ctx = Context::new(ENG);
-    //     let text = " café ";
-    //     assert!(!stage.needs_apply(text, &ctx).unwrap());
-    //     let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-    //     assert!(matches!(result, Cow::Borrowed(_)));
-    // }
+    #[test]
+    fn test_needs_apply_for_turkish() {
+        let ctx = Context::new(TUR);
+        let needs_apply = CaseFold.needs_apply(" ısı ", &ctx).unwrap();
+        assert!(!needs_apply);
+    }
+
+    #[test]
+    fn test_needs_apply_for_dutch() {
+        let ctx = Context::new(NLD);
+        let needs_apply = CaseFold.needs_apply(" ijssel ", &ctx).unwrap();
+        assert!(!needs_apply);
+    }
+
+    #[test]
+    fn direct_apply_on_already_folded_text() {
+        let ctx = Context::new(TUR);
+        let text = "ısı"; // Already lowercase Turkish
+
+        // Direct call (bypassing needs_apply check)
+        let result = CaseFold.apply(Cow::Borrowed(text), &ctx).unwrap();
+
+        // Should be zero-copy
+        assert!(matches!(result, Cow::Borrowed(_)));
+        assert_eq!(result, text);
+    }
 }

@@ -1,4 +1,5 @@
 use crate::{
+    all_langs,
     context::Context,
     lang::Lang,
     stage::{Stage, StageError},
@@ -115,11 +116,35 @@ impl Stage for NormalizationStage {
 
 impl StageTestConfig for NormalizationStage {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // No CharMapper implementation
+        all_langs() // Language-independent
+    }
+
+    fn samples(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "café",      // é can be composed or decomposed
+            "naïve",     // ï precomposed
+            "e\u{0301}", // e + combining acute
+            "ﬁle",       // fi ligature (NFKC)
+            "①②③",       // circled numbers (NFKC)
+            "",
+        ]
+    }
+
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "hello", // Pure ASCII
+            "world123", "test", "",
+        ]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        // Note: Transformations depend on the normalization form
+        // This is stage-instance specific, so keeping empty for now
+        &[]
     }
 
     fn skip_needs_apply_test() -> bool {
-        true // needs_apply() is based on quick_check, not case changes
+        true // Quick check logic is complex
     }
 }
 

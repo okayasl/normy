@@ -72,16 +72,28 @@ impl CharMapper for StripControlChars {
 
 impl StageTestConfig for StripControlChars {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // 1→0 mapping (filter), not 1→1
+        &[] // 1→0 mapping (filter)
     }
 
-    fn samples(_lang: crate::lang::Lang) -> &'static [&'static str] {
+    fn samples(_lang: Lang) -> &'static [&'static str] {
         &[
             "hello\u{0001}world\u{007F}",
             "clean text only",
             "\u{001F}start",
             "end\u{009F}",
             "",
+        ]
+    }
+
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &["clean text only", "hello world", "test123", ""]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("hello\u{0001}world", "helloworld"),
+            ("\u{001F}start", "start"),
+            ("end\u{009F}", "end"),
         ]
     }
 }

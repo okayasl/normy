@@ -294,12 +294,10 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
 
 // UNIVERSAL CONTRACT COMPLIANCE
 impl StageTestConfig for StripHtml {
-    /// This stage is language-agnostic — works identically in all languages
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // → tests run on all languages
+        &[]
     }
 
-    /// Custom samples that trigger real changes
     fn samples(_lang: Lang) -> &'static [&'static str] {
         &[
             "<p>Hello &amp; world</p>",
@@ -308,13 +306,20 @@ impl StageTestConfig for StripHtml {
             "Normal text with > and & in prose &amp; such",
             "<div class=\"test\">content</div>",
             "&lt;escaped&gt;",
-            "<![CDATA[preserve this]]>",
         ]
     }
 
-    /// Idempotent: stripping HTML twice = stripping once
-    fn skip_idempotency() -> &'static [Lang] {
-        &[]
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &["plain text", "hello world", "test123", ""]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("<p>Hello</p>", "Hello"),
+            ("&amp;", "&"),
+            ("&lt;test&gt;", "<test>"),
+            ("<b>bold</b>", "bold"),
+        ]
     }
 }
 

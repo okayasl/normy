@@ -1,7 +1,7 @@
 use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 use crate::{
-    ENG, HIN, JPN, ZHO,
+    DEU, ENG, FRA, HIN, JPN, KOR, SPA, ZHO,
     context::Context,
     lang::{Lang, LangEntry, SegmentRule},
     stage::{CharMapper, Stage, StageError},
@@ -178,11 +178,45 @@ impl Stage for SegmentWords {
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         if let Some(mapper) = self.as_char_mapper(ctx) {
-            let mapped: String = mapper.bind(&text, ctx).collect();
-            return Ok(Cow::Owned(mapped));
+            // Collect into a String and compare with original
+            let mut out = String::with_capacity(text.len());
+            let mut changed = false;
+
+            let mut original_chars = text.chars();
+            for segmented_char in mapper.bind(&text, ctx) {
+                out.push(segmented_char);
+
+                // Check if this char matches the original sequence
+                // If the iterator inserted a space/ZWSP, original_chars won't match
+                if let Some(orig) = original_chars.next() {
+                    if orig != segmented_char {
+                        changed = true;
+                    }
+                } else {
+                    // Iterator produced more chars than original (impossible for SegmentWords)
+                    changed = true;
+                }
+            }
+
+            // Check if there are leftover chars in original (iterator consumed fewer)
+            if original_chars.next().is_some() {
+                changed = true;
+            }
+
+            return if changed {
+                Ok(Cow::Owned(out))
+            } else {
+                Ok(text)
+            };
         }
 
-        Ok(Cow::Owned(segment_allocating(&text, ctx.lang_entry)))
+        // Fallback path - always allocates but track changes
+        let segmented = segment_allocating(&text, ctx.lang_entry);
+        if segmented == text.as_ref() {
+            Ok(text)
+        } else {
+            Ok(Cow::Owned(segmented))
+        }
     }
 
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
@@ -413,25 +447,48 @@ impl FusedIterator for SegmentWordIterator {}
 
 impl StageTestConfig for SegmentWords {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // Not 1:1 (inserts spaces/ZWSP), skip fast/slow equivalence
-    }
-
-    fn skip_idempotency() -> &'static [Lang] {
-        &[] // Idempotent: twice doesn't add extra delimiters
+        &[] // Inserts spaces/ZWSP
     }
 
     fn samples(lang: Lang) -> &'static [&'static str] {
         match lang {
-            ENG => &["Hello world", "123 !@#", "", " "],    // No-op
-            ZHO => &["你好世界", "Hello世界", "AI+区块链"], // Unigram + transitions
-            JPN => &["こんにちは世界", "Rustは最高", "東京2025年"], // Transitions only
-            HIN => &["पत्नी", "विद्वत्", "Helloपत्नी"],         // ZWSP + transitions
+            ENG => &["Hello world", "123 !@#", "", " "],
+            ZHO => &["你好世界", "Hello世界", "AI+区块链"],
+            JPN => &["こんにちは世界", "Rustは最高", "東京2025年"],
+            HIN => &["पत्नी", "विद्वत्", "Helloपत्नी"],
             _ => &["Hello World 123", " déjà-vu ", "TEST", ""],
         }
     }
 
+    fn should_pass_through(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            ENG | FRA | SPA | DEU => &["hello world", "test 123", ""], // Western text
+            ZHO | JPN | KOR | HIN => &[], // These always need segmentation
+            _ => &["hello world", ""],
+        }
+    }
+
+    fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
+        match lang {
+            ZHO => &[
+                ("你好", "你 好"), // Unigram
+                ("世界", "世 界"),
+                ("Hello世界", "Hello 世 界"),
+            ],
+            JPN => &[
+                ("Hello世界", "Hello 世界"), // Script transition
+                ("東京2025年", "東京 2025 年"),
+            ],
+            HIN => &[
+                ("पत्नी", "पत्\u{200B}नी"), // ZWSP after virama
+                ("Helloपत्नी", "Hello पत्\u{200B}नी"),
+            ],
+            _ => &[],
+        }
+    }
+
     fn skip_needs_apply_test() -> bool {
-        true // SegmentWords does not react to case
+        true
     }
 }
 

@@ -170,7 +170,7 @@ impl Stage for StripMarkdown {
 
 impl StageTestConfig for StripMarkdown {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // Language-agnostic
+        &[]
     }
 
     fn samples(_lang: Lang) -> &'static [&'static str] {
@@ -180,15 +180,21 @@ impl StageTestConfig for StripMarkdown {
             "| A | B |\n| - | - |\n| 1 | 2 |",
             "[link](https://example.com) and ![img](x.png)",
             "> Blockquote\n\nWith `code` and $E=mc^2$",
-            // NOTE: "Normal text with - hyphen and # hash in prose" is removed
-            // because contains_markdown_bytes() intentionally has false positives
-            // for performance. The apply() method correctly handles these by
-            // returning the original Cow unchanged.
         ]
     }
 
-    fn skip_idempotency() -> &'static [Lang] {
-        &[]
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &["plain text", "hello world", "test123", ""]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("**bold**", "bold"),
+            ("_italic_", "italic"),
+            ("# Header", "Header"),
+            ("`code`", "code"),
+            ("[link](url)", "link"),
+        ]
     }
 }
 

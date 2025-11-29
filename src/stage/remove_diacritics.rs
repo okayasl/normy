@@ -1,6 +1,7 @@
 use crate::{
+    ARA, FRA, POL, VIE,
     context::Context,
-    lang::LangEntry,
+    lang::{Lang, LangEntry},
     stage::{CharMapper, Stage, StageError},
     testing::stage_contract::StageTestConfig,
 };
@@ -174,22 +175,42 @@ impl<I: Iterator<Item = char>> Iterator for RemoveDiacriticsIter<I> {
 impl<I: Iterator<Item = char>> FusedIterator for RemoveDiacriticsIter<I> {}
 
 impl StageTestConfig for RemoveDiacritics {
-    fn one_to_one_languages() -> &'static [crate::lang::Lang] {
-        &[] // Not 1:1 — can remove chars (Arabic harakat)
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // Not 1:1, removes combining marks
     }
 
-    fn samples(lang: crate::lang::Lang) -> &'static [&'static str] {
+    fn samples(lang: Lang) -> &'static [&'static str] {
         match lang {
-            crate::lang::data::FRA => &["café", "naïve", "résumé", "Crème brûlée"],
-            crate::lang::data::VIE => &["Hà Nội", "Đạt", "đẹp quá"],
-            crate::lang::data::ARA => &["مَرْحَبًا", "كتاب"],
-            crate::lang::data::POL => &["Łódź", "żółć", "gęślą"],
+            FRA => &["café", "naïve", "résumé", "Crème brûlée"],
+            VIE => &["Hà Nội", "Đạt", "đẹp quá"],
+            ARA => &["مَرْحَبًا", "كتاب"],
+            POL => &["Łódź", "żółć", "gęślą"],
             _ => &["hello", "test 123", "café", ""],
         }
     }
 
+    fn should_pass_through(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            FRA | VIE | POL => &["hello", "world", "test123", ""],
+            ARA => &["كتاب", ""], // No vowel marks
+            _ => &["hello", "world", "test123", ""],
+        }
+    }
+
+    fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
+        match lang {
+            FRA => &[("café", "cafe"), ("naïve", "naive"), ("résumé", "resume")],
+            VIE => &[("Hà Nội", "Ha Noi"), ("đẹp", "dep")],
+            POL => &[("Łódź", "Lodz"), ("żółć", "zolc")],
+            ARA => &[
+                ("مَرْحَبًا", "مرحبا"), // Remove harakat
+            ],
+            _ => &[("café", "cafe")],
+        }
+    }
+
     fn skip_needs_apply_test() -> bool {
-        true // RemoveDiacritics does not modify case
+        true
     }
 }
 

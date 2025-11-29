@@ -75,7 +75,7 @@ impl CharMapper for UnifyWidth {
 
 impl StageTestConfig for UnifyWidth {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[JPN, ZHO, KOR] // Critical for East Asian search
+        &[JPN, ZHO, KOR]
     }
 
     fn samples(lang: Lang) -> &'static [&'static str] {
@@ -84,6 +84,23 @@ impl StageTestConfig for UnifyWidth {
             ZHO => &["你好　Ｗｏｒｌｄ", "全角１２３"],
             _ => &["Full-width ABC１２３！", "Normal text"],
         }
+    }
+
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "hello world", // Already half-width
+            "test123",
+            "",
+        ]
+    }
+
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("Ａ", "A"),       // Full-width A → half-width
+            ("１２３", "123"), // Full-width digits
+            ("！", "!"),       // Full-width punctuation
+            ("　", " "),       // Ideographic space
+        ]
     }
 }
 

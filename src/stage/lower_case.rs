@@ -125,8 +125,6 @@ impl<'a> FusedIterator for LowercaseIter<'a> {}
 
 impl StageTestConfig for LowerCase {
     fn one_to_one_languages() -> &'static [Lang] {
-        // LowerCase is *always* 1→1 and context-free
-        // This is the entire point
         &[
             ENG, FRA, SPA, ITA, POR, DAN, NOR, SWE, ISL, CAT, TUR, DEU, NLD, ELL, LIT,
         ]
@@ -140,6 +138,32 @@ impl StageTestConfig for LowerCase {
             ELL => &["ΣΟΦΟΣ", "ΟΔΟΣ"],
             LIT => &["JIS", "JĮ"],
             _ => &["HELLO", "World 123", " café ", "NAÏVE"],
+        }
+    }
+
+    fn should_pass_through(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            TUR => &["istanbul", "ısı", "i"],
+            DEU => &["straße", "fuß"],
+            NLD => &["ijssel"],
+            ELL => &["σοφοσ", "οδοσ"],
+            LIT => &["jis", "jį"],
+            _ => &["hello", "world", "test123", ""],
+        }
+    }
+
+    fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
+        match lang {
+            TUR => &[
+                ("İ", "i̇"), // Note: Unicode lowercase of İ
+                ("I", "ı"),
+                ("İSTANBUL", "i̇stanbul"),
+            ],
+            DEU => &[("ẞ", "ß"), ("GROẞ", "groß")],
+            NLD => &[("Ĳ", "ĳ"), ("IJssel", "ĳssel")],
+            ELL => &[("ΣΟΦΟΣ", "σοφοσ"), ("ΟΔΟΣ", "οδοσ")],
+            LIT => &[("JIS", "jis"), ("JĮ", "jį")],
+            _ => &[("HELLO", "hello"), ("World", "world")],
         }
     }
 }

@@ -1,5 +1,7 @@
 use crate::{
+    DAN, DEU, FRA, NOR, SWE,
     context::Context,
+    lang::Lang,
     stage::{CharMapper, FusedIterator, Stage, StageError},
     testing::stage_contract::StageTestConfig,
 };
@@ -162,17 +164,47 @@ impl<'a> Iterator for TransliterateIter<'a> {
 impl<'a> FusedIterator for TransliterateIter<'a> {}
 
 impl StageTestConfig for Transliterate {
-    fn one_to_one_languages() -> &'static [crate::lang::Lang] {
-        // Only languages with 1→1 transliteration are eligible
-        &[crate::lang::data::DEU, crate::lang::data::POL] // ß→ss, Ł→L (if defined as 1→1)
+    fn one_to_one_languages() -> &'static [Lang] {
+        &[] // Multi-char expansions
     }
 
-    fn samples(lang: crate::lang::Lang) -> &'static [&'static str] {
+    fn samples(lang: Lang) -> &'static [&'static str] {
         match lang {
-            crate::lang::data::FRA => &["œuvre", "ŒUVRE", "Cœur"],
-            crate::lang::data::DAN => &["Århus", "århus", "Øresund"],
-            crate::lang::data::DEU => &["Straße", "Fußgänger", "Weißwurst"],
+            FRA => &["œuvre", "ŒUVRE", "Cœur"],
+            DAN => &["Århus", "århus", "Øresund"],
+            DEU => &["Straße", "Fußgänger", "Weißwurst"],
             _ => &["hello", "İstanbul", "café", ""],
+        }
+    }
+
+    fn should_pass_through(lang: Lang) -> &'static [&'static str] {
+        match lang {
+            DEU | DAN | FRA => &["hello", "world", "test"],
+            _ => &["hello", "world", "test123", ""],
+        }
+    }
+
+    fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
+        match lang {
+            DEU => &[
+                ("Ä", "Ae"),
+                ("ä", "ae"),
+                ("Ö", "Oe"),
+                ("ö", "oe"),
+                ("Ü", "Ue"),
+                ("ü", "ue"),
+                ("ß", "ss"),
+            ],
+            DAN | NOR | SWE => &[
+                ("Å", "Aa"),
+                ("å", "aa"),
+                ("Ø", "Oe"),
+                ("ø", "oe"),
+                ("Æ", "Ae"),
+                ("æ", "ae"),
+            ],
+            FRA => &[("Œ", "Oe"), ("œ", "oe")],
+            _ => &[],
         }
     }
 

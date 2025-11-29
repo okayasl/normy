@@ -1,6 +1,7 @@
 use crate::{lang::Lang, stage::Stage};
 
 /// Trait that stages implement to opt into the universal test suite.
+/// Trait that stages implement to opt into the universal test suite.
 pub trait StageTestConfig: Stage + Sized {
     /// Languages where this stage has a **pure 1:1, context-free** mapping.
     fn one_to_one_languages() -> &'static [Lang];
@@ -10,12 +11,34 @@ pub trait StageTestConfig: Stage + Sized {
         &[]
     }
 
-    /// Optional: custom samples per language
+    /// General test samples (may or may not trigger changes)
     fn samples(_lang: Lang) -> &'static [&'static str] {
         &["Hello World 123", " déjà-vu ", "TEST", ""]
     }
 
-    // Add this default
+    /// Samples that should pass through unchanged (zero-copy test).
+    /// These test the zero-copy guarantee when no transformation is needed.
+    ///
+    /// Default: common ASCII patterns that most stages should pass through unchanged.
+    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+        &[
+            "hello",   // Simple lowercase
+            "world",   // Another simple word
+            "test123", // Alphanumeric
+            "abc def", // Simple phrase with space
+            "",        // Empty string
+        ]
+    }
+
+    /// Input/output pairs that verify correct transformations.
+    /// These test that the stage produces expected output for known inputs.
+    ///
+    /// Return empty slice if stage doesn't have predictable transformations.
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
+
+    /// Skip the needs_apply accuracy test (for stages where it's complex to predict)
     fn skip_needs_apply_test() -> bool {
         false
     }
@@ -60,16 +83,32 @@ use std::borrow::Cow;
 
 #[cfg(test)]
 pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
+    use crate::{all_langs, context::Context};
+    use std::borrow::Cow;
+
     for &lang in all_langs() {
         let ctx = Context::new(lang);
+
+        // TEST 1: General samples - test whatever happens
         for &input in S::samples(lang) {
-            // Simulate what ChainedProcess actually does:
+            let before_ptr = input as *const str;
+            let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+
+            if result == input {
+                let after_ptr = result.as_ref() as *const str;
+                assert_eq!(
+                    before_ptr, after_ptr,
+                    "zero-copy violated: stage claimed to not change text but allocated anyway \
+                     (lang: {lang:?}, input: `{input}`)\n\
+                     This means apply() returned Cow::Owned even though output == input"
+                );
+            }
+
+            // Pipeline simulation
             let mut text = Cow::Borrowed(input);
-            // First pass
             if stage.needs_apply(&text, &ctx).unwrap() {
                 text = stage.apply(text, &ctx).unwrap();
             }
-            // Second pass — this is the real zero-copy test
             let before = text.as_ref() as *const str;
             if stage.needs_apply(&text, &ctx).unwrap() {
                 text = stage.apply(text, &ctx).unwrap();
@@ -77,7 +116,51 @@ pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
             let after = text.as_ref() as *const str;
             assert_eq!(
                 before, after,
-                "zero-copy failed in real pipeline simulation: pointer changed despite no change needed (lang: {lang:?}, input: `{input}`)"
+                "zero-copy failed in pipeline simulation: pointer changed on idempotent pass \
+                 (lang: {lang:?}, input: `{input}`)"
+            );
+        }
+
+        // TEST 2: Pass-through samples - MUST be zero-copy
+        for &pass_through_input in S::should_pass_through(lang) {
+            let before_ptr = pass_through_input as *const str;
+            let result = stage
+                .apply(Cow::Borrowed(pass_through_input), &ctx)
+                .unwrap();
+
+            assert_eq!(
+                result.as_ref(),
+                pass_through_input,
+                "Stage '{}' modified pass-through sample (lang: {lang:?}, input: `{pass_through_input}`)\n\
+                 Expected: no change\n\
+                 Got: {:?}",
+                stage.name(),
+                result.as_ref()
+            );
+
+            let after_ptr = result.as_ref() as *const str;
+            assert_eq!(
+                before_ptr,
+                after_ptr,
+                "zero-copy violated on pass-through sample (lang: {lang:?}, input: `{pass_through_input}`)\n\
+                 Stage: {}\n\
+                 The stage correctly didn't change the text, but allocated anyway!",
+                stage.name()
+            );
+        }
+
+        // TEST 3: Transformation samples - verify correctness
+        for &(input, expected) in S::should_transform(lang) {
+            let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            assert_eq!(
+                result.as_ref(),
+                expected,
+                "Stage '{}' produced incorrect transformation (lang: {lang:?})\n\
+                 Input:    `{input}`\n\
+                 Expected: `{expected}`\n\
+                 Got:      `{}`",
+                stage.name(),
+                result.as_ref()
             );
         }
     }

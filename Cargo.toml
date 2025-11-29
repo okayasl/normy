@@ -16,12 +16,20 @@ unicode-normalization = "0.1.25"
 
 [dev-dependencies]
 proptest = "1.9.0"
+criterion = { version = "0.7.0", features = ["html_reports", "plotters"] }
+# pyo3 = { version = "0.27.1", features = ["extension-module"] }
+# tracing = "0.1.43"
+# tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+unidecode = "0.3.0"
+
+[[bench]]
+name = "normy_bench"
+harness = false      # Criterion's custom harness
 
 [features]
 default = ["simd"]
 simd = ["simdutf8"]
 ascii-fast = []
-
 
 [profile.release]
 lto = "fat"
