@@ -17,70 +17,75 @@
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{Rng, SeedableRng, random, rngs::StdRng};
 use std::borrow::Cow;
 use std::hint::black_box;
 
-// Import your library's public surface used in the original bench.
 use normy::{
-    CaseFold, DEU, ENG, LowerCase, NFC, NORMALIZE_WHITESPACE_FULL, Normy, NormyBuilder,
-    SegmentWords, StripHtml, TRIM_WHITESPACE_ONLY, TUR, UnifyWidth, lang::Lang, process::Process,
+    CaseFold, DEU, ENG, LowerCase, NFC, NFKC, NORMALIZE_WHITESPACE_FULL, Normy, NormyBuilder,
+    RemoveDiacritics, SegmentWords, StripHtml, TRIM_WHITESPACE_ONLY, TUR, Transliterate,
+    UnifyWidth, lang::Lang, process::Process,
 };
 use unicode_normalization::UnicodeNormalization;
 
-// ── Corpus generator (deterministic, less repetitive) ──
+// ── Corpus generator ──
 fn realistic_corpus(seed: u64, size_kb: usize) -> String {
-    // A small pool of varied sentences covering multiple scripts and punctuation.
     const POOL: &[&str] = &[
-        "Hello, world!", // ASCII
+        "Hello, world!",
         "This is a test sentence for bench.",
-        "déjà vu café naïve — accents and dash.", // latin + accents
-        "İstanbul'da büyük ŞOK! İiIı göz göze.",  // Turkish
-        "Größe Straße fußball ßẞ ÄÖÜäöü Maßstab.", // German
-        "　全角スペースと半角 space が混在　こんにちは世界！", // Japanese (with fullwidth)
-        "你好，世界！Ｈｅｌｌｏ　Ｗｏｒｌｄ",     // Chinese + Fullwidth Latin
-        "ﬁligree ﬂag ﬁﬀﬃﬃ — ligature soup",       // ligatures
-        "Emoji 👍🏼 and other symbols ✨🚀",        // emojis
-        "Numbers: 1234567890 and separators —,.;:", // numbers
+        "déjà vu café naïve — accents and dash.",
+        "İstanbul'da büyük ŞOK! İiIı göz göze.",
+        "Größe Straße fußball ßẞ ÄÖÜäöü Maßstab.",
+        "　全角スペースと半角 space が混在　こんにちは世界！",
+        "你好，世界！Ｈｅｌｌｏ　Ｗｏｒｌｄ",
+        "ﬁligree ﬂag ﬁﬀﬃﬃ — ligature soup",
+        "Emoji 👍🏼 and other symbols ✨🚀",
+        "Numbers: 1234567890 and separators —,.;:",
     ];
 
     let mut rng = StdRng::seed_from_u64(seed);
     let mut out = String::with_capacity(size_kb * 1024);
     while out.len() < size_kb * 1024 {
         let i = rng.random_range(0..POOL.len());
-        // Add small random punctuation or repetition to increase realism
         let repeat = rng.random_range(1..4);
         for _ in 0..repeat {
             out.push_str(POOL[i]);
             out.push(' ');
         }
-        // Occasionally add a long word of mixed-case latin to simulate identifiers
         if rng.random_bool(0.05) {
             let word_len = rng.random_range(8..32);
             for _ in 0..word_len {
-                let c = (b'a' + (rng.random::<u8>() % 26)) as char;
+                let c = (b'a' + (random::<u8>() % 26)) as char;
                 out.push(c);
             }
             out.push(' ');
         }
     }
-    out.truncate(size_kb * 1024);
+    let max_len = size_kb * 1024;
+    if out.len() > max_len {
+        while !out.is_char_boundary(max_len) {
+            // move back to previous char boundary
+            out.pop();
+        }
+        out.truncate(max_len);
+    }
     out
 }
 
 fn homoglyph_storm() -> String {
-    // Keep this as a stress input, but not overly repetitive: 200KB
     let sample = "A Α А Ꭺ ᗅ ᴀ ꓮ Ａ 𐊠 𝐀 𝐴 𝑨 𝒜 𝓐 𝔄 𝔸 𝕬 𝖠 𝗔 𝘈 𝘼 𝙰 𝚨 𝛢 𝜜 𝝖 𝞐 café ﬁﬀﬃﬃ";
-    sample.repeat(1_300) // ~200KB-ish depending on sample
+    sample.repeat(1_300)
 }
 
-// ── Pipelines (preserve intent) ──
-fn search_pipeline(lang: Lang) -> Normy<impl Process> {
+// ── Pipelines ──
+fn full_pipeline(lang: Lang) -> Normy<impl Process> {
     NormyBuilder::default()
         .lang(lang)
         .add_stage(NFC)
         .add_stage(LowerCase)
         .add_stage(CaseFold)
+        .add_stage(RemoveDiacritics)
+        .add_stage(Transliterate)
         .add_stage(NORMALIZE_WHITESPACE_FULL)
         .add_stage(SegmentWords)
         .build()
@@ -97,6 +102,14 @@ fn display_pipeline(lang: Lang) -> Normy<impl Process> {
         .build()
 }
 
+fn normy_nfc_only(lang: Lang) -> Normy<impl Process> {
+    NormyBuilder::default().lang(lang).add_stage(NFC).build()
+}
+
+fn normy_nfkc_only(lang: Lang) -> Normy<impl Process> {
+    NormyBuilder::default().lang(lang).add_stage(NFKC).build()
+}
+
 // ── Baselines ──
 fn unicode_nfc(text: &str) -> String {
     text.nfc().collect()
@@ -108,7 +121,7 @@ fn unidecode_baseline(text: &str) -> String {
     unidecode::unidecode(text)
 }
 
-// ── Zero-Copy Tracker (per-case / deterministic) ──
+// ── Zero-Copy Tracker ──
 #[derive(Default)]
 struct ZeroCopyTracker {
     hits: usize,
@@ -134,123 +147,111 @@ impl ZeroCopyTracker {
     }
 }
 
-// ── Bench: Main suite (preserves original tests, but with per-case throughput & per-case tracker) ──
+// ── Benchmarks ──
 fn benches_main(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Normy vs Baselines (clean)");
+    let mut group = c.benchmark_group("Normy Benchmarks");
 
-    // Generate corpora: realistic mixed (1.5MB), storm (~200KB)
-    let mixed = realistic_corpus(0xDEAD_BEEF, 1536); // 1536 KB ~ 1.5MB
+    let mixed = realistic_corpus(0xDEAD_BEEF, 128);
     let storm = homoglyph_storm();
 
-    // Cases: pair each text with the Lang and a label — keep original intent
     let cases = [
         (&mixed as &str, ENG, "EN Mixed"),
-        (&mixed as &str, TUR, "TR Locale (İ/i)"),
-        (&mixed as &str, DEU, "DE ß→ss CaseFold"),
-        (&storm as &str, ENG, "Homoglyph Storm NFKC"),
+        (&mixed as &str, TUR, "TR Locale"),
+        (&mixed as &str, DEU, "DE ß→ss"),
+        (&storm as &str, ENG, "Homoglyph Storm"),
     ];
 
     for &(text, lang, name) in &cases {
-        // Build pipeline and baseline(s)
-        let pipeline = search_pipeline(lang);
-        let unidecode_name = format!("unidecode (same input) / {name}");
-
-        // Set throughput to the actual byte size of the input for accurate MiB/s
+        let pipeline = full_pipeline(lang);
+        let mut tracker = ZeroCopyTracker::default();
         group.throughput(Throughput::Bytes(text.len() as u64));
 
-        // Zero-copy tracker dedicated to this case
-        let mut tracker = ZeroCopyTracker::default();
-
-        // Normy Search bench for this case
-        group.bench_function(format!("Normy Search/{name}"), |b| {
+        group.bench_function(format!("Normy → {name}"), |b| {
             b.iter(|| {
-                let result = pipeline.normalize(black_box(text)).expect("normy failed");
-                tracker.record(text, &result);
-                result
+                let r = pipeline.normalize(black_box(text)).expect("normy failed");
+                tracker.record(text, &r);
+                r
             });
         });
 
-        // Unidecode baseline on the same input to keep fair
-        group.bench_function(unidecode_name, |b| {
+        group.bench_function(format!("Normy NFC → {name}"), |b| {
+            let nfc_pipeline = normy_nfc_only(lang);
+            b.iter(|| {
+                nfc_pipeline
+                    .normalize(black_box(text))
+                    .expect("normy NFC failed")
+            });
+        });
+        group.bench_function(format!("Normy NFKC → {name}"), |b| {
+            let nfkc_pipeline = normy_nfkc_only(lang);
+            b.iter(|| {
+                nfkc_pipeline
+                    .normalize(black_box(text))
+                    .expect("normy NFKC failed")
+            });
+        });
+
+        group.bench_function(format!("Unidecode → {name}"), |b| {
             b.iter(|| unidecode_baseline(black_box(text)));
         });
 
-        // Collect stats *before* printing (borrow checker friendly)
-        let hits = tracker.hits;
-        let total = tracker.total;
-        let rate = tracker.hit_rate_pct();
+        group.bench_function(format!("Unicode NFC → {name}"), |b| {
+            b.iter(|| unicode_nfc(black_box(text)));
+        });
 
-        // Report
-        println!("Case: {name}  →  ZERO-COPY HIT RATE: {rate:.2}% ({hits}/{total})");
+        group.bench_function(format!("Unicode NFKC → {name}"), |b| {
+            b.iter(|| unicode_nfkc(black_box(text)));
+        });
+
+        println!(
+            "Case: {name} → ZERO-COPY HIT RATE: {:.2}% ({}/{})",
+            tracker.hit_rate_pct(),
+            tracker.hits,
+            tracker.total
+        );
     }
 
-    // Display bench (use mixed corpus)
-    group.throughput(Throughput::Bytes(mixed.len() as u64));
     let display = display_pipeline(ENG);
     let mut display_tracker = ZeroCopyTracker::default();
-
+    group.throughput(Throughput::Bytes(mixed.len() as u64));
     group.bench_function("Normy Display (HTML+CJK+Trim)", |b| {
         b.iter(|| {
-            let result = display
+            let r = display
                 .normalize(black_box(&mixed))
                 .expect("display failed");
-            display_tracker.record(&mixed, &result);
-            result
+            display_tracker.record(&mixed, &r);
+            r
         });
     });
-
-    // Report display stats
-    let dhits = display_tracker.hits;
-    let dtotal = display_tracker.total;
-    let drate = display_tracker.hit_rate_pct();
-
-    println!("Display ZERO-COPY HIT RATE: {drate:.2}% ({dhits}/{dtotal})");
-
-    // Unicode-normalization NFC on mixed
-    group.throughput(Throughput::Bytes(mixed.len() as u64));
-    group.bench_function("unicode-normalization NFC", |b| {
-        b.iter(|| unicode_nfc(black_box(&mixed)));
-    });
-
-    // Unicode-normalization NFKC on storm
-    group.throughput(Throughput::Bytes(storm.len() as u64));
-    group.bench_function("unicode-normalization NFKC", |b| {
-        b.iter(|| unicode_nfkc(black_box(&storm)));
-    });
-
-    // Unidecode on mixed (explicit aggregate bench too)
-    group.throughput(Throughput::Bytes(mixed.len() as u64));
-    group.bench_function("unidecode (Rust) - mixed", |b| {
-        b.iter(|| unidecode_baseline(black_box(&mixed)));
-    });
+    println!(
+        "Display ZERO-COPY HIT RATE: {:.2}% ({}/{})",
+        display_tracker.hit_rate_pct(),
+        display_tracker.hits,
+        display_tracker.total
+    );
 
     group.finish();
 }
 
-// Inputs that *should* be eligible for zero-copy if the pipeline is conservative:
-const ASCII_SAFE: &str =
-    "Hello simple ascii no accents 12345 - Keep this lightweight and already-normalized";
-// NFC-clean composed latin characters (no decomposition needed)
-const LATIN_COMPOSED: &str = "Café with precomposed e-acute (U+00E9) and simple ASCII suffix";
-// ── Dedicated zero-copy microbench
+// ── Zero-copy microbench ──
+const ASCII_SAFE: &str = "Hello simple ascii no accents 12345 - Keep this lightweight";
+const LATIN_COMPOSED: &str = "Café with precomposed e-acute (U+00E9) and ASCII";
+
 fn bench_zero_copy_micro(c: &mut Criterion) {
     let mut group = c.benchmark_group("Normy Zero-Copy Microbench");
 
-    // Minimal pipeline to allow zero-copy on clean ASCII
-    let fast_ascii_pipeline = NormyBuilder::default()
+    let fast_pipeline = NormyBuilder::default()
         .lang(ENG)
-        .add_stage(TRIM_WHITESPACE_ONLY) // no transformations
+        .add_stage(TRIM_WHITESPACE_ONLY)
         .build();
 
     let pipeline = NormyBuilder::default()
         .lang(ENG)
         .add_stage(NFC)
         .add_stage(LowerCase)
-        // Avoid CaseFold to allow zero-copy hits
         .add_stage(TRIM_WHITESPACE_ONLY)
         .build();
 
-    // Track separately
     let mut tracker_ascii = ZeroCopyTracker::default();
     group.throughput(Throughput::Bytes(ASCII_SAFE.len() as u64));
     group.bench_function("zero-copy / ascii-safe", |b| {
@@ -263,18 +264,17 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
         });
     });
     println!(
-        "Zero-copy ascii-safe hit rate: {rate:.2}% ({hits}/{total})",
-        rate = tracker_ascii.hit_rate_pct(),
-        hits = tracker_ascii.hits,
-        total = tracker_ascii.total
+        "Zero-copy ascii-safe hit rate: {:.2}% ({}/{})",
+        tracker_ascii.hit_rate_pct(),
+        tracker_ascii.hits,
+        tracker_ascii.total
     );
 
-    // Fast-path Normy Search for clean ASCII (should hit zero-copy)
     let mut tracker_fast = ZeroCopyTracker::default();
     group.throughput(Throughput::Bytes(ASCII_SAFE.len() as u64));
     group.bench_function("Normy Search fast-path / ascii-safe", |b| {
         b.iter(|| {
-            let r = fast_ascii_pipeline
+            let r = fast_pipeline
                 .normalize(black_box(ASCII_SAFE))
                 .expect("normy failed");
             tracker_fast.record(ASCII_SAFE, &r);
@@ -282,10 +282,10 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
         });
     });
     println!(
-        "Fast-path Normy Search zero-copy hit rate: {rate:.2}% ({hits}/{total})",
-        rate = tracker_fast.hit_rate_pct(),
-        hits = tracker_fast.hits,
-        total = tracker_fast.total
+        "Fast-path Normy zero-copy hit rate: {:.2}% ({}/{})",
+        tracker_fast.hit_rate_pct(),
+        tracker_fast.hits,
+        tracker_fast.total
     );
 
     let mut tracker_composed = ZeroCopyTracker::default();
@@ -300,10 +300,10 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
         });
     });
     println!(
-        "Zero-copy composed-latin hit rate: {rate:.2}% ({hits}/{total})",
-        rate = tracker_composed.hit_rate_pct(),
-        hits = tracker_composed.hits,
-        total = tracker_composed.total
+        "Zero-copy composed-latin hit rate: {:.2}% ({}/{})",
+        tracker_composed.hit_rate_pct(),
+        tracker_composed.hits,
+        tracker_composed.total
     );
 
     group.finish();
