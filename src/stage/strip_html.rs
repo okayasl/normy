@@ -445,4 +445,206 @@ mod tests {
         let input = "<div><p><span>nested</span></p></div>";
         assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "nested");
     }
+
+    #[test]
+    fn test_quoted_attributes_comprehensive() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        // Single quotes with >
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<div title='x > y'>content</div>"), &ctx)
+                .unwrap(),
+            "content"
+        );
+
+        // Double quotes with >
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed(r#"<div title="x > y">content</div>"#), &ctx)
+                .unwrap(),
+            "content"
+        );
+
+        // Multiple attributes
+        assert_eq!(
+            stage
+                .apply(
+                    Cow::Borrowed(r#"<div class="test" title="x > y" id="main">content</div>"#),
+                    &ctx
+                )
+                .unwrap(),
+            "content"
+        );
+
+        // Nested quotes
+        assert_eq!(
+            stage
+                .apply(
+                    Cow::Borrowed(r#"<div title='He said "hello"'>content</div>"#),
+                    &ctx
+                )
+                .unwrap(),
+            "content"
+        );
+    }
+
+    #[test]
+    fn test_escaped_quotes() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        let input = r#"<div title="He said \"hello\"">content</div>"#;
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "content");
+    }
+
+    #[test]
+    fn test_script_style_with_attributes() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        let input = r#"<script type="text/javascript" src="file.js">alert(1);</script>text"#;
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "text");
+
+        let input = r#"<style type="text/css">body{}</style>text"#;
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "text");
+    }
+
+    #[test]
+    fn test_self_closing_tags() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<img src='test.jpg' />text"), &ctx)
+                .unwrap(),
+            "text"
+        );
+        assert_eq!(
+            stage.apply(Cow::Borrowed("<br/>text"), &ctx).unwrap(),
+            "text"
+        );
+        assert_eq!(
+            stage.apply(Cow::Borrowed("<hr />text"), &ctx).unwrap(),
+            "text"
+        );
+    }
+
+    #[test]
+    fn test_case_insensitive_special_tags() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        // Mixed case script
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<ScRiPt>alert(1)</ScRiPt>text"), &ctx)
+                .unwrap(),
+            "text"
+        );
+
+        // Mixed case style
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<STYLE>body{}</STYLE>text"), &ctx)
+                .unwrap(),
+            "text"
+        );
+
+        // Mixed case CDATA
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<![CdAtA[content]]>text"), &ctx)
+                .unwrap(),
+            "contenttext"
+        );
+    }
+
+    #[test]
+    fn test_closing_tag_boundary() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        // Should NOT close at </scriptx>
+        let input = "<script>code</scriptx>more";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "");
+
+        // Should accept whitespace before >
+        let input = "<script>code</script >text";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "text");
+    }
+
+    #[test]
+    fn test_empty_and_valueless_attributes() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        let input = r#"<input disabled checked value="">text"#;
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "text");
+
+        let input = r#"<button disabled>text</button>"#;
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "text");
+    }
+
+    #[test]
+    fn test_consecutive_tags() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("</div><div><span></span></div>"), &ctx)
+                .unwrap(),
+            ""
+        );
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<b><i><u>text</u></i></b>"), &ctx)
+                .unwrap(),
+            "text"
+        );
+    }
+
+    #[test]
+    fn test_whitespace_preservation() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        // Multiple spaces
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<p>Hello   world</p>"), &ctx)
+                .unwrap(),
+            "Hello   world"
+        );
+
+        // Newlines between tags
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("<p>Line1</p>\n<p>Line2</p>"), &ctx)
+                .unwrap(),
+            "Line1\nLine2"
+        );
+    }
+
+    #[test]
+    fn test_attributes_without_quotes() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        let input = "<div class=test id=main>content</div>";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "content");
+    }
+
+    #[test]
+    fn test_mixed_entities_and_tags() {
+        let stage = StripHtml;
+        let ctx = Context::new(ENG);
+
+        let input = "&lt;p&gt;<b>bold</b>&lt;/p&gt;";
+        // Entity-encoded tags are decoded, then ALL tags (decoded + original) are stripped
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), "bold");
+    }
 }

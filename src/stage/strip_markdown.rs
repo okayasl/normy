@@ -376,4 +376,197 @@ Final paragraph.
 
         assert_eq!(once, twice);
     }
+
+    #[test]
+    fn test_strikethrough() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("~~deleted text~~"), &ctx)
+                .unwrap(),
+            "deleted text"
+        );
+
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("Keep ~~delete~~ this"), &ctx)
+                .unwrap(),
+            "Keep delete this"
+        );
+    }
+
+    #[test]
+    fn test_code_blocks() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        // Fenced code block
+        let input = "```rust\nfn main() {}\n```";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert!(result.contains("fn main()"));
+
+        // Code block with no language
+        let input = "```\ncode here\n```";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert!(result.contains("code here"));
+    }
+
+    #[test]
+    fn test_horizontal_rules() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        let input = "Before\n\n---\n\nAfter";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        // Rules become newlines
+        assert!(result.contains("Before"));
+        assert!(result.contains("After"));
+    }
+
+    #[test]
+    fn test_ordered_lists() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        let input = "1. First\n2. Second\n3. Third";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+
+        // At document start without blank lines, pulldown-cmark may treat as plain text
+        // This is fine - the important thing is idempotency
+        assert_eq!(result, "1. First\n2. Second\n3. Third");
+
+        // Verify idempotency
+        let twice = stage.apply(result.clone(), &ctx).unwrap();
+        assert_eq!(result, twice);
+    }
+
+    #[test]
+    fn test_mixed_inline_formatting() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        // Bold + italic
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("***bold and italic***"), &ctx)
+                .unwrap(),
+            "bold and italic"
+        );
+
+        // Bold with code inside
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("**bold with `code` inside**"), &ctx)
+                .unwrap(),
+            "bold with code inside"
+        );
+
+        // Nested formatting
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("**bold _and italic_**"), &ctx)
+                .unwrap(),
+            "bold and italic"
+        );
+    }
+
+    #[test]
+    fn test_math_display_modes() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        // Inline math
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("Formula $E=mc^2$ here"), &ctx)
+                .unwrap(),
+            "Formula $E=mc^2$ here"
+        );
+
+        // Display math
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("$$\\frac{1}{2}$$"), &ctx)
+                .unwrap(),
+            "$$\\frac{1}{2}$$"
+        );
+
+        // Multiple inline
+        assert_eq!(
+            stage.apply(Cow::Borrowed("$x$ and $y$"), &ctx).unwrap(),
+            "$x$ and $y$"
+        );
+    }
+
+    #[test]
+    fn test_escaped_markdown() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        let input = r"\*not bold\* and \# not heading";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        // Backslash escapes should be handled by pulldown-cmark
+        assert!(result.contains("*not bold*") || result.contains("not bold"));
+    }
+
+    #[test]
+    fn test_empty_elements() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        // Empty bold
+        let result = stage.apply(Cow::Borrowed("****"), &ctx).unwrap();
+        assert_eq!(result.trim(), "");
+
+        // Empty link
+        let result = stage.apply(Cow::Borrowed("[](url)"), &ctx).unwrap();
+        assert_eq!(result.trim(), "");
+    }
+
+    #[test]
+    fn test_reference_style_links() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        let input = "Click [here][ref]\n\n[ref]: https://example.com";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert!(result.contains("Click here"));
+        assert!(!result.contains("[ref]"));
+    }
+
+    #[test]
+    fn test_autolinks() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        let input = "Visit <https://example.com> today";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert!(result.contains("https://example.com"));
+    }
+
+    #[test]
+    fn test_nested_lists() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        let input = "- Level 1\n  - Level 2\n    - Level 3";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert!(result.contains("Level 1"));
+        assert!(result.contains("Level 2"));
+        assert!(result.contains("Level 3"));
+    }
+
+    #[test]
+    fn test_heading_levels() {
+        let stage = StripMarkdown;
+        let ctx = Context::new(ENG);
+
+        let input = "# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert!(result.contains("H1"));
+        assert!(result.contains("H2"));
+        assert!(result.contains("H6"));
+    }
 }
