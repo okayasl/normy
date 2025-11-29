@@ -252,8 +252,11 @@ mod tests {
     fn test_ascii_no_op() {
         let stage = RemoveDiacritics;
         let c = Context::new(ENG);
-        assert!(!stage.needs_apply("hello world", &c).unwrap());
-        assert_eq!(stage.apply(Cow::Borrowed("hello"), &c).unwrap(), "hello");
+        assert!(!stage.needs_apply("hello world café", &c).unwrap());
+        assert_eq!(
+            stage.apply(Cow::Borrowed("hello café"), &c).unwrap(),
+            "hello café"
+        );
     }
 
     #[test]

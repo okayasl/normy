@@ -1,22 +1,21 @@
-// benches/normy_bench_clean.rs
-// Cleaned-up Criterion benchmark for Normy with:
-//  - Correct per-test throughput (based on actual input size)
-//  - Per-test zero-copy stats (not aggregated across cases)
-//  - Dedicated zero-copy microbench
-//  - More realistic non-repetitive corpus generator (deterministic)
-//  - Rebalanced Unidecode vs Normy fairness (same inputs per-case)
-//  - Flamegraph/run template included below
+// benches/normy_bench_improved.rs
+// Improved Criterion benchmark for Normy with:
+//  - Correct zero-copy expectations and test cases
+//  - Separate benchmarks for "needs transformation" vs "already normalized"
+//  - More realistic corpus with configurable normalization ratio
+//  - Per-stage pipeline benchmarks to identify bottlenecks
+//  - Better tracking and reporting of zero-copy behavior
 //
 // Notes for use:
 // - Add these dev-dependencies to Cargo.toml: criterion, rand, unicode-normalization, unidecode
 // - Ensure `normy` is available as a dependency (path or crate)
-// - Build and run with `cargo bench --bench normy_bench_clean`
+// - Build and run with `cargo bench --bench normy_bench_improved`
 
 #![deny(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rand::{Rng, SeedableRng, random, rngs::StdRng};
 use std::borrow::Cow;
 use std::hint::black_box;
@@ -28,8 +27,11 @@ use normy::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-// ── Corpus generator ──
-fn realistic_corpus(seed: u64, size_kb: usize) -> String {
+// ── Corpus generators ──
+
+/// Generate corpus with mixed content (uppercase, diacritics, special chars)
+/// This corpus is EXPECTED to have low zero-copy rate with full pipeline
+fn realistic_corpus_needs_transform(seed: u64, size_kb: usize) -> String {
     const POOL: &[&str] = &[
         "Hello, world!",
         "This is a test sentence for bench.",
@@ -61,20 +63,80 @@ fn realistic_corpus(seed: u64, size_kb: usize) -> String {
             out.push(' ');
         }
     }
-    let max_len = size_kb * 1024;
-    if out.len() > max_len {
-        while !out.is_char_boundary(max_len) {
-            // move back to previous char boundary
-            out.pop();
+    truncate_to_char_boundary(&mut out, size_kb * 1024);
+    out
+}
+
+/// Generate corpus that's already normalized (lowercase ASCII, no diacritics)
+/// This corpus is EXPECTED to have high zero-copy rate with full pipeline
+fn realistic_corpus_already_normalized(seed: u64, size_kb: usize) -> String {
+    const POOL: &[&str] = &[
+        "hello world this is a test",
+        "the quick brown fox jumps over the lazy dog",
+        "sample text for benchmark testing purposes",
+        "normalized content without special characters",
+        "simple ascii text with numbers 123456",
+        "another example sentence for testing",
+        "common english words and phrases here",
+        "basic text processing benchmark data",
+    ];
+
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut out = String::with_capacity(size_kb * 1024);
+    while out.len() < size_kb * 1024 {
+        let i = rng.random_range(0..POOL.len());
+        let repeat = rng.random_range(1..3);
+        for _ in 0..repeat {
+            out.push_str(POOL[i]);
+            out.push(' ');
         }
-        out.truncate(max_len);
     }
+    truncate_to_char_boundary(&mut out, size_kb * 1024);
+    out
+}
+
+/// Generate mixed corpus with configurable ratio of already-normalized content
+/// This simulates real-world NLP workloads
+fn realistic_corpus_mixed(seed: u64, size_kb: usize, normalized_ratio: f64) -> String {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut out = String::with_capacity(size_kb * 1024);
+
+    let normalized_pool = [
+        "hello world",
+        "simple test",
+        "normalized content",
+        "basic text",
+    ];
+
+    let needs_transform_pool = ["Hello World", "café naïve", "İstanbul ŞOK", "Größe ßẞ"];
+
+    while out.len() < size_kb * 1024 {
+        if rng.random_bool(normalized_ratio) {
+            let i = rng.random_range(0..normalized_pool.len());
+            out.push_str(normalized_pool[i]);
+        } else {
+            let i = rng.random_range(0..needs_transform_pool.len());
+            out.push_str(needs_transform_pool[i]);
+        }
+        out.push(' ');
+    }
+
+    truncate_to_char_boundary(&mut out, size_kb * 1024);
     out
 }
 
 fn homoglyph_storm() -> String {
     let sample = "A Α А Ꭺ ᗅ ᴀ ꓮ Ａ 𐊠 𝐀 𝐴 𝑨 𝒜 𝓐 𝔄 𝔸 𝕬 𝖠 𝗔 𝘈 𝘼 𝙰 𝚨 𝛢 𝜜 𝝖 𝞐 café ﬁﬀﬃﬃ";
     sample.repeat(1_300)
+}
+
+fn truncate_to_char_boundary(s: &mut String, max_len: usize) {
+    if s.len() > max_len {
+        while !s.is_char_boundary(max_len) && !s.is_empty() {
+            s.pop();
+        }
+        s.truncate(max_len);
+    }
 }
 
 // ── Pipelines ──
@@ -110,6 +172,28 @@ fn normy_nfkc_only(lang: Lang) -> Normy<impl Process> {
     NormyBuilder::default().lang(lang).add_stage(NFKC).build()
 }
 
+// Incremental pipeline stages for bottleneck analysis
+fn pipeline_nfc_only(lang: Lang) -> Normy<impl Process> {
+    NormyBuilder::default().lang(lang).add_stage(NFC).build()
+}
+
+fn pipeline_nfc_lowercase(lang: Lang) -> Normy<impl Process> {
+    NormyBuilder::default()
+        .lang(lang)
+        .add_stage(NFC)
+        .add_stage(LowerCase)
+        .build()
+}
+
+fn pipeline_nfc_lowercase_casefold(lang: Lang) -> Normy<impl Process> {
+    NormyBuilder::default()
+        .lang(lang)
+        .add_stage(NFC)
+        .add_stage(LowerCase)
+        .add_stage(CaseFold)
+        .build()
+}
+
 // ── Baselines ──
 fn unicode_nfc(text: &str) -> String {
     text.nfc().collect()
@@ -127,6 +211,7 @@ struct ZeroCopyTracker {
     hits: usize,
     total: usize,
 }
+
 impl ZeroCopyTracker {
     #[allow(clippy::ptr_arg)]
     fn record(&mut self, input: &str, output: &Cow<'_, str>) {
@@ -148,20 +233,23 @@ impl ZeroCopyTracker {
 }
 
 // ── Benchmarks ──
-fn benches_main(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Normy Benchmarks");
 
-    let mixed = realistic_corpus(0xDEAD_BEEF, 128);
+/// Main benchmark suite with correct expectations
+fn benches_main(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Normy Full Pipeline");
+
+    // Test 1: Content that NEEDS transformation (expect 0% zero-copy - that's correct!)
+    let needs_transform = realistic_corpus_needs_transform(0xDEAD_BEEF, 128);
     let storm = homoglyph_storm();
 
-    let cases = [
-        (&mixed as &str, ENG, "EN Mixed"),
-        (&mixed as &str, TUR, "TR Locale"),
-        (&mixed as &str, DEU, "DE ß→ss"),
+    let cases_needs_transform = [
+        (&needs_transform as &str, ENG, "EN Mixed (needs transform)"),
+        (&needs_transform as &str, TUR, "TR Locale (needs transform)"),
+        (&needs_transform as &str, DEU, "DE ß→ss (needs transform)"),
         (&storm as &str, ENG, "Homoglyph Storm"),
     ];
 
-    for &(text, lang, name) in &cases {
+    for &(text, lang, name) in &cases_needs_transform {
         let pipeline = full_pipeline(lang);
         let mut tracker = ZeroCopyTracker::default();
         group.throughput(Throughput::Bytes(text.len() as u64));
@@ -174,57 +262,79 @@ fn benches_main(c: &mut Criterion) {
             });
         });
 
-        group.bench_function(format!("Normy NFC → {name}"), |b| {
-            let nfc_pipeline = normy_nfc_only(lang);
-            b.iter(|| {
-                nfc_pipeline
-                    .normalize(black_box(text))
-                    .expect("normy NFC failed")
-            });
-        });
-        group.bench_function(format!("Normy NFKC → {name}"), |b| {
-            let nfkc_pipeline = normy_nfkc_only(lang);
-            b.iter(|| {
-                nfkc_pipeline
-                    .normalize(black_box(text))
-                    .expect("normy NFKC failed")
-            });
-        });
-
-        group.bench_function(format!("Unidecode → {name}"), |b| {
-            b.iter(|| unidecode_baseline(black_box(text)));
-        });
-
-        group.bench_function(format!("Unicode NFC → {name}"), |b| {
-            b.iter(|| unicode_nfc(black_box(text)));
-        });
-
-        group.bench_function(format!("Unicode NFKC → {name}"), |b| {
-            b.iter(|| unicode_nfkc(black_box(text)));
-        });
-
         println!(
-            "Case: {name} → ZERO-COPY HIT RATE: {:.2}% ({}/{})",
+            "Case: {name} → ZERO-COPY: {:.2}% ({}/{}) [EXPECTED: ~0% - needs transformation]",
             tracker.hit_rate_pct(),
             tracker.hits,
             tracker.total
         );
     }
 
-    let display = display_pipeline(ENG);
-    let mut display_tracker = ZeroCopyTracker::default();
-    group.throughput(Throughput::Bytes(mixed.len() as u64));
-    group.bench_function("Normy Display (HTML+CJK+Trim)", |b| {
+    // Test 2: Already normalized content (expect HIGH zero-copy rate)
+    let already_normalized = realistic_corpus_already_normalized(0xCAFE_BABE, 128);
+    let pipeline_en = full_pipeline(ENG);
+    let mut tracker_normalized = ZeroCopyTracker::default();
+    group.throughput(Throughput::Bytes(already_normalized.len() as u64));
+
+    group.bench_function(
+        "Normy → Already Normalized (expect high zero-copy)",
+        |b| {
+            b.iter(|| {
+                let r = pipeline_en
+                    .normalize(black_box(&already_normalized))
+                    .expect("normy failed");
+                tracker_normalized.record(&already_normalized, &r);
+                r
+            });
+        },
+    );
+
+    println!(
+        "Already Normalized → ZERO-COPY: {:.2}% ({}/{}) [EXPECTED: ~100%]",
+        tracker_normalized.hit_rate_pct(),
+        tracker_normalized.hits,
+        tracker_normalized.total
+    );
+
+    // Test 3: Mixed corpus (70% normalized, 30% needs transform)
+    let mixed_70 = realistic_corpus_mixed(0xBEEF_CAFE, 128, 0.7);
+    let mut tracker_mixed = ZeroCopyTracker::default();
+    group.throughput(Throughput::Bytes(mixed_70.len() as u64));
+
+    group.bench_function("Normy → Mixed 70% Normalized", |b| {
         b.iter(|| {
-            let r = display
-                .normalize(black_box(&mixed))
-                .expect("display failed");
-            display_tracker.record(&mixed, &r);
+            let r = pipeline_en
+                .normalize(black_box(&mixed_70))
+                .expect("normy failed");
+            tracker_mixed.record(&mixed_70, &r);
             r
         });
     });
+
     println!(
-        "Display ZERO-COPY HIT RATE: {:.2}% ({}/{})",
+        "Mixed 70% → ZERO-COPY: {:.2}% ({}/{}) [EXPECTED: ~70%]",
+        tracker_mixed.hit_rate_pct(),
+        tracker_mixed.hits,
+        tracker_mixed.total
+    );
+
+    // Test 4: Display pipeline (HTML + CJK + Trim)
+    let display = display_pipeline(ENG);
+    let mut display_tracker = ZeroCopyTracker::default();
+    group.throughput(Throughput::Bytes(needs_transform.len() as u64));
+
+    group.bench_function("Normy Display (HTML+CJK+Trim)", |b| {
+        b.iter(|| {
+            let r = display
+                .normalize(black_box(&needs_transform))
+                .expect("display failed");
+            display_tracker.record(&needs_transform, &r);
+            r
+        });
+    });
+
+    println!(
+        "Display Pipeline → ZERO-COPY: {:.2}% ({}/{}) [Content-dependent]",
         display_tracker.hit_rate_pct(),
         display_tracker.hits,
         display_tracker.total
@@ -233,17 +343,95 @@ fn benches_main(c: &mut Criterion) {
     group.finish();
 }
 
-// ── Zero-copy microbench ──
-const ASCII_SAFE: &str = "Hello simple ascii no accents 12345 - Keep this lightweight";
-const LATIN_COMPOSED: &str = "Café with precomposed e-acute (U+00E9) and ASCII";
+/// Benchmark individual normalization forms
+fn benches_normalization_forms(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Normalization Forms");
 
+    let needs_transform = realistic_corpus_needs_transform(0xDEAD_BEEF, 128);
+    let already_normalized = realistic_corpus_already_normalized(0xCAFE_BABE, 128);
+
+    for (corpus, corpus_name) in [
+        (&needs_transform, "Needs Transform"),
+        (&already_normalized, "Already Normalized"),
+    ] {
+        group.throughput(Throughput::Bytes(corpus.len() as u64));
+
+        // Normy implementations
+        group.bench_function(BenchmarkId::new("Normy NFC", corpus_name), |b| {
+            let nfc_pipeline = normy_nfc_only(ENG);
+            b.iter(|| {
+                nfc_pipeline
+                    .normalize(black_box(corpus))
+                    .expect("normy NFC failed")
+            });
+        });
+
+        group.bench_function(BenchmarkId::new("Normy NFKC", corpus_name), |b| {
+            let nfkc_pipeline = normy_nfkc_only(ENG);
+            b.iter(|| {
+                nfkc_pipeline
+                    .normalize(black_box(corpus))
+                    .expect("normy NFKC failed")
+            });
+        });
+
+        // Baseline comparisons
+        group.bench_function(BenchmarkId::new("Unicode NFC", corpus_name), |b| {
+            b.iter(|| unicode_nfc(black_box(corpus)));
+        });
+
+        group.bench_function(BenchmarkId::new("Unicode NFKC", corpus_name), |b| {
+            b.iter(|| unicode_nfkc(black_box(corpus)));
+        });
+
+        group.bench_function(BenchmarkId::new("Unidecode", corpus_name), |b| {
+            b.iter(|| unidecode_baseline(black_box(corpus)));
+        });
+    }
+
+    group.finish();
+}
+
+/// Incremental pipeline benchmark to identify bottlenecks
+fn benches_incremental_pipeline(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Pipeline Stages (Incremental)");
+
+    let corpus = realistic_corpus_needs_transform(0xDEAD_BEEF, 128);
+    group.throughput(Throughput::Bytes(corpus.len() as u64));
+
+    let p1 = pipeline_nfc_only(ENG);
+    group.bench_function("1 stage: NFC", |b| {
+        b.iter(|| p1.normalize(black_box(&corpus)).expect("failed"));
+    });
+
+    let p2 = pipeline_nfc_lowercase(ENG);
+    group.bench_function("2 stages: NFC + LowerCase", |b| {
+        b.iter(|| p2.normalize(black_box(&corpus)).expect("failed"));
+    });
+
+    let p3 = pipeline_nfc_lowercase_casefold(ENG);
+    group.bench_function("3 stages: NFC + LowerCase + CaseFold", |b| {
+        b.iter(|| p3.normalize(black_box(&corpus)).expect("failed"));
+    });
+
+    let p_full = full_pipeline(ENG);
+    group.bench_function("Full pipeline (7 stages)", |b| {
+        b.iter(|| p_full.normalize(black_box(&corpus)).expect("failed"));
+    });
+
+    group.finish();
+}
+
+const ASCII_WITH_UPPERCASE: &str = "Hello simple ascii no accents 12345 - Keep this lightweight";
+const ASCII_LOWERCASE: &str = "hello simple ascii no accents 12345 keep this lightweight";
+const LATIN_COMPOSED_UPPER: &str = "Café with precomposed e-acute (U+00E9) and ASCII";
+const LATIN_COMPOSED_LOWER: &str = "café with precomposed e-acute already normalized";
+
+/// Zero-copy microbenchmark with correct expectations
 fn bench_zero_copy_micro(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Normy Zero-Copy Microbench");
+    let mut group = c.benchmark_group("Zero-Copy Microbench");
 
-    let fast_pipeline = NormyBuilder::default()
-        .lang(ENG)
-        .add_stage(TRIM_WHITESPACE_ONLY)
-        .build();
+    // Test case 1: Pure ASCII with uppercase (LowerCase MUST allocate)
 
     let pipeline = NormyBuilder::default()
         .lang(ENG)
@@ -252,65 +440,117 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
         .add_stage(TRIM_WHITESPACE_ONLY)
         .build();
 
-    let mut tracker_ascii = ZeroCopyTracker::default();
-    group.throughput(Throughput::Bytes(ASCII_SAFE.len() as u64));
-    group.bench_function("zero-copy / ascii-safe", |b| {
+    let mut tracker_uppercase = ZeroCopyTracker::default();
+    group.throughput(Throughput::Bytes(ASCII_WITH_UPPERCASE.len() as u64));
+    group.bench_function("ascii with uppercase (expect 0% zero-copy)", |b| {
         b.iter(|| {
             let r = pipeline
-                .normalize(black_box(ASCII_SAFE))
+                .normalize(black_box(ASCII_WITH_UPPERCASE))
                 .expect("normy failed");
-            tracker_ascii.record(ASCII_SAFE, &r);
+            tracker_uppercase.record(ASCII_WITH_UPPERCASE, &r);
             r
         });
     });
     println!(
-        "Zero-copy ascii-safe hit rate: {:.2}% ({}/{})",
-        tracker_ascii.hit_rate_pct(),
-        tracker_ascii.hits,
-        tracker_ascii.total
+        "ASCII with uppercase → zero-copy: {:.2}% [EXPECTED: 0% - has uppercase]",
+        tracker_uppercase.hit_rate_pct()
     );
+
+    // Test case 2: Pure ASCII lowercase (should be 100% zero-copy!)
+
+    let mut tracker_lowercase = ZeroCopyTracker::default();
+    group.throughput(Throughput::Bytes(ASCII_LOWERCASE.len() as u64));
+    group.bench_function("ascii lowercase (expect 100% zero-copy)", |b| {
+        b.iter(|| {
+            let r = pipeline
+                .normalize(black_box(ASCII_LOWERCASE))
+                .expect("normy failed");
+            tracker_lowercase.record(ASCII_LOWERCASE, &r);
+            r
+        });
+    });
+    println!(
+        "ASCII lowercase → zero-copy: {:.2}% [EXPECTED: 100%]",
+        tracker_lowercase.hit_rate_pct()
+    );
+
+    // Test case 3: Fast-path (no transformations needed)
+    let fast_pipeline = NormyBuilder::default()
+        .lang(ENG)
+        .add_stage(TRIM_WHITESPACE_ONLY)
+        .build();
 
     let mut tracker_fast = ZeroCopyTracker::default();
-    group.throughput(Throughput::Bytes(ASCII_SAFE.len() as u64));
-    group.bench_function("Normy Search fast-path / ascii-safe", |b| {
+    group.throughput(Throughput::Bytes(ASCII_LOWERCASE.len() as u64));
+    group.bench_function("fast-path trim only (expect 100% zero-copy)", |b| {
         b.iter(|| {
             let r = fast_pipeline
-                .normalize(black_box(ASCII_SAFE))
+                .normalize(black_box(ASCII_LOWERCASE))
                 .expect("normy failed");
-            tracker_fast.record(ASCII_SAFE, &r);
+            tracker_fast.record(ASCII_LOWERCASE, &r);
             r
         });
     });
     println!(
-        "Fast-path Normy zero-copy hit rate: {:.2}% ({}/{})",
-        tracker_fast.hit_rate_pct(),
-        tracker_fast.hits,
-        tracker_fast.total
+        "Fast-path (trim only) → zero-copy: {:.2}% [EXPECTED: 100%]",
+        tracker_fast.hit_rate_pct()
     );
 
+    // Test case 4: Precomposed unicode with uppercase (LowerCase must allocate)
+
     let mut tracker_composed = ZeroCopyTracker::default();
-    group.throughput(Throughput::Bytes(LATIN_COMPOSED.len() as u64));
-    group.bench_function("zero-copy / composed-latin", |b| {
+    group.throughput(Throughput::Bytes(LATIN_COMPOSED_UPPER.len() as u64));
+    group.bench_function("composed unicode with uppercase (expect 0%)", |b| {
         b.iter(|| {
             let r = pipeline
-                .normalize(black_box(LATIN_COMPOSED))
+                .normalize(black_box(LATIN_COMPOSED_UPPER))
                 .expect("normy failed");
-            tracker_composed.record(LATIN_COMPOSED, &r);
+            tracker_composed.record(LATIN_COMPOSED_UPPER, &r);
             r
         });
     });
     println!(
-        "Zero-copy composed-latin hit rate: {:.2}% ({}/{})",
-        tracker_composed.hit_rate_pct(),
-        tracker_composed.hits,
-        tracker_composed.total
+        "Composed unicode with uppercase → zero-copy: {:.2}% [EXPECTED: 0% - has uppercase]",
+        tracker_composed.hit_rate_pct()
+    );
+
+    // Test case 5: Precomposed unicode lowercase (NFC already, no diacritics to remove)
+
+    // Use pipeline that removes diacritics - this WILL allocate
+    let pipeline_diacritics = NormyBuilder::default()
+        .lang(ENG)
+        .add_stage(NFC)
+        .add_stage(LowerCase)
+        .add_stage(RemoveDiacritics)
+        .build();
+
+    let mut tracker_diacritics = ZeroCopyTracker::default();
+    group.throughput(Throughput::Bytes(LATIN_COMPOSED_LOWER.len() as u64));
+    group.bench_function("composed lowercase + remove diacritics (expect 0%)", |b| {
+        b.iter(|| {
+            let r = pipeline_diacritics
+                .normalize(black_box(LATIN_COMPOSED_LOWER))
+                .expect("normy failed");
+            tracker_diacritics.record(LATIN_COMPOSED_LOWER, &r);
+            r
+        });
+    });
+    println!(
+        "Composed lowercase (removing diacritics) → zero-copy: {:.2}% [EXPECTED: 0% - has diacritics]",
+        tracker_diacritics.hit_rate_pct()
     );
 
     group.finish();
 }
 
 // ── Criterion harness
-criterion_group!(benches, benches_main, bench_zero_copy_micro);
+criterion_group!(
+    benches,
+    benches_main,
+    benches_normalization_forms,
+    benches_incremental_pipeline,
+    bench_zero_copy_micro
+);
 criterion_main!(benches);
 
 /*
@@ -321,10 +561,10 @@ Recommended approaches depending on your environment:
 1) cargo-flamegraph (easy, linux):
    - Install: `cargo install flamegraph` (requires perf)
    - Run: `cargo flamegraph --bin <your-binary>` or for benches:
-     `cargo +nightly bench --bench normy_bench_clean` then use the produced binary under target to perf-record.
+     `cargo +nightly bench --bench normy_bench_improved` then use the produced binary under target to perf-record.
 
 2) perf + FlameGraph script (Linux):
-   - Build release bench binary: `cargo bench --bench normy_bench_clean -- --nocapture --profile release`
+   - Build release bench binary: `cargo bench --bench normy_bench_improved -- --nocapture --profile release`
    - Locate the benchmark binary under `target/release/deps/` (it is produced by criterion)
    - Record: `sudo perf record -F 99 -g -- target/release/deps/<bench-binary>`
    - Generate: `sudo perf script | /path/to/FlameGraph/stackcollapse-perf.pl | /path/to/FlameGraph/flamegraph.pl > flamegraph.svg`
@@ -335,5 +575,4 @@ Recommended approaches depending on your environment:
 Notes:
  - Criterion runs the benchmarks many times. When profiling you may want to run the bench a few times and target the specific worst-case function with a microbench.
  - Another approach is to add `#[inline(never)]` to candidate functions temporarily and microbenchmark them directly so call stacks are clearer.
- - If you want, I can generate a short script that finds the correct bench binary by pattern and runs perf/FlameGraph for you.
 */
