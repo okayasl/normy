@@ -185,7 +185,7 @@ mod contract_tests {
 // One Language Per Test — The Normy Way
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
-mod language_specific_tests {
+mod tests {
     use super::*;
     use crate::{
         CaseFold,
