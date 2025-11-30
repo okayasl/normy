@@ -40,7 +40,7 @@ impl Stage for CaseFold {
             while let Some(c) = chars.next() {
                 if ctx
                     .lang_entry
-                    .peek_ahead_fold(c, chars.peek().copied())
+                    .get_peek_fold(c, chars.peek().copied())
                     .is_some()
                 {
                     return Ok(true);
@@ -57,12 +57,12 @@ impl Stage for CaseFold {
         }
 
         // Pre-allocate capacity based on expected expansions
-        let (_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
+        let (_count, extra_bytes) = ctx.lang_entry.hint_capacity_fold(&text);
         let mut out = String::with_capacity(text.len() + extra_bytes);
         let mut changed = false;
 
         for c in text.chars() {
-            if let Some(folded) = ctx.lang_entry.fold_char(c) {
+            if let Some(folded) = ctx.lang_entry.apply_case_fold(c) {
                 out.push(folded);
                 // Only mark as changed if the character actually changed
                 if folded != c {
@@ -112,7 +112,7 @@ fn apply_with_peek_ahead<'a>(
     ctx: &Context,
 ) -> Result<Cow<'a, str>, StageError> {
     let fold_map = ctx.lang_entry.fold_map();
-    let (foldable_count, extra_bytes) = ctx.lang_entry.count_foldable_bytes(&text);
+    let (foldable_count, extra_bytes) = ctx.lang_entry.hint_capacity_fold(&text);
 
     let mut out = String::with_capacity(
         text.len()
@@ -129,7 +129,7 @@ fn apply_with_peek_ahead<'a>(
 
     while let Some(c) = chars.next() {
         // Check for peek-ahead rules (e.g., Dutch IJ → ij)
-        if let Some(target) = ctx.lang_entry.peek_ahead_fold(c, chars.peek().copied()) {
+        if let Some(target) = ctx.lang_entry.get_peek_fold(c, chars.peek().copied()) {
             let next_char = chars.next().unwrap(); // We know it exists from peek
 
             // Build what the original two-char sequence was
@@ -180,7 +180,7 @@ fn apply_with_peek_ahead<'a>(
 impl CharMapper for CaseFold {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        ctx.lang_entry.fold_char(c)
+        ctx.lang_entry.apply_case_fold(c)
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
@@ -202,7 +202,7 @@ impl<'a> Iterator for CaseFoldIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        self.lang.fold_char(c)
+        self.lang.apply_case_fold(c)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

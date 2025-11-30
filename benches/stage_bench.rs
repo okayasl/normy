@@ -2,8 +2,8 @@ use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_ma
 use normy::{
     ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LowerCase,
     NFC, NFD, NFKC, NFKD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy, POL, RUS,
-    RemoveDiacritics, SPA, StripControlChars, StripHtml, THA, TRIM_WHITESPACE_ONLY, TUR,
-    Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
+    RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA, TRIM_WHITESPACE_ONLY,
+    TUR, Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
 };
 
 // 16 languages — the exact set that will appear in the Normy white paper
@@ -27,17 +27,17 @@ const SAMPLES: &[(&str, Lang)] = &[
     //  9. Korean   – jamo + full-width Latin
     ("한글 ＫＯＲＥＡ", KOR),
     // 10. Greek    – final sigma + dialytika + tonos
-    ("ἈΡΧΙΜΉΔΗΣ ἙΛΛΆΣ", ELL),
-    // 11. Russian  – Ё/ё + combining accents
-    ("ЁЛКИ-ПАЛКИ А́ННА", RUS),
-    // 12. Thai     – no spaces, tone marks, saraswati
-    ("ภาษาไทย ๓๔๕", THA),
-    // 13. Hebrew   – niqqud + final forms
-    ("ספר עִבְרִית", HEB),
-    // 14. Spanish  – ñ + inverted punctuation
-    ("¡España mañana!", SPA),
-    // 15. Polish   – Polish ogonek + kreska
-    ("Łódź Żółć", POL),
+    // ("ἈΡΧΙΜΉΔΗΣ ἙΛΛΆΣ", ELL),
+    // // 11. Russian  – Ё/ё + combining accents
+    // ("ЁЛКИ-ПАЛКИ А́ННА", RUS),
+    // // 12. Thai     – no spaces, tone marks, saraswati
+    // ("ภาษาไทย ๓๔๕", THA),
+    // // 13. Hebrew   – niqqud + final forms
+    // ("ספר עִבְרִית", HEB),
+    // // 14. Spanish  – ñ + inverted punctuation
+    // ("¡España mañana!", SPA),
+    // // 15. Polish   – Polish ogonek + kreska
+    // ("Łódź Żółć", POL),
     // 16. English  – HTML + emoji + punctuation + control chars
     ("<b>Hello naïve World!</b>\t\r\n  résumé 🇫🇷", ENG),
 ];
@@ -97,19 +97,20 @@ where
 fn stage_matrix(c: &mut Criterion) {
     stage_benches_auto(c, "LowerCase", || LowerCase);
     stage_benches_auto(c, "CaseFold", || CaseFold);
-    stage_benches_auto(c, "NFC", || NFC);
-    stage_benches_auto(c, "NFD", || NFD);
-    stage_benches_auto(c, "NFKC", || NFKC);
-    stage_benches_auto(c, "NFKD", || NFKD);
     stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
-    stage_benches_auto(c, "UnifyWidth", || UnifyWidth);
-    stage_benches_auto(c, "NormalizePunctuation", || NormalizePunctuation);
-    stage_benches_auto(c, "StripControlChars", || StripControlChars);
-    stage_benches_auto(c, "StripHtml", || StripHtml);
     stage_benches_auto(c, "Transliterate", || Transliterate);
-    stage_benches_auto(c, "NormalizeWhitespaceFull", || NORMALIZE_WHITESPACE_FULL);
-    stage_benches_auto(c, "CollapseWhitespaceOnly", || COLLAPSE_WHITESPACE_ONLY);
-    stage_benches_auto(c, "TrimWhitespaceOnly", || TRIM_WHITESPACE_ONLY);
+    stage_benches_auto(c, "SegmentWords", || SegmentWords);
+    // stage_benches_auto(c, "UnifyWidth", || UnifyWidth);
+    // stage_benches_auto(c, "NFC", || NFC);
+    // stage_benches_auto(c, "NFD", || NFD);
+    // stage_benches_auto(c, "NFKC", || NFKC);
+    // stage_benches_auto(c, "NFKD", || NFKD);
+    // stage_benches_auto(c, "NormalizePunctuation", || NormalizePunctuation);
+    // stage_benches_auto(c, "StripControlChars", || StripControlChars);
+    // stage_benches_auto(c, "StripHtml", || StripHtml);
+    // stage_benches_auto(c, "NormalizeWhitespaceFull", || NORMALIZE_WHITESPACE_FULL);
+    // stage_benches_auto(c, "CollapseWhitespaceOnly", || COLLAPSE_WHITESPACE_ONLY);
+    // stage_benches_auto(c, "TrimWhitespaceOnly", || TRIM_WHITESPACE_ONLY);
 }
 
 criterion_group!(

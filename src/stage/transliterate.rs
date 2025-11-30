@@ -53,25 +53,31 @@ impl Stage for Transliterate {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        let map = ctx.lang_entry.transliterate_map();
-        if map.is_empty() {
+        // Use the precomputed flag for instant rejection
+        if !ctx.lang_entry.has_transliterate_map() {
             return Ok(false);
         }
-        Ok(text.chars().any(|c| map.iter().any(|m| m.from == c)))
+
+        // Check if any character in text needs transliteration
+        Ok(text.chars().any(|c| ctx.lang_entry.is_transliterable(c)))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let map = ctx.lang_entry.transliterate_map();
-        if map.is_empty() {
-            return Ok(text); // Zero-cost early exit
+        // Fast path: language has no transliteration rules
+        if !ctx.lang_entry.has_transliterate_map() {
+            return Ok(text);
         }
 
-        let (trans_count, extra_bytes) = ctx.lang_entry.count_transliterate_bytes(&text);
+        // Use capacity hint to detect if transformation is needed
+        let (trans_count, extra_bytes) = ctx.lang_entry.hint_capacity_transliterate(&text);
         if trans_count == 0 {
             return Ok(text); // Zero-copy: no chars need transliteration
         }
 
+        // Allocate with precise capacity
         let mut out = String::with_capacity(text.len() + extra_bytes);
+
+        let map = ctx.lang_entry.transliterate_map();
         for c in text.chars() {
             if let Some(m) = map.iter().find(|m| m.from == c) {
                 out.push_str(m.to);
@@ -79,14 +85,14 @@ impl Stage for Transliterate {
                 out.push(c);
             }
         }
+
         Ok(Cow::Owned(out))
     }
 
     #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        if ctx.lang_entry.transliterate_is_one_to_one()
-            && !ctx.lang_entry.transliterate_map().is_empty()
-        {
+        // Use precomputed flags for instant decision
+        if ctx.lang_entry.has_one_to_one_transliterate() && ctx.lang_entry.has_transliterate_map() {
             Some(self)
         } else {
             None
@@ -95,9 +101,8 @@ impl Stage for Transliterate {
 
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        if ctx.lang_entry.transliterate_is_one_to_one()
-            && !ctx.lang_entry.transliterate_map().is_empty()
-        {
+        // Use precomputed flags for instant decision
+        if ctx.lang_entry.has_one_to_one_transliterate() && ctx.lang_entry.has_transliterate_map() {
             Some(self)
         } else {
             None
@@ -113,8 +118,10 @@ impl CharMapper for Transliterate {
             .find(|m| m.from == c)
             .map(|m| {
                 debug_assert!(
-                    m.to.len() == 1,
-                    "transliterate_is_one_to_one() mapping failed"
+                    m.to.chars().count() == 1,
+                    "has_one_to_one_transliterate() guarantee violated: '{}' maps to '{}'",
+                    m.from,
+                    m.to
                 );
                 m.to.chars().next().unwrap()
             })
@@ -122,16 +129,16 @@ impl CharMapper for Transliterate {
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        let map = ctx.lang_entry.transliterate_map();
-
-        if map.is_empty() || !ctx.lang_entry.transliterate_is_one_to_one() {
+        // Use precomputed flags for instant decision
+        if !ctx.lang_entry.has_transliterate_map() || !ctx.lang_entry.has_one_to_one_transliterate()
+        {
             // Zero-cost path: no transliteration possible or needed
             return Box::new(text.chars());
         }
 
         Box::new(TransliterateIter {
             chars: text.chars(),
-            map,
+            map: ctx.lang_entry.transliterate_map(),
         })
     }
 }
@@ -151,7 +158,13 @@ impl<'a> Iterator for TransliterateIter<'a> {
             self.map
                 .iter()
                 .find(|m| m.from == c)
-                .map(|m| m.to.chars().next().unwrap())
+                .map(|m| {
+                    debug_assert!(
+                        m.to.chars().count() == 1,
+                        "TransliterateIter expects one-to-one mappings"
+                    );
+                    m.to.chars().next().unwrap()
+                })
                 .unwrap_or(c),
         )
     }
@@ -165,21 +178,22 @@ impl<'a> FusedIterator for TransliterateIter<'a> {}
 
 impl StageTestConfig for Transliterate {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // Multi-char expansions
+        &[] // Most languages have multi-char expansions (Ä→ae, Œ→oe, etc.)
     }
 
     fn samples(lang: Lang) -> &'static [&'static str] {
         match lang {
-            FRA => &["œuvre", "ŒUVRE", "Cœur"],
-            DAN => &["Århus", "århus", "Øresund"],
-            DEU => &["Straße", "Fußgänger", "Weißwurst"],
+            FRA => &["œuvre", "ŒUVRE", "Cœur", "Æon"],
+            DAN => &["Århus", "århus", "Øresund", "København"],
+            DEU => &["Straße", "Fußgänger", "Weißwurst", "Äpfel"],
+            CAT => &["Façade", "plaça", "Barça"],
             _ => &["hello", "İstanbul", "café", ""],
         }
     }
 
     fn should_pass_through(lang: Lang) -> &'static [&'static str] {
         match lang {
-            DEU | DAN | FRA => &["hello", "world", "test"],
+            DEU | DAN | FRA | CAT | NOR | SWE | ISL => &["hello", "world", "test", "123"],
             _ => &["hello", "world", "test123", ""],
         }
     }
@@ -240,7 +254,7 @@ impl StageTestConfig for Transliterate {
     }
 
     fn skip_needs_apply_test() -> bool {
-        true
+        false // We can now test needs_apply accurately!
     }
 }
 
@@ -251,6 +265,7 @@ impl StageTestConfig for Transliterate {
 mod contract_tests {
     use super::*;
     use crate::assert_stage_contract;
+
     #[test]
     fn universal_contract_compliance() {
         assert_stage_contract!(Transliterate);
@@ -260,7 +275,7 @@ mod contract_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DAN, ENG, FRA, TUR};
+    use crate::{CAT, DAN, ENG, FRA, TUR};
     use std::borrow::Cow;
 
     #[test]
@@ -270,45 +285,70 @@ mod tests {
         let input = "Hello World";
         assert!(!stage.needs_apply(input, &ctx).unwrap());
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        assert_eq!(result, "Hello World"); // Zero-copy
+        assert_eq!(result, "Hello World");
+        assert!(matches!(result, Cow::Borrowed(_))); // Zero-copy
     }
 
     #[test]
-    fn test_french_oe_ligature() {
+    fn test_french_ligatures() {
         let stage = Transliterate;
         let ctx = Context::new(FRA);
-        // Assume pre-lowercased input (post-CaseFold)
-        let result_upper = stage.apply(Cow::Borrowed("ŒUVRE"), &ctx).unwrap(); // 'Œ' → "oe" (lowercase target)
-        assert_eq!(result_upper, "oeUVRE"); // Partial: Œ replaced, rest preserved (but in real pipeline, all lower)
-        let result_lower = stage.apply(Cow::Borrowed("œuvre"), &ctx).unwrap();
-        assert_eq!(result_lower, "oeuvre");
+
+        let result = stage.apply(Cow::Borrowed("ŒUVRE"), &ctx).unwrap();
+        assert_eq!(result, "oeUVRE");
+
+        let result = stage.apply(Cow::Borrowed("œuvre"), &ctx).unwrap();
+        assert_eq!(result, "oeuvre");
+
+        let result = stage.apply(Cow::Borrowed("Æon"), &ctx).unwrap();
+        assert_eq!(result, "aeon");
     }
 
     #[test]
-    fn test_danish_aa() {
+    fn test_danish_special_chars() {
         let stage = Transliterate;
         let ctx = Context::new(DAN);
-        let result_upper = stage.apply(Cow::Borrowed("Århus"), &ctx).unwrap();
-        assert_eq!(result_upper, "aarhus"); // 'Å' → "aa" (lowercase target)
-        let result_lower = stage.apply(Cow::Borrowed("århus"), &ctx).unwrap();
-        assert_eq!(result_lower, "aarhus");
+
+        let result = stage.apply(Cow::Borrowed("Århus"), &ctx).unwrap();
+        assert_eq!(result, "aarhus");
+
+        let result = stage.apply(Cow::Borrowed("København"), &ctx).unwrap();
+        assert_eq!(result, "Koebenhavn");
+    }
+
+    #[test]
+    fn test_catalan_cedilla() {
+        let stage = Transliterate;
+        let ctx = Context::new(CAT);
+
+        assert!(stage.needs_apply("Façade", &ctx).unwrap());
+        let result = stage.apply(Cow::Borrowed("Façade"), &ctx).unwrap();
+        assert_eq!(result, "Facade");
+
+        let result = stage.apply(Cow::Borrowed("plaça"), &ctx).unwrap();
+        assert_eq!(result, "placa");
     }
 
     #[test]
     fn test_turkish_unaffected() {
         let stage = Transliterate;
         let ctx = Context::new(TUR);
+
+        assert!(!stage.needs_apply("İstanbul", &ctx).unwrap());
         let result = stage.apply(Cow::Borrowed("İstanbul"), &ctx).unwrap();
-        assert_eq!(result, "İstanbul"); // Turkish has no transliterate rules
+        assert_eq!(result, "İstanbul");
+        assert!(matches!(result, Cow::Borrowed(_))); // Zero-copy
     }
 
     #[test]
     fn test_mixed_text() {
         let stage = Transliterate;
         let ctx = Context::new(FRA);
-        let input = "ŒUVRE Århus Łódź Straße"; // Mixed case
+
+        let input = "ŒUVRE Århus Łódź Straße";
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        assert_eq!(result, "oeUVRE Århus Łódź Straße"); // Only French Œ → "oe"; others preserved
+        // Only French rules apply: Œ→oe, Æ→ae, Ç→c
+        assert_eq!(result, "oeUVRE Århus Łódź Straße");
     }
 
     #[test]
@@ -318,17 +358,78 @@ mod tests {
         let ctx_fra = Context::new(FRA);
         let ctx_dan = Context::new(DAN);
 
-        assert!(stage.as_char_mapper(&ctx_eng).is_none()); // empty map
-        assert!(stage.as_char_mapper(&ctx_fra).is_none()); // "oe" is 2 chars → not 1→1
-        assert!(stage.as_char_mapper(&ctx_dan).is_none()); // "aa" is 2 chars
+        // English: no rules
+        assert!(stage.as_char_mapper(&ctx_eng).is_none());
+
+        // French: has multi-char expansions (Œ→oe)
+        assert!(stage.as_char_mapper(&ctx_fra).is_none());
+
+        // Danish: has multi-char expansions (Å→aa)
+        assert!(stage.as_char_mapper(&ctx_dan).is_none());
     }
 
     #[test]
     fn test_zero_copy_when_no_replacements() {
         let stage = Transliterate;
         let ctx = Context::new(FRA);
+
         let input = Cow::Borrowed("Paris France");
+        assert!(!stage.needs_apply("Paris France", &ctx).unwrap());
+
         let result = stage.apply(input.clone(), &ctx).unwrap();
         assert!(matches!(result, Cow::Borrowed(_)));
+        assert_eq!(result, "Paris France");
+    }
+
+    #[test]
+    fn test_needs_apply_accuracy() {
+        let stage = Transliterate;
+
+        // French
+        let ctx = Context::new(FRA);
+        assert!(stage.needs_apply("Œuvre", &ctx).unwrap());
+        assert!(!stage.needs_apply("Paris", &ctx).unwrap());
+
+        // Catalan
+        let ctx = Context::new(CAT);
+        assert!(stage.needs_apply("Barça", &ctx).unwrap());
+        assert!(!stage.needs_apply("Barcelona", &ctx).unwrap());
+
+        // English (no rules)
+        let ctx = Context::new(ENG);
+        assert!(!stage.needs_apply("anything", &ctx).unwrap());
+    }
+
+    #[test]
+    fn test_capacity_hint_accuracy() {
+        // French: Œ→oe (3 bytes → 2 bytes, but 1 char → 2 chars)
+        let ctx = Context::new(FRA);
+        let (count, _extra) = ctx.lang_entry.hint_capacity_transliterate("Œuvre");
+        assert_eq!(count, 1, "Should detect 1 transliteration");
+        // Œ is 3 bytes UTF-8, "oe" is 2 bytes → extra should be 0 (contraction)
+
+        // Catalan: Ç→c (2 bytes → 1 byte, one-to-one)
+        let ctx = Context::new(CAT);
+        let (count, extra) = ctx.lang_entry.hint_capacity_transliterate("Façade");
+        assert_eq!(count, 1, "Should detect 1 transliteration");
+        assert_eq!(extra, 0, "One-to-one should have 0 extra bytes");
+    }
+
+    #[test]
+    fn test_precomputed_flags() {
+        let ctx_eng = Context::new(ENG);
+        let ctx_fra = Context::new(FRA);
+        let ctx_cat = Context::new(CAT);
+
+        // English: no transliterate map
+        assert!(!ctx_eng.lang_entry.has_transliterate_map());
+
+        // French: has transliterate map, not one-to-one
+        assert!(ctx_fra.lang_entry.has_transliterate_map());
+        assert!(!ctx_fra.lang_entry.has_one_to_one_transliterate());
+
+        // Catalan: has transliterate map, IS one-to-one (Ç→c, ç→c)
+        assert!(ctx_cat.lang_entry.has_transliterate_map());
+        assert!(ctx_cat.lang_entry.has_one_to_one_transliterate());
     }
 }

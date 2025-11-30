@@ -64,7 +64,7 @@ impl Stage for LowerCase {
         let mut changed = false;
 
         for c in text.chars() {
-            let lower = ctx.lang_entry.lowercase_char(c);
+            let lower = ctx.lang_entry.apply_lowercase(c);
             if lower != c {
                 changed = true;
             }
@@ -92,7 +92,7 @@ impl Stage for LowerCase {
 impl CharMapper for LowerCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        Some(ctx.lang_entry.lowercase_char(c))
+        Some(ctx.lang_entry.apply_lowercase(c))
     }
 
     fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
@@ -113,7 +113,7 @@ impl<'a> Iterator for LowercaseIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        Some(self.lang.lowercase_char(c))
+        Some(self.lang.apply_lowercase(c))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

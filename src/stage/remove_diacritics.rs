@@ -75,7 +75,7 @@ impl Stage for RemoveDiacritics {
         let mut changed = false;
 
         for c in text.chars() {
-            if let Some(base) = ctx.lang_entry.strip_diacritic(c) {
+            if let Some(base) = ctx.lang_entry.apply_strip(c) {
                 out.push(base);
                 changed = true;
             } else if ctx.lang_entry.is_diacritic(c) {
@@ -111,7 +111,7 @@ impl Stage for RemoveDiacritics {
 impl CharMapper for RemoveDiacritics {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        if let Some(base) = ctx.lang_entry.strip_diacritic(c) {
+        if let Some(base) = ctx.lang_entry.apply_strip(c) {
             Some(base)
         } else if ctx.lang_entry.is_diacritic(c) {
             None // Remove
@@ -131,10 +131,7 @@ impl CharMapper for RemoveDiacritics {
         // Medium path: only precomposed strip map (French, Vietnamese, Polish, etc.)
         // → 1:1 mapping, zero decomposition
         if lang.has_strip_map() && !lang.has_diacritics() {
-            return Box::new(
-                text.chars()
-                    .map(move |c| lang.strip_diacritic(c).unwrap_or(c)),
-            );
+            return Box::new(text.chars().map(move |c| lang.apply_strip(c).unwrap_or(c)));
         }
 
         // Slow path: has combining diacritics (Arabic, Hebrew) → must decompose
@@ -146,10 +143,7 @@ impl CharMapper for RemoveDiacritics {
         }
 
         // Final fallback: use strip map even if diacritics exist (rare, safe)
-        Box::new(
-            text.chars()
-                .map(move |c| lang.strip_diacritic(c).unwrap_or(c)),
-        )
+        Box::new(text.chars().map(move |c| lang.apply_strip(c).unwrap_or(c)))
     }
 }
 
