@@ -24,5 +24,7 @@ target
 # Project related files
 .vscode
 proptest-regressions
+*.txt
+
 
 

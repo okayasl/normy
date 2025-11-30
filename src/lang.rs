@@ -324,88 +324,88 @@ impl LangEntry {
                 .unwrap_or(false)
         }
     }
-
-    // -------------------------------------------------------------------------
-    // General helpers
-    // -------------------------------------------------------------------------
-    // #[inline]
-    // fn needs_trim(&self, text: &str) -> bool {
-    //     text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace)
-    // }
-
-    // #[inline]
-    // fn count_foldable_chars(&self, text: &str) -> usize {
-    //     text.chars().filter(|&c| self.needs_case_fold(c)).count()
-    // }
-
-    // /// Convenience: does this language need word segmentation at all?
-    // #[inline(always)]
-    // fn needs_word_segmentation(&self) -> bool {
-    //     self.needs_segmentation() && !self.segment_rules().is_empty()
-    // }
-
-    // #[inline]
-    // fn count_diacritics(&self, text: &str) -> usize {
-    //     if !self.has_diacritics() {
-    //         return 0;
-    //     }
-    //     text.chars().filter(|&c| self.is_diacritic(c)).count()
-    // }
-
-    // #[inline]
-    // fn contains_diacritics(&self, text: &str) -> bool {
-    //     if !self.has_diacritics() {
-    //         return false;
-    //     }
-    //     text.chars().any(|c| self.is_diacritic(c))
-    // }
-
-    // /// Determine whether a boundary (space) should be inserted between two characters.
-    // /// Returns `true` if a segmentation boundary is required, `false` otherwise.
-    // ///
-    // /// Rules:
-    // /// 1. Whitespace never produces boundaries.
-    // /// 2. Characters in the same script cluster (Western, CJK, Hangul, SE-Asian) do not produce boundaries.
-    // /// 3. Consecutive CJK ideographs do not produce boundaries.
-    // /// 4. Western → Script or Script → Western boundaries follow the language's segment rules.
-    // /// 5. Cross-script transitions produce a boundary.
-    // #[inline(always)]
-    // pub fn needs_boundary_between(&self, prev: char, curr: char) -> bool {
-    //     // --- 1. Whitespace never produces boundaries ---
-    //     if is_any_whitespace(prev) || is_any_whitespace(curr) {
-    //         return false;
-    //     }
-
-    //     // --- 2. Same script cluster: no boundary ---
-    //     if is_same_script_cluster(prev, curr) {
-    //         return false;
-    //     }
-
-    //     // --- 3. Cross-cluster transitions ---
-    //     let prev_class = classify(prev);
-    //     let curr_class = classify(curr);
-
-    //     match (prev_class, curr_class) {
-    //         // Western → Script (CJK/Hangul/SEAsian/NonCJKScript)
-    //         (
-    //             CharClass::Western,
-    //             CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
-    //         ) => self.segment_rules().contains(&SegmentRule::WesternToScript),
-
-    //         // Script → Western
-    //         (
-    //             CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
-    //             CharClass::Western,
-    //         ) => self.segment_rules().contains(&SegmentRule::ScriptToWestern),
-
-    //         // Cross-script (CJK → Hangul/SEAsian/NonCJKScript etc.)
-    //         (pc, cc) if pc != cc => true,
-
-    //         // Everything else: no boundary
-    //         _ => false,
-    //     }
-    // }
 }
+
+// -------------------------------------------------------------------------
+// General helpers
+// -------------------------------------------------------------------------
+// #[inline]
+// fn needs_trim(&self, text: &str) -> bool {
+//     text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace)
+// }
+
+// #[inline]
+// fn count_foldable_chars(&self, text: &str) -> usize {
+//     text.chars().filter(|&c| self.needs_case_fold(c)).count()
+// }
+
+// /// Convenience: does this language need word segmentation at all?
+// #[inline(always)]
+// fn needs_word_segmentation(&self) -> bool {
+//     self.needs_segmentation() && !self.segment_rules().is_empty()
+// }
+
+// #[inline]
+// fn count_diacritics(&self, text: &str) -> usize {
+//     if !self.has_diacritics() {
+//         return 0;
+//     }
+//     text.chars().filter(|&c| self.is_diacritic(c)).count()
+// }
+
+// #[inline]
+// fn contains_diacritics(&self, text: &str) -> bool {
+//     if !self.has_diacritics() {
+//         return false;
+//     }
+//     text.chars().any(|c| self.is_diacritic(c))
+// }
+
+// /// Determine whether a boundary (space) should be inserted between two characters.
+// /// Returns `true` if a segmentation boundary is required, `false` otherwise.
+// ///
+// /// Rules:
+// /// 1. Whitespace never produces boundaries.
+// /// 2. Characters in the same script cluster (Western, CJK, Hangul, SE-Asian) do not produce boundaries.
+// /// 3. Consecutive CJK ideographs do not produce boundaries.
+// /// 4. Western → Script or Script → Western boundaries follow the language's segment rules.
+// /// 5. Cross-script transitions produce a boundary.
+// #[inline(always)]
+// pub fn needs_boundary_between(&self, prev: char, curr: char) -> bool {
+//     // --- 1. Whitespace never produces boundaries ---
+//     if is_any_whitespace(prev) || is_any_whitespace(curr) {
+//         return false;
+//     }
+
+//     // --- 2. Same script cluster: no boundary ---
+//     if is_same_script_cluster(prev, curr) {
+//         return false;
+//     }
+
+//     // --- 3. Cross-cluster transitions ---
+//     let prev_class = classify(prev);
+//     let curr_class = classify(curr);
+
+//     match (prev_class, curr_class) {
+//         // Western → Script (CJK/Hangul/SEAsian/NonCJKScript)
+//         (
+//             CharClass::Western,
+//             CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
+//         ) => self.segment_rules().contains(&SegmentRule::WesternToScript),
+
+//         // Script → Western
+//         (
+//             CharClass::Cjk | CharClass::Hangul | CharClass::SEAsian | CharClass::NonCJKScript,
+//             CharClass::Western,
+//         ) => self.segment_rules().contains(&SegmentRule::ScriptToWestern),
+
+//         // Cross-script (CJK → Hangul/SEAsian/NonCJKScript etc.)
+//         (pc, cc) if pc != cc => true,
+
+//         // Everything else: no boundary
+//         _ => false,
+//     }
+// }
 
 // #[cfg(test)]
 // mod tests {

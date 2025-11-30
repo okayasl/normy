@@ -97,18 +97,32 @@ impl Stage for NormalizeWhitespace {
             return Ok(false);
         }
 
+        // 1. CHEAP CHECK: Trimming (O(1) lookups)
         if self.trim_edges
             && (text.starts_with(char::is_whitespace) || text.ends_with(char::is_whitespace))
         {
             return Ok(true);
         }
 
-        if self.normalize_unicode && text.chars().any(is_unicode_whitespace) {
-            return Ok(true);
-        }
+        // 2. UNIFIED CHECK: Unicode Normalization and/or Sequential Collapse (single O(N) pass)
+        if self.normalize_unicode || self.collapse_sequential {
+            let mut prev_was_whitespace = false;
 
-        if self.collapse_sequential && has_sequential_whitespace(text) {
-            return Ok(true);
+            for c in text.chars() {
+                let is_ws = c.is_whitespace();
+
+                // Check sequential collapse
+                if self.collapse_sequential && is_ws && prev_was_whitespace {
+                    return Ok(true);
+                }
+
+                // Check unicode normalization - is_unicode_whitespace already excludes ASCII WS
+                if self.normalize_unicode && is_unicode_whitespace(c) {
+                    return Ok(true);
+                }
+
+                prev_was_whitespace = is_ws;
+            }
         }
 
         Ok(false)
@@ -165,22 +179,6 @@ impl Stage for NormalizeWhitespace {
             Ok(text) // ← ZERO-COPY — even if needs_apply was true
         }
     }
-}
-
-#[inline]
-fn has_sequential_whitespace(text: &str) -> bool {
-    let mut prev_was_ws = false;
-    for c in text.chars() {
-        if c.is_whitespace() {
-            if prev_was_ws {
-                return true;
-            }
-            prev_was_ws = true;
-        } else {
-            prev_was_ws = false;
-        }
-    }
-    false
 }
 
 impl StageTestConfig for NormalizeWhitespace {
