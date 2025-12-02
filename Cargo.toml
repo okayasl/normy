@@ -36,6 +36,10 @@ harness = false
 name = "stage_bench"
 harness = false
 
+[[bench]]
+name = "old_vs_new"
+harness = false
+
 [features]
 default = ["simd"]
 simd = ["simdutf8"]

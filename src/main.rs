@@ -41,6 +41,7 @@ mod tests {
             "*.lock",
             "*.json",
             "*.gitignore",
+            "*.txt",
             "target",
             "proptest-regressions",
             "data",
