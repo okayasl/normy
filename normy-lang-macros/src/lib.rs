@@ -365,6 +365,66 @@ fn generate_contains_fn(fn_name: &str, chars: &[char]) -> proc_macro2::TokenStre
     }
 }
 
+/// Generate CharMap constructor based on size
+fn generate_char_map_constructor(
+    map: &[(char, char)],
+    mod_name: &syn::Ident,
+    data_name: &str,
+) -> proc_macro2::TokenStream {
+    let len = map.len();
+    let data_ident = syn::Ident::new(data_name, proc_macro2::Span::call_site());
+
+    if len == 0 {
+        quote! { CharMap::Empty(EmptyCharMap) }
+    } else if len <= 4 {
+        quote! { CharMap::Tiny(TinyCharMap::new(#mod_name::#data_ident)) }
+    } else if len <= 15 {
+        quote! { CharMap::Small(SmallCharMap::new(#mod_name::#data_ident)) }
+    } else {
+        quote! { CharMap::Binary(BinaryCharMap::new(#mod_name::#data_ident)) }
+    }
+}
+
+/// Generate StrMap constructor based on size
+fn generate_str_map_constructor(
+    map: &[(char, String)],
+    mod_name: &syn::Ident,
+    data_name: &str,
+) -> proc_macro2::TokenStream {
+    let len = map.len();
+    let data_ident = syn::Ident::new(data_name, proc_macro2::Span::call_site());
+
+    if len == 0 {
+        quote! { StrMap::Empty(EmptyStrMap) }
+    } else if len <= 4 {
+        quote! { StrMap::Tiny(TinyStrMap::new(#mod_name::#data_ident)) }
+    } else if len <= 15 {
+        quote! { StrMap::Small(SmallStrMap::new(#mod_name::#data_ident)) }
+    } else {
+        quote! { StrMap::Binary(BinaryStrMap::new(#mod_name::#data_ident)) }
+    }
+}
+
+/// Generate CharSet constructor based on size
+fn generate_char_set_constructor(
+    chars: &[char],
+    mod_name: &syn::Ident,
+    data_name: &str,
+) -> proc_macro2::TokenStream {
+    let len = chars.len();
+    let data_ident = syn::Ident::new(data_name, proc_macro2::Span::call_site());
+
+    if len == 0 {
+        quote! { CharSet::Empty }
+    } else if len <= 4 {
+        quote! { CharSet::Tiny(TinyCharSet::new(#mod_name::#data_ident)) }
+    } else if len <= 15 {
+        quote! { CharSet::Small(SmallCharSet::new(#mod_name::#data_ident)) }
+    } else {
+        quote! { CharSet::Binary(BinaryCharSet::new(#mod_name::#data_ident)) }
+    }
+}
+
 fn generate_code(languages: Vec<Language>) -> proc_macro2::TokenStream {
     let mut lang_consts = Vec::new();
     let mut modules = Vec::new();
@@ -412,18 +472,30 @@ fn generate_code(languages: Vec<Language>) -> proc_macro2::TokenStream {
         let unigram_cjk = lang.unigram_cjk;
 
         // Generate static data
+        // produce owned token lists (so they can be reused / cloned)
         let case_map_items = case_map
             .iter()
             .map(|(f, t)| quote! { CaseMap { from: #f, to: #t } });
+        let case_map_items_clone = case_map_items.clone();
+
         let fold_map_items = fold_map
             .iter()
             .map(|(f, t)| quote! { FoldMap { from: #f, to: #t } });
+        let fold_map_items_clone = fold_map_items.clone();
+
         let transliterate_items = transliterate_map
             .iter()
             .map(|(f, t)| quote! { FoldMap { from: #f, to: #t } });
+        let transliterate_items_clone = transliterate_items.clone();
+
         let strip_map_items = strip_map
             .iter()
             .map(|(f, t)| quote! { StripMap { from: #f, to: #t } });
+        let strip_map_items_clone = strip_map
+            .iter()
+            .map(|(f, t)| quote! { CaseMap { from: #f, to: #t } });
+
+        //
 
         // Generate optimized find functions
         let find_case = generate_char_find_fn("find_case_map", &case_map, "CASE");
@@ -445,6 +517,28 @@ fn generate_code(languages: Vec<Language>) -> proc_macro2::TokenStream {
             proc_macro2::Span::call_site(),
         );
 
+        // Generate specialized map constructors with correct module path
+        let case_map_constructor =
+            generate_char_map_constructor(&case_map, &mod_name_ident, "CASE_DATA");
+        let fold_map_constructor =
+            generate_str_map_constructor(&fold_map, &mod_name_ident, "FOLD_DATA");
+        let translit_map_constructor =
+            generate_str_map_constructor(&transliterate_map, &mod_name_ident, "TRANSLITERATE_DATA");
+        let strip_map_constructor =
+            generate_char_map_constructor(&strip_map, &mod_name_ident, "STRIP_DATA");
+
+        let fold_chars_constructor =
+            generate_char_set_constructor(&fold_chars, &mod_name_ident, "FOLD_CHARS_DATA");
+        let translit_chars_constructor = generate_char_set_constructor(
+            &translit_chars,
+            &mod_name_ident,
+            "TRANSLITERATE_CHARS_DATA",
+        );
+        let strip_chars_constructor =
+            generate_char_set_constructor(&strip_chars, &mod_name_ident, "STRIP_CHARS_DATA");
+        let diacritics_constructor =
+            generate_char_set_constructor(&spacing_diacritics, &mod_name_ident, "DIACRITICS_DATA");
+
         lang_consts.push(quote! {
             pub const #code: Lang = Lang { code: #code_str, name: #name };
         });
@@ -463,6 +557,18 @@ fn generate_code(languages: Vec<Language>) -> proc_macro2::TokenStream {
                 pub static FOLD_CHAR_SLICE: &[char] = &[#(#fold_chars),*];
                 pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[#(#translit_chars),*];
                 pub static STRIP_CHAR_SLICE: &[char] = &[#(#strip_chars),*];
+
+                // new data
+                pub static CASE_DATA: &[CaseMap] = &[#(#case_map_items_clone),*];
+                pub static FOLD_DATA: &[FoldMap] = &[#(#fold_map_items_clone),*];
+                pub static TRANSLITERATE_DATA: &[FoldMap] = &[#(#transliterate_items_clone),*];
+                pub static STRIP_DATA: &[CaseMap] = &[#(#strip_map_items_clone),*];
+
+                pub static FOLD_CHARS_DATA: &[char] = &[#(#fold_chars),*];
+                pub static TRANSLITERATE_CHARS_DATA: &[char] = &[#(#translit_chars),*];
+                pub static STRIP_CHARS_DATA: &[char] = &[#(#strip_chars),*];
+                pub static DIACRITICS_DATA: &[char] = &[#(#spacing_diacritics),*];
+
 
                 pub static PEEK_PAIRS: &[PeekPair] = &[#(#peek_pairs),*];
                 pub static SEGMENT_RULES: &[SegmentRule] = &[#(#segment_rules),*];
@@ -512,6 +618,17 @@ fn generate_code(languages: Vec<Language>) -> proc_macro2::TokenStream {
                 needs_segmentation: #mod_path::NEEDS_WORD_SEGMENTATION,
                 requires_peek_ahead: #mod_path::REQUIRES_PEEK_AHEAD,
                 unigram_cjk: #mod_path::UNIGRAM_CJK,
+
+                // Use specialized map constructors
+                case_map_enum: #case_map_constructor,
+                fold_map_enum: #fold_map_constructor,
+                transliterate_map_enum: #translit_map_constructor,
+                strip_map_enum: #strip_map_constructor,
+                fold_chars_enum: #fold_chars_constructor,
+                transliterate_chars_enum: #translit_chars_constructor,
+                strip_chars_enum: #strip_chars_constructor,
+                diacritics_enum: #diacritics_constructor,
+
 
                 code: #mod_path::CODE,
                 case_map: #mod_path::CASE,

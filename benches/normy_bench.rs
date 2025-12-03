@@ -16,9 +16,16 @@
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use icu::normalizer::ComposingNormalizerBorrowed;
 use rand::{Rng, SeedableRng, random, rngs::StdRng};
-use std::borrow::Cow;
+use regex::Regex;
 use std::hint::black_box;
+use std::{borrow::Cow, sync::LazyLock};
+
+use tokenizers::{
+    NormalizedString, Normalizer,
+    normalizers::{Lowercase, Sequence, StripAccents, unicode::NFC as tokenizerNFC},
+};
 
 use normy::{
     CaseFold, DEU, ENG, LowerCase, NFC, NFKC, NORMALIZE_WHITESPACE_FULL, Normy, NormyBuilder,
@@ -129,6 +136,43 @@ fn realistic_corpus_mixed_batch(seed: u64, count: usize, normalized_ratio: f64) 
     }
 
     batch
+}
+
+static NFC_NORMALIZER: LazyLock<ComposingNormalizerBorrowed<'static>> =
+    LazyLock::new(ComposingNormalizerBorrowed::new_nfc);
+// ICU4X: NFC (Normalization Form Canonical Composition)
+fn icu4x_nfc(text: &str) -> String {
+    NFC_NORMALIZER.normalize(text).to_string()
+}
+
+static NFKC_NORMALIZER: LazyLock<ComposingNormalizerBorrowed<'static>> =
+    LazyLock::new(ComposingNormalizerBorrowed::new_nfkc);
+// ICU4X: NFKC (Normalization Form Compatibility Composition)
+fn icu4x_nfkc(text: &str) -> String {
+    NFKC_NORMALIZER.normalize(text).to_string()
+}
+
+// tokenizers: Hugging Face pipeline (NFC + Lowercase + Strip accents)
+fn tokenizers_normalize(text: &str) -> String {
+    static NORMALIZER: LazyLock<Sequence> = LazyLock::new(|| {
+        Sequence::new(vec![
+            tokenizers::NormalizerWrapper::NFC(tokenizerNFC),
+            tokenizers::NormalizerWrapper::Lowercase(Lowercase),
+            tokenizers::NormalizerWrapper::StripAccents(StripAccents),
+        ])
+    });
+    let mut normalized = NormalizedString::from(text.to_owned()); // owned once
+    NORMALIZER
+        .normalize(&mut normalized)
+        .expect("tokenizers failed");
+    normalized.get().to_string()
+}
+
+// Regex baseline: Simple homoglyph normalization (e.g., for "storm" corpus)
+static HOMOGYLPH_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[ΑАᎪᗅᴀꓮＡ𐊠𝐀𝐴𝑨𝒜𝓐𝔄𝔸𝕬𝖠𝗔𝘈𝘼𝙰𝚨𝛢𝜜𝝖𝞐]").unwrap());
+fn regex_homoglyph(text: &str) -> String {
+    HOMOGYLPH_RE.replace_all(text, "A").to_string() // Placeholder; extend for full
 }
 
 fn homoglyph_storm() -> String {
@@ -397,6 +441,25 @@ fn benches_normalization_forms(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("Unidecode", corpus_name), |b| {
             b.iter(|| unidecode_baseline(black_box(corpus)));
         });
+
+        group.bench_function(BenchmarkId::new("ICU4X NFC", corpus_name), |b| {
+            b.iter(|| icu4x_nfc(black_box(corpus)));
+        });
+        group.bench_function(BenchmarkId::new("ICU4X NFKC", corpus_name), |b| {
+            b.iter(|| icu4x_nfkc(black_box(corpus)));
+        });
+
+        // tokenizers baseline
+        group.bench_function(BenchmarkId::new("tokenizers HF", corpus_name), |b| {
+            b.iter(|| tokenizers_normalize(black_box(corpus)));
+        });
+
+        // Regex for homoglyph-specific (only on "Needs Transform")
+        if corpus_name == "Needs Transform" {
+            group.bench_function(BenchmarkId::new("Regex Homoglyph", corpus_name), |b| {
+                b.iter(|| regex_homoglyph(black_box(corpus)));
+            });
+        }
     }
 
     group.finish();
@@ -555,13 +618,69 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
     group.finish();
 }
 
+fn benches_full_baselines(c: &mut Criterion) {
+    // tokenizers full (NFC + Lower + Strip + Whitespace collapse via regex)
+    static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+
+    let mut group = c.benchmark_group("Full Pipeline Baselines");
+    let needs_transform = realistic_corpus_needs_transform(0xDEAD_BEEF, 128);
+    let already_normalized = realistic_corpus_already_normalized(0xCAFE_BABE, 128);
+    for (corpus, name) in [
+        (&needs_transform, "Needs"),
+        (&already_normalized, "Normalized"),
+    ] {
+        group.throughput(Throughput::Bytes(corpus.len() as u64));
+
+        // Normy (existing)
+        let pipeline = full_pipeline(ENG);
+        group.bench_function(BenchmarkId::new("Normy Full", name), |b| {
+            b.iter(|| pipeline.normalize(black_box(corpus)).expect("failed"));
+        });
+
+        // ICU4X equivalent (NFC + Lowercase + NFKC + Strip via regex fallback)
+        group.bench_function(BenchmarkId::new("ICU4X Equivalent", name), |b| {
+            b.iter(|| {
+                let nfc = icu4x_nfc(corpus);
+                let lower = nfc.to_lowercase();
+                icu4x_nfkc(&lower) // + diacritics via NFKC
+            });
+        });
+
+        group.bench_function(BenchmarkId::new("tokenizers Full", name), |b| {
+            b.iter(|| {
+                let norm = tokenizers_normalize(corpus);
+                WS_RE.replace_all(&norm, " ").trim().to_string()
+            });
+        });
+    }
+    group.finish();
+}
+
+fn benches_memory_bandwidth_pressure(c: &mut Criterion) {
+    let mut group = c.benchmark_group("Memory Bandwidth Pressure (Already Normalized)");
+    let corpus = realistic_corpus_already_normalized(0xCAFE_BABE, 1024); // 1 MiB
+
+    group.throughput(Throughput::Bytes(corpus.len() as u64));
+    group.bench_function("ICU4X NFC", |b| b.iter(|| icu4x_nfc(black_box(&corpus))));
+    group.bench_function("Normy NFC (zero-copy)", |b| {
+        let pipeline = normy_nfc_only(ENG);
+        b.iter(|| pipeline.normalize(black_box(&corpus)).unwrap());
+    });
+
+    // Add sample_size(10) because this is allocation-heavy
+    group.sample_size(10);
+    group.finish();
+}
+
 // ── Criterion harness
 criterion_group!(
     benches,
     benches_main,
     benches_normalization_forms,
     benches_incremental_pipeline,
-    bench_zero_copy_micro
+    bench_zero_copy_micro,
+    benches_full_baselines,
+    benches_memory_bandwidth_pressure,
 );
 criterion_main!(benches);
 

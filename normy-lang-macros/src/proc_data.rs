@@ -1,261 +1,5 @@
-use crate::lang::{CaseMap, FoldMap, Lang, LangEntry, PeekPair, SegmentRule, StripMap};
-
-use paste::paste;
-use phf::{Map, phf_map};
-
-/// ---------------------------------------------------------------------------
-///    Macro – generates everything from a single table
-/// ---------------------------------------------------------------------------
-macro_rules! define_languages {
-    ($(
-        $code:ident, $code_str:literal, $name:literal,
-        case: [ $($cfrom:expr => $cto:expr),* $(,)? ],
-        fold: [ $($ffrom:expr => $fto:expr),* $(,)? ],
-        transliterate: [ $($tfrom:expr => $tto:expr),* $(,)? ],
-        precomposed_to_base: [ $($sfrom:expr => $sto:expr),* $(,)? ],
-        spacing_diacritics: [ $($d:expr),* $(,)? ],
-        needs_word_segmentation: $needs_word_segmentation:expr,
-        requires_peek_ahead: $requires_peek_ahead:expr,
-        peek_pairs: [ $( ($pa:expr, $pb:expr => $pto:expr) ),* $(,)? ],
-        segment_rules: [ $($sr:expr),* $(,)? ],
-        unigram_cjk: $unigram:expr
-    ),* $(,)?) => {
-        $(
-            #[doc = concat!(
-                "Language **", stringify!($code), "** — ", $name, "\n\n",
-                "- **Case map:** [", stringify!($($cfrom => $cto),*), "]\n",
-                "- **Fold map:** [", stringify!($($ffrom => $fto),*), "]\n",
-                "- **Transliterate:** [", stringify!($($tfrom => $tto),*), "]\n",
-                "- **Precomposed to base:** [", stringify!($($sfrom => $sto),*), "]\n",
-                "- **Spacing diacritics:** [", stringify!($($d),*), "]\n",
-                "- **Needs word segmentation:** ", stringify!($needs_word_segmentation), "\n",
-                "- **Segment rules:** [", stringify!($($sr),*), "]\n",
-                "- **Requires peek-ahead:** ", stringify!($requires_peek_ahead), "\n",
-                "- **Peek pairs:** [", stringify!($(($pa, $pb => $pto)),*), "]\n",
-                "- **CJK unigram tokens:** ", stringify!($unigram), "\n",
-            )]
-            pub const $code: Lang = Lang { code: $code_str, name: $name };
-        )*
-
-        $(
-            paste! {
-                mod [<$code:lower _data>] {
-                    use super::*;
-
-                    pub static CODE: &str = $code_str;
-
-                    pub static CASE: &[CaseMap] = &[
-                        $(CaseMap { from: $cfrom, to: $cto }),*
-                    ];
-
-                    pub static FOLD: &[FoldMap] = &[
-                        $(FoldMap { from: $ffrom, to: $fto }),*
-                    ];
-
-                    pub static TRANSLITERATE: &[FoldMap] = &[
-                        $(FoldMap { from: $tfrom, to: $tto }),*
-                    ];
-
-                    pub static PRECOMPOSED_TO_BASE: &[StripMap] = &[
-                        $(StripMap { from: $sfrom, to: $sto }),*
-                    ];
-
-                    pub static SPACING_DIACRITICS: &[char] = &[$($d),*];
-
-                    pub const NEEDS_WORD_SEGMENTATION: bool = $needs_word_segmentation;
-                    pub const REQUIRES_PEEK_AHEAD: bool = $requires_peek_ahead;
-
-                    pub static FOLD_CHAR_SLICE: &[char] = &[$($ffrom),*];
-                    pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[$($tfrom),*];
-                    pub static STRIP_CHAR_SLICE: &[char] = &[$($sfrom),*];
-                    pub static DIACRITIC_SLICE: &[char] = &[$($d),*];
-
-                    pub static PEEK_PAIRS: &[PeekPair] = &[
-                        $( PeekPair { a: $pa, b: $pb, to: $pto } ),*
-                    ];
-
-                    pub static SEGMENT_RULES: &[SegmentRule] = &[$($sr),*];
-                    pub const UNIGRAM_CJK: bool = $unigram;
-
-                    // === Precomputed Boolean Flags ===
-                    pub const HAS_CASE_MAP: bool = {
-                        let arr: &[CaseMap] = &[$(CaseMap { from: $cfrom, to: $cto }),*];
-                        !arr.is_empty()
-                    };
-
-                    pub const HAS_FOLD_MAP: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $ffrom, to: $fto }),*];
-                        !arr.is_empty()
-                    };
-
-                    pub const HAS_TRANSLITERATE_MAP: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $tfrom, to: $tto }),*];
-                        !arr.is_empty()
-                    };
-
-                    pub const HAS_STRIP_MAP: bool = {
-                        let arr: &[StripMap] = &[$(StripMap { from: $sfrom, to: $sto }),*];
-                        !arr.is_empty()
-                    };
-
-                    pub const HAS_DIACRITICS: bool = {
-                        let arr: &[char] = &[$($d),*];
-                        !arr.is_empty()
-                    };
-
-                    pub const HAS_PEEK_PAIRS: bool = {
-                        let arr: &[PeekPair] = &[$( PeekPair { a: $pa, b: $pb, to: $pto } ),*];
-                        !arr.is_empty()
-                    };
-
-                    pub const HAS_SEGMENT_RULES: bool = {
-                        let arr: &[SegmentRule] = &[$($sr),*];
-                        !arr.is_empty()
-                    };
-
-                    // === Derived Properties ===
-
-                    /// Check if all fold mappings are one-to-one (single char output)
-                    pub const HAS_ONE_TO_ONE_FOLDS: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $ffrom, to: $fto }),*];
-                        if arr.is_empty() {
-                            true
-                        } else {
-                            let mut all_one_to_one = true;
-                            let mut i = 0;
-                            while i < arr.len() {
-                                let to_str = arr[i].to;
-                                // Count UTF-8 characters in to_str
-                                let mut char_count = 0;
-                                let bytes = to_str.as_bytes();
-                                let mut byte_idx = 0;
-                                while byte_idx < bytes.len() {
-                                    let b = bytes[byte_idx];
-                                    // UTF-8 leading byte detection
-                                    if b & 0x80 == 0 {
-                                        byte_idx += 1;
-                                    } else if b & 0xE0 == 0xC0 {
-                                        byte_idx += 2;
-                                    } else if b & 0xF0 == 0xE0 {
-                                        byte_idx += 3;
-                                    } else {
-                                        byte_idx += 4;
-                                    }
-                                    char_count += 1;
-                                }
-                                if char_count != 1 {
-                                    all_one_to_one = false;
-                                    break;
-                                }
-                                i += 1;
-                            }
-                            all_one_to_one
-                        }
-                    };
-
-                    /// Check if all transliterate mappings are one-to-one
-                    pub const HAS_ONE_TO_ONE_TRANSLITERATE: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $tfrom, to: $tto }),*];
-                        if arr.is_empty() {
-                            true
-                        } else {
-                            let mut all_one_to_one = true;
-                            let mut i = 0;
-                            while i < arr.len() {
-                                let to_str = arr[i].to;
-                                let mut char_count = 0;
-                                let bytes = to_str.as_bytes();
-                                let mut byte_idx = 0;
-                                while byte_idx < bytes.len() {
-                                    let b = bytes[byte_idx];
-                                    if b & 0x80 == 0 {
-                                        byte_idx += 1;
-                                    } else if b & 0xE0 == 0xC0 {
-                                        byte_idx += 2;
-                                    } else if b & 0xF0 == 0xE0 {
-                                        byte_idx += 3;
-                                    } else {
-                                        byte_idx += 4;
-                                    }
-                                    char_count += 1;
-                                }
-                                if char_count != 1 {
-                                    all_one_to_one = false;
-                                    break;
-                                }
-                                i += 1;
-                            }
-                            all_one_to_one
-                        }
-                    };
-                }
-            }
-        )*
-
-        paste! {
-            pub(crate) static LANG_TABLE: Map<&'static str, LangEntry> = phf_map! {
-                $(
-                    $code_str => LangEntry {
-                        // === Precomputed Flags (Hot Path) ===
-                        has_case_map: [<$code:lower _data>]::HAS_CASE_MAP,
-                        has_fold_map: [<$code:lower _data>]::HAS_FOLD_MAP,
-                        has_transliterate_map: [<$code:lower _data>]::HAS_TRANSLITERATE_MAP,
-                        has_strip_map: [<$code:lower _data>]::HAS_STRIP_MAP,
-                        has_diacritics: [<$code:lower _data>]::HAS_DIACRITICS,
-                        has_peek_pairs: [<$code:lower _data>]::HAS_PEEK_PAIRS,
-                        has_segment_rules: [<$code:lower _data>]::HAS_SEGMENT_RULES,
-                        has_one_to_one_folds: [<$code:lower _data>]::HAS_ONE_TO_ONE_FOLDS,
-                        has_one_to_one_transliterate: [<$code:lower _data>]::HAS_ONE_TO_ONE_TRANSLITERATE,
-                        needs_segmentation: [<$code:lower _data>]::NEEDS_WORD_SEGMENTATION,
-                        requires_peek_ahead: [<$code:lower _data>]::REQUIRES_PEEK_AHEAD,
-                        unigram_cjk: [<$code:lower _data>]::UNIGRAM_CJK,
-
-                        // === Data Arrays ===
-                        code: [<$code:lower _data>]::CODE,
-                        case_map: [<$code:lower _data>]::CASE,
-                        fold_map: [<$code:lower _data>]::FOLD,
-                        transliterate_map: [<$code:lower _data>]::TRANSLITERATE,
-                        strip_map: [<$code:lower _data>]::PRECOMPOSED_TO_BASE,
-                        diacritics: if [<$code:lower _data>]::SPACING_DIACRITICS.is_empty() {
-                            None
-                        } else {
-                            Some([<$code:lower _data>]::SPACING_DIACRITICS)
-                        },
-                        fold_char_slice: [<$code:lower _data>]::FOLD_CHAR_SLICE,
-                        transliterate_char_slice: [<$code:lower _data>]::TRANSLITERATE_CHAR_SLICE,
-                        strip_char_slice: [<$code:lower _data>]::STRIP_CHAR_SLICE,
-                        diacritic_slice: if [<$code:lower _data>]::DIACRITIC_SLICE.is_empty() {
-                            None
-                        } else {
-                            Some([<$code:lower _data>]::DIACRITIC_SLICE)
-                        },
-                        peek_pairs: [<$code:lower _data>]::PEEK_PAIRS,
-                        segment_rules: [<$code:lower _data>]::SEGMENT_RULES,
-                    }
-                ),*
-            };
-        }
-
-        pub fn from_code(code: &str) -> Option<Lang> {
-            let upper = code.to_uppercase();
-            match upper.as_str() {
-                $(
-                    $code_str => Some($code),
-                )*
-                _ => None,
-            }
-        }
-
-        /// All supported languages — for testing and introspection
-        pub const fn all_langs() -> &'static [Lang] {
-            &[
-                $(
-                    $code
-                ),*
-            ]
-        }
-    };
-}
+use crate::lang::*;
+use normy_lang_macros::define_languages;
 
 define_languages! {
     TUR, "TUR", "Turkish",
@@ -269,6 +13,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     DEU, "DEU", "German",
         case: [],
@@ -281,6 +26,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     NLD, "NLD", "Dutch",
         case: [],
@@ -290,9 +36,13 @@ define_languages! {
         spacing_diacritics: [],
         needs_word_segmentation: false,
         requires_peek_ahead: true,
-        peek_pairs: [ ('I', 'J' => "ij"), ('I', 'j' => "ij") ],
+        peek_pairs: [
+            PeekPair { a: 'I', b: 'J', to: "ij" },
+            PeekPair { a: 'I', b: 'j', to: "ij" },
+        ],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     DAN, "DAN", "Danish",
         case: [],
@@ -305,6 +55,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     NOR, "NOR", "Norwegian",
         case: [],
@@ -317,6 +68,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     SWE, "SWE", "Swedish",
         case: [],
@@ -329,6 +81,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     ISL, "ISL", "Icelandic",
         case: [],
@@ -341,6 +94,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     ARA, "ARA", "Arabic",
         case: [],
@@ -357,6 +111,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     HEB, "HEB", "Hebrew",
         case: [],
@@ -374,6 +129,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     VIE, "VIE", "Vietnamese",
         case: [],
@@ -400,6 +156,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     FRA, "FRA", "French",
         case: [],
@@ -430,6 +187,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     CES, "CES", "Czech",
         case: [],
@@ -457,6 +215,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     SLK, "SLK", "Slovak",
         case: [],
@@ -495,6 +254,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     POL, "POL", "Polish",
         case: [],
@@ -507,6 +267,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     // [('L', '·' => "l·l"),('l', '·' => "l·l")],
     // Catalan l·l → L·L is a case mapping rule, not a fold, The rule says: "Catalan preserves middle dot contextually" → this refers to case mapping, not search folding.
@@ -527,6 +288,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     SPA, "SPA", "Spanish",
         case: [],
@@ -539,6 +301,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     POR, "POR", "Portuguese",
         case: [],
@@ -551,6 +314,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     ITA, "ITA", "Italian",
         case: [],
@@ -563,6 +327,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     HRV, "HRV", "Croatian",
         case: [],
@@ -575,6 +340,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     SRP, "SRP", "Serbian",
         case: [],
@@ -587,6 +353,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     LIT, "LIT", "Lithuanian",
         case: [ 'Ė' => 'ė', 'Į' => 'į', 'Ų' => 'ų' ],
@@ -599,6 +366,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     // Greek (ELL) Addition: Added Greek to requires_peek_ahead to mandate
     // the necessary lookahead for handling the contextual final sigma (σ/ς).[1]
@@ -621,6 +389,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     HIN, "HIN", "Hindi",
         case: [],
@@ -636,6 +405,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     BEN, "BEN", "Bengali",
         case: [],
@@ -651,6 +421,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     TAM, "TAM", "Tamil",
         case: [],
@@ -666,6 +437,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     RUS, "RUS", "Russian",
         case: [],
@@ -712,6 +484,7 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
+    ,
 
     JPN, "JPN", "Japanese",
         case: [],
@@ -727,6 +500,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     ZHO, "ZHO", "Chinese (Simplified)",
         case: [],
@@ -743,6 +517,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: true,
+    ,
 
     KOR, "KOR", "Korean",
         case: [],
@@ -758,6 +533,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     THA, "THA", "Thai",
         case: [],
@@ -773,6 +549,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     LAO, "LAO", "Lao",
         case: [],
@@ -788,6 +565,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     MYA, "MYA", "Myanmar",
         case: [],
@@ -803,6 +581,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     KHM, "KHM", "Khmer",
         case: [],
@@ -818,6 +597,7 @@ define_languages! {
             SegmentRule::ScriptToWestern,
         ],
         unigram_cjk: false,
+    ,
 
     ENG, "ENG", "English",
         case: [],
@@ -830,4 +610,5 @@ define_languages! {
         peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false
+    ,
 }

@@ -24,9 +24,13 @@ simdutf8 = { version = "0.1.5", optional = true }
 smallvec = "1.15.1"
 
 [dev-dependencies]
+lazy_static = "1.5.0"
 proptest = "1.9.0"
 criterion = { version = "0.7.0", features = ["html_reports", "plotters"] }
 unidecode = "0.3.0"
+icu = { version = "2.1.1", default-features = false, features = ["compiled_data"] }
+tokenizers = "0.22.2"
+regex = "1.12.2"
 
 [[bench]]
 name = "normy_bench"
@@ -37,7 +41,7 @@ name = "stage_bench"
 harness = false
 
 [[bench]]
-name = "old_vs_new"
+name = "comparison_bench"
 harness = false
 
 [features]

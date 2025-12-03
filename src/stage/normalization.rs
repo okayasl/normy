@@ -10,143 +10,99 @@ use unicode_normalization::{
     IsNormalized, UnicodeNormalization, is_nfc_quick, is_nfd_quick, is_nfkc_quick, is_nfkd_quick,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NormalizationForm {
-    NFC,
-    NFD,
-    NFKC,
-    NFKD,
-}
+// --- 1. Define Concrete Normalization Stage Structs ---
 
-impl NormalizationForm {
-    #[inline]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::NFC => "NFC",
-            Self::NFD => "NFD",
-            Self::NFKC => "NFKC",
-            Self::NFKD => "NFKD",
+/// Unicode Normalization Form C (Canonical Composition)
+#[derive(Default, Clone, Copy)]
+pub struct NfcStage;
+
+/// Unicode Normalization Form D (Canonical Decomposition)
+#[derive(Default, Clone, Copy)]
+pub struct NfdStage;
+
+/// Unicode Normalization Form KC (Compatibility Composition)
+#[derive(Default, Clone, Copy)]
+pub struct NfkcStage;
+
+/// Unicode Normalization Form KD (Compatibility Decomposition)
+#[derive(Default, Clone, Copy)]
+pub struct NfkdStage;
+
+// --- 2. Public Constants ---
+
+// The constants now use the direct, concrete stage structs.
+pub const NFC: NfcStage = NfcStage;
+pub const NFD: NfdStage = NfdStage;
+pub const NFKC: NfkcStage = NfkcStage;
+pub const NFKD: NfkdStage = NfkdStage;
+
+// --- 3. Implement the Stage Trait Directly for EACH Struct ---
+
+// Macro to eliminate duplication—generates all four impls from one source
+macro_rules! impl_normalization_stage {
+    ($type:ty, $name:literal, $quick_fn:ident, $apply_fn:ident) => {
+        impl Stage for $type {
+            fn name(&self) -> &'static str {
+                $name
+            }
+
+            #[inline(always)]
+            fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
+                Ok(!matches!($quick_fn(text.chars()), IsNormalized::Yes))
+            }
+
+            #[inline(always)]
+            fn apply<'a>(
+                &self,
+                text: Cow<'a, str>,
+                _ctx: &Context,
+            ) -> Result<Cow<'a, str>, StageError> {
+                if matches!($quick_fn(text.chars()), IsNormalized::Yes) {
+                    return Ok(text);
+                }
+                Ok(text.$apply_fn().collect::<String>().into())
+            }
         }
-    }
+    };
 }
 
-/// - **NFC (Canonical Composition)**:  
-///   Composes characters into precomposed form where possible (e.g., `e + ́` → `é`).  
-///   Preserves ligatures, fractions, superscripts. Reversible with NFD. Ideal for display and string comparison.
-pub const NFC: NormalizationStage = NormalizationStage::new(NormalizationForm::NFC);
+// Now generate all four — clean, DRY, and correct
+impl_normalization_stage!(NfcStage, "nfc", is_nfc_quick, nfc);
+impl_normalization_stage!(NfdStage, "nfd", is_nfd_quick, nfd);
+impl_normalization_stage!(NfkcStage, "nfkc", is_nfkc_quick, nfkc);
+impl_normalization_stage!(NfkdStage, "nfkd", is_nfkd_quick, nfkd);
 
-/// - **NFD (Canonical Decomposition)**:  
-///   Decomposes characters into base + combining marks (e.g., `é` → `e + ́`).  
-///   Preserves compatibility chars. Reversible with NFC. Ideal for diacritic removal and linguistic analysis.
-pub const NFD: NormalizationStage = NormalizationStage::new(NormalizationForm::NFD);
+// --- 4. Implementation for StageTestConfig (Must be Duplicated) ---
 
-/// - **NFKC (Compatibility Composition)**:  
-///   Decomposes compatibility characters, then composes canonical equivalents (e.g., `ﬁ` → `fi`, `²` → `2`).  
-///   Lossy: formatting info lost. Some Unicode fractions may preserve Unicode fraction slashes.  
-///   Useful for search, string comparison, and canonical storage.
-pub const NFKC: NormalizationStage = NormalizationStage::new(NormalizationForm::NFKC);
+// NOTE: Since we removed the generic structure, we MUST duplicate the
+// StageTestConfig implementation for ALL four concrete structs.
 
-/// - **NFKD (Compatibility Decomposition)**:  
-///   Fully decomposes compatibility and canonical characters (maximal decomposition).  
-///   Lossy: formatting info lost. Useful for phonetic processing and maximum normalization.
-pub const NFKD: NormalizationStage = NormalizationStage::new(NormalizationForm::NFKD);
-
-/// Unicode normalization stages (NFC, NFD, NFKC, NFKD).
-///
-/// This module provides a generic `NormalizationStage` for Unicode text normalization,
-/// covering the four standard forms: NFC, NFD, NFKC, and NFKD.
-pub struct NormalizationStage {
-    form: NormalizationForm,
-}
-
-impl NormalizationStage {
-    pub const fn new(form: NormalizationForm) -> Self {
-        Self { form }
-    }
-
-    #[inline(always)]
-    fn quick_check(&self, text: &str) -> bool {
-        match self.form {
-            NormalizationForm::NFC => matches!(is_nfc_quick(text.chars()), IsNormalized::Yes),
-            NormalizationForm::NFD => matches!(is_nfd_quick(text.chars()), IsNormalized::Yes),
-            NormalizationForm::NFKC => matches!(is_nfkc_quick(text.chars()), IsNormalized::Yes),
-            NormalizationForm::NFKD => matches!(is_nfkd_quick(text.chars()), IsNormalized::Yes),
+macro_rules! impl_stage_test_config {
+    ($type:ty) => {
+        impl StageTestConfig for $type {
+            fn one_to_one_languages() -> &'static [Lang] {
+                all_langs()
+            }
+            fn samples(_lang: Lang) -> &'static [&'static str] {
+                &["café", "naïve", "e\u{0301}", "ﬁle", "①②③", ""]
+            }
+            fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
+                &["hello", "world123", "test", ""]
+            }
+            fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+                &[]
+            }
+            fn skip_needs_apply_test() -> bool {
+                true
+            }
         }
-    }
-
-    #[inline(always)]
-    fn normalize<'a>(&self, text: Cow<'a, str>) -> Cow<'a, str> {
-        if self.quick_check(&text) {
-            return text;
-        }
-        let owned = match self.form {
-            NormalizationForm::NFC => text.nfc().collect::<String>(),
-            NormalizationForm::NFD => text.nfd().collect::<String>(),
-            NormalizationForm::NFKC => text.nfkc().collect::<String>(),
-            NormalizationForm::NFKD => text.nfkd().collect::<String>(),
-        };
-        Cow::Owned(owned)
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        self.form.as_str()
-    }
+    };
 }
 
-impl Stage for NormalizationStage {
-    fn name(&self) -> &'static str {
-        match self.form {
-            NormalizationForm::NFC => "nfc",
-            NormalizationForm::NFD => "nfd",
-            NormalizationForm::NFKC => "nfkc",
-            NormalizationForm::NFKD => "nfkd",
-        }
-    }
-
-    #[inline(always)]
-    fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(!self.quick_check(text))
-    }
-
-    #[inline(always)]
-    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        Ok(self.normalize(text))
-    }
-}
-
-impl StageTestConfig for NormalizationStage {
-    fn one_to_one_languages() -> &'static [Lang] {
-        all_langs() // Language-independent
-    }
-
-    fn samples(_lang: Lang) -> &'static [&'static str] {
-        &[
-            "café",      // é can be composed or decomposed
-            "naïve",     // ï precomposed
-            "e\u{0301}", // e + combining acute
-            "ﬁle",       // fi ligature (NFKC)
-            "①②③",       // circled numbers (NFKC)
-            "",
-        ]
-    }
-
-    fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
-        &[
-            "hello", // Pure ASCII
-            "world123", "test", "",
-        ]
-    }
-
-    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
-        // Note: Transformations depend on the normalization form
-        // This is stage-instance specific, so keeping empty for now
-        &[]
-    }
-
-    fn skip_needs_apply_test() -> bool {
-        true // Quick check logic is complex
-    }
-}
+impl_stage_test_config!(NfcStage);
+impl_stage_test_config!(NfdStage);
+impl_stage_test_config!(NfkcStage);
+impl_stage_test_config!(NfkdStage);
 
 #[cfg(test)]
 mod contract_tests {
@@ -217,16 +173,17 @@ mod tests {
         let c = Context::default();
         let text = "café naïve ﬁ";
 
-        for form in [
-            NormalizationForm::NFC,
-            NormalizationForm::NFD,
-            NormalizationForm::NFKC,
-            NormalizationForm::NFKD,
-        ] {
-            let stage = NormalizationStage::new(form);
+        // 1. Create a list of the concrete stage instances, wrapped in a Box<dyn Stage>
+        let stages: Vec<Box<dyn Stage>> =
+            vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
+
+        for stage in stages.into_iter() {
+            // Iterate over the trait objects
+            // Need to dereference the Box to use the Stage trait methods
             let once = stage.apply(Cow::Borrowed(text), &c)?;
             let twice = stage.apply(once.clone(), &c)?;
-            assert_eq!(once, twice, "Stage {} not idempotent", stage.as_str());
+
+            assert_eq!(once, twice, "Stage {} not idempotent", stage.name());
             assert!(!(stage.needs_apply(&once, &c)?));
         }
 
@@ -238,9 +195,8 @@ mod tests {
         let c = Context::default();
         let original = "El Niño café naïve";
 
-        let nfd =
-            NormalizationStage::new(NormalizationForm::NFD).apply(Cow::Borrowed(original), &c)?;
-        let back_to_nfc = NormalizationStage::new(NormalizationForm::NFC).apply(nfd, &c)?;
+        let nfd = NFD.apply(Cow::Borrowed(original), &c)?;
+        let back_to_nfc = NFC.apply(nfd, &c)?;
 
         assert_eq!(back_to_nfc, original);
         Ok(())
@@ -248,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_multilingual_nfkc() -> TestResult {
-        let stage = NormalizationStage::new(NormalizationForm::NFKC);
+        let stage = NFKC;
         let c = Context::default();
 
         let input = "Hello, 世界! ﬁﬀ caféﬀﬃﬃ";
@@ -268,11 +224,11 @@ mod tests {
         let c = Context::default();
 
         let query = "café naïve ff"; // decomposed + ligatures
-        let stage_search = NormalizationStage::new(NormalizationForm::NFKC);
+        let stage_search = NFKC;
         let normalized_query = stage_search.apply(Cow::Borrowed(query), &c)?;
 
         let display_text = "café naïve ff";
-        let stage_display = NormalizationStage::new(NormalizationForm::NFKC);
+        let stage_display = NFKC;
         let normalized_display = stage_display.apply(Cow::Borrowed(display_text), &c)?;
 
         assert_eq!(normalized_query, normalized_display);
@@ -286,13 +242,11 @@ mod tests {
         let empty = "";
         let ascii = "hello world";
 
-        for form in [
-            NormalizationForm::NFC,
-            NormalizationForm::NFD,
-            NormalizationForm::NFKC,
-            NormalizationForm::NFKD,
-        ] {
-            let stage = NormalizationStage::new(form);
+        // 1. Create a list of the concrete stage instances, wrapped in a Box<dyn Stage>
+        let stages: Vec<Box<dyn Stage>> =
+            vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
+
+        for stage in stages.into_iter() {
             assert_eq!(stage.apply(Cow::Borrowed(empty), &c)?, "");
             assert_eq!(stage.apply(Cow::Borrowed(ascii), &c)?, ascii);
         }

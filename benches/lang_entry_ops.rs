@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use normy::lang::data::from_code;
+use normy::lang::get_lang_entry_by_code;
 
 fn bench_char_lookups(c: &mut Criterion) {
     let mut group = c.benchmark_group("char_operations");
@@ -17,7 +17,7 @@ fn bench_char_lookups(c: &mut Criterion) {
     ];
 
     for (lang, ch, desc) in test_cases {
-        let entry = from_code(lang).unwrap();
+        let entry = get_lang_entry_by_code(lang).unwrap();
 
         group.bench_with_input(
             BenchmarkId::new("apply_case_fold", desc),
@@ -63,7 +63,7 @@ fn bench_text_operations(c: &mut Criterion) {
     ];
 
     for (lang, text, desc) in test_texts {
-        let entry = from_code(lang).unwrap();
+        let entry = get_lang_entry_by_code(lang).unwrap();
 
         // Test needs_lowercase (hot detection path)
         group.bench_with_input(
@@ -101,7 +101,7 @@ fn bench_hot_loop_simulation(c: &mut Criterion) {
 
     // Simulate the actual hot loop: check every char in a string
     let text = "İstanbul'da Büyük Çarşı'da Ümit'le Öğle Yemeği Yedik";
-    let entry = from_code("TUR").unwrap();
+    let entry = get_lang_entry_by_code("TUR").unwrap();
 
     group.bench_function("turkish_case_fold_detection", |b| {
         b.iter(|| {
