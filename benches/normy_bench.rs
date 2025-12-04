@@ -16,7 +16,7 @@
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use icu::normalizer::ComposingNormalizerBorrowed;
+use icu_normalizer::ComposingNormalizerBorrowed;
 use rand::{Rng, SeedableRng, random, rngs::StdRng};
 use regex::Regex;
 use std::hint::black_box;

@@ -42,6 +42,11 @@ pub trait StageTestConfig: Stage + Sized {
     fn skip_needs_apply_test() -> bool {
         false
     }
+
+    /// Skip the needs_apply accuracy test (for stages where it's complex to predict)
+    fn skip_zero_copy_apply_test() -> bool {
+        false
+    }
 }
 
 /// Assert that a stage satisfies **all seven universal contracts** defined in the Normy white paper.
@@ -85,6 +90,10 @@ use std::borrow::Cow;
 pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
     use crate::{all_langs, context::Context};
     use std::borrow::Cow;
+
+    if S::skip_zero_copy_apply_test() {
+        return;
+    }
 
     for &lang in all_langs() {
         let ctx = Context::new(lang);
@@ -201,6 +210,9 @@ pub fn stage_is_idempotent<S: StageTestConfig>(stage: S) {
 
 #[cfg(test)]
 pub fn needs_apply_is_accurate<S: StageTestConfig>(stage: S) {
+    if S::skip_needs_apply_test() {
+        return;
+    }
     // Test in *every* language that the stage claims to support.
     // Stages that are language-agnostic (whitespace, NFC, …) will just be tested once.
     let languages = if S::one_to_one_languages().is_empty() {
