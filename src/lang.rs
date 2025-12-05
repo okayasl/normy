@@ -279,6 +279,25 @@ impl LangEntry {
         self.spacing_diacritics_slice
     }
 
+    /// Finds a language-specific case map entry for a character.
+    #[inline(always)]
+    pub fn find_case_map(&self, c: char) -> Option<&'static CaseMap> {
+        self.case_map.iter().find(|m| m.from == c)
+    }
+
+    /// Finds a language-specific fold map entry for a character.
+    #[inline(always)]
+    pub fn find_fold_map(&self, c: char) -> Option<&'static FoldMap> {
+        self.fold_map.iter().find(|m| m.from == c)
+    }
+
+    #[inline(always)]
+    pub fn find_transliterate_map(&self, c: char) -> Option<&'static FoldMap> {
+        self.transliterate_map // Transliterate uses the FoldMap struct
+            .iter()
+            .find(|m| m.from == c)
+    }
+
     // ============================================================
     // CATEGORY 5: Transformations - Pattern: apply_* or get_*
     // ============================================================
@@ -361,17 +380,15 @@ impl LangEntry {
             return (0, 0);
         }
 
-        let fold_map = self.fold_map();
+        let fold_map = self.fold_map; // Use the raw slice directly
 
         // --- Single-Pass, Unified Logic ---
         let mut num_folds = 0;
         let mut extra_bytes = 0;
 
         for c in text.chars() {
-            // Use the highly optimized, inlined lookup helper here.
-            // NOTE: If you implemented the Structure of Arrays (SoA) for your maps,
-            // this call should use that SoA lookup logic.
-            if let Some(m) = find_fold_map(fold_map, c) {
+            // Replaced the call to external find_fold_map with inline iteration
+            if let Some(m) = fold_map.iter().find(|m| m.from == c) {
                 num_folds += 1;
 
                 // This is the core logic for expansion calculation.
@@ -395,15 +412,17 @@ impl LangEntry {
         }
 
         // `map` is the slice of TransliterateMap structs
-        let map = self.transliterate_map();
+        let map = self.transliterate_map; // Use the raw slice directly
 
         // --- Single-Pass, Unified Logic ---
         let mut num_transformations = 0;
         let mut extra_bytes = 0;
 
         for c in text.chars() {
-            // Use the highly optimized, inlined lookup helper
-            if let Some(m) = find_fold_map(map, c) {
+            // Replaced the call to external find_fold_map with inline iteration
+            // Note: Since FoldMap and TransliterateMap are the same struct (FoldMap),
+            // the find logic is identical.
+            if let Some(m) = map.iter().find(|m| m.from == c) {
                 num_transformations += 1;
 
                 // This calculates the expansion for ALL matches,
@@ -420,13 +439,6 @@ impl LangEntry {
 
         (num_transformations, extra_bytes)
     }
-}
-
-#[inline(always)]
-fn find_fold_map(fold_map: &'static [FoldMap], c: char) -> Option<&'static FoldMap> {
-    // The reference returned by .find() is guaranteed to live as long
-    // as the data it points to, which is static.
-    fold_map.iter().find(|m| m.from == c)
 }
 
 pub fn get_lang_entry_by_code(code: &str) -> Option<&'static LangEntry> {

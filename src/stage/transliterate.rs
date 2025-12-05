@@ -77,9 +77,8 @@ impl Stage for Transliterate {
         // Allocate with precise capacity
         let mut out = String::with_capacity(text.len() + extra_bytes);
 
-        let map = ctx.lang_entry.transliterate_map();
         for c in text.chars() {
-            if let Some(m) = map.iter().find(|m| m.from == c) {
+            if let Some(m) = ctx.lang_entry.find_transliterate_map(c) {
                 out.push_str(m.to);
             } else {
                 out.push(c);
@@ -113,9 +112,8 @@ impl Stage for Transliterate {
 impl CharMapper for Transliterate {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        let map = ctx.lang_entry.transliterate_map();
-        map.iter()
-            .find(|m| m.from == c)
+        ctx.lang_entry
+            .find_transliterate_map(c)
             .map(|m| {
                 debug_assert!(
                     m.to.chars().count() == 1,
@@ -155,9 +153,12 @@ impl<'a> Iterator for TransliterateIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
         Some(
+            // Since TransliterateIter holds the `map` slice,
+            // we manually search the slice instead of calling the LangEntry method
+            // (which would require a Context reference we don't have here).
             self.map
                 .iter()
-                .find(|m| m.from == c)
+                .find(|m| m.from == c) // <--- USE DIRECT SLICE FIND
                 .map(|m| {
                     debug_assert!(
                         m.to.chars().count() == 1,
