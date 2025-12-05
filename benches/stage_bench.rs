@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{borrow::Cow, time::Duration};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
@@ -60,6 +60,8 @@ where
         let normy = Normy::builder().lang(lang).add_stage(stage).build();
         let normalized = normy.normalize(text).unwrap();
         auto_unchanged.push((normalized, lang));
+        let mut zero_copy_hits = 0usize;
+        let mut total = 0usize;
 
         // Benchmark changed input
         let id = format!("{} - Changed - {text}", lang.code());
@@ -67,30 +69,52 @@ where
             b.iter_batched(
                 || text,
                 |t| {
+                    total += 1;
                     // fresh stage every iteration — same behavior as your original pattern
                     let stage = constructor();
                     let normy = Normy::builder().lang(lang).add_stage(stage).build();
-                    normy.normalize(t)
+                    let result = normy.normalize(t).unwrap();
+                    if matches!(result, Cow::Borrowed(s) if s.as_ptr() == t.as_ptr() && s.len() == t.len()) {
+                        zero_copy_hits += 1;
+                    }
                 },
                 BatchSize::SmallInput,
             )
         });
+        let pct = if total > 0 {
+            (zero_copy_hits as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        println!("   ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
     }
 
     // Benchmark auto-unchanged samples
     for (normalized, lang) in auto_unchanged {
+        let mut zero_copy_hits = 0usize;
+        let mut total = 0usize;
         let id = format!("{} - Unchanged (auto) - {normalized}", lang.code());
         group.bench_function(BenchmarkId::new("", id), |b| {
             b.iter_batched(
                 || normalized.as_ref(),
                 |t| {
+                    total += 1;
                     let stage = constructor();
                     let normy = Normy::builder().lang(lang).add_stage(stage).build();
-                    normy.normalize(t)
+                    let result = normy.normalize(t).unwrap();
+                    if matches!(result, Cow::Borrowed(s) if s.as_ptr() == t.as_ptr() && s.len() == t.len()) {
+                        zero_copy_hits += 1;
+                    }
                 },
                 BatchSize::SmallInput,
             )
         });
+        let pct = if total > 0 {
+            (zero_copy_hits as f64 / total as f64) * 100.0
+        } else {
+            0.0
+        };
+        println!("   ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
     }
 
     group.finish();

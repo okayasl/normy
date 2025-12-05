@@ -127,5 +127,6 @@ pub trait CharMapper: Send + Sync {
 
     /// Bind the mapper to a concrete `&str`.  The returned iterator must be
     /// `FusedIterator` so the compiler can eliminate bounds checks.
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a>;
+    fn bind<'a>(&self, text: &'a str, ctx: &'a Context)
+    -> Box<dyn FusedIterator<Item = char> + 'a>;
 }

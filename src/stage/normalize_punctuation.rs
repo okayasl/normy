@@ -213,7 +213,8 @@ mod tests {
         let stage = NormalizePunctuation;
         let mapper: &dyn CharMapper = &stage;
 
-        let iter = mapper.bind("A “quote” and… dash—", &Context::new(ENG));
+        let binding = Context::new(ENG);
+        let iter = mapper.bind("A “quote” and… dash—", &binding);
         let collected: String = iter.collect();
 
         assert_eq!(collected, "A \"quote\" and. dash-");

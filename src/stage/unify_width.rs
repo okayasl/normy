@@ -180,7 +180,8 @@ mod tests {
         let stage = UnifyWidth;
         let mapper: &dyn CharMapper = &stage;
 
-        let iter = mapper.bind("ＡＢＣ １２３！", &Context::new(ENG));
+        let binding = Context::new(ENG);
+        let iter = mapper.bind("ＡＢＣ １２３！", &binding);
         let collected: String = iter.collect();
 
         assert_eq!(collected, "ABC 123!");

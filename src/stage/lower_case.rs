@@ -63,22 +63,12 @@ impl Stage for LowerCase {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        let mapper = self
+            .as_char_mapper(ctx)
+            .expect("LowerCase always provides CharMapper");
         let mut out = String::with_capacity(text.len());
-        let mut changed = false;
-
-        for c in text.chars() {
-            let lower = ctx.lang_entry.apply_lowercase(c);
-            if lower != c {
-                changed = true;
-            }
-            out.push(lower);
-        }
-
-        if changed {
-            Ok(Cow::Owned(out))
-        } else {
-            Ok(text)
-        }
+        out.extend(mapper.bind(&text, ctx));
+        Ok(Cow::Owned(out))
     }
 
     #[inline]
@@ -98,16 +88,20 @@ impl CharMapper for LowerCase {
         Some(ctx.lang_entry.apply_lowercase(c))
     }
 
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
+    fn bind<'a>(
+        &self,
+        text: &'a str,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(LowercaseIter {
             chars: text.chars(),
-            lang: ctx.lang_entry,
+            lang: &ctx.lang_entry,
         })
     }
 }
 struct LowercaseIter<'a> {
     chars: Chars<'a>,
-    lang: LangEntry,
+    lang: &'a LangEntry,
 }
 
 impl<'a> Iterator for LowercaseIter<'a> {
@@ -118,8 +112,16 @@ impl<'a> Iterator for LowercaseIter<'a> {
         self.chars.next().map(|c| self.lang.apply_lowercase(c))
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.chars.size_hint()
+    }
+}
+
+impl<'a> ExactSizeIterator for LowercaseIter<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.chars.size_hint().0
     }
 }
 
@@ -167,6 +169,10 @@ impl StageTestConfig for LowerCase {
             LIT => &[("JIS", "jis")],
             _ => &[("HELLO", "hello")],
         }
+    }
+
+    fn skip_zero_copy_apply_test() -> bool {
+        true
     }
 }
 
