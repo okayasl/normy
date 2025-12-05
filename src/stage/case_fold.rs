@@ -5,8 +5,8 @@ use crate::{
     stage::{CharMapper, FusedIterator, Stage, StageError},
     testing::stage_contract::StageTestConfig,
 };
-use std::{borrow::Cow, str::Chars};
 use std::sync::Arc;
+use std::{borrow::Cow, str::Chars};
 
 /// Locale-sensitive case folding for search and comparison.
 ///
@@ -32,6 +32,9 @@ impl Stage for CaseFold {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
+        if text.is_ascii() {
+            return Ok(text.bytes().any(|b| b.is_ascii_uppercase()));
+        }
         // Check if any character needs case folding
         if text.chars().any(|c| ctx.lang_entry.needs_case_fold(c)) {
             return Ok(true);
@@ -168,17 +171,21 @@ impl CharMapper for CaseFold {
         ctx.lang_entry.apply_case_fold(c)
     }
 
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
+    fn bind<'a>(
+        &self,
+        text: &'a str,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(CaseFoldIter {
             chars: text.chars(),
-            lang: ctx.lang_entry,
+            lang: &ctx.lang_entry,
         })
     }
 }
 
 struct CaseFoldIter<'a> {
     chars: Chars<'a>,
-    lang: LangEntry,
+    lang: &'a LangEntry,
 }
 
 impl<'a> Iterator for CaseFoldIter<'a> {
@@ -192,6 +199,13 @@ impl<'a> Iterator for CaseFoldIter<'a> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.chars.size_hint()
+    }
+}
+
+impl<'a> ExactSizeIterator for CaseFoldIter<'a> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.chars.size_hint().0
     }
 }
 
