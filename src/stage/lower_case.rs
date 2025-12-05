@@ -56,6 +56,9 @@ impl Stage for LowerCase {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
+        if text.is_ascii() {
+            return Ok(text.bytes().any(|b| b.is_ascii_uppercase()));
+        }
         Ok(text.chars().any(|c| ctx.lang_entry.needs_lowercase(c)))
     }
 
@@ -74,7 +77,7 @@ impl Stage for LowerCase {
         if changed {
             Ok(Cow::Owned(out))
         } else {
-            Ok(text) // ← ZERO-COPY — pure, unassailable
+            Ok(text)
         }
     }
 
@@ -112,8 +115,7 @@ impl<'a> Iterator for LowercaseIter<'a> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        let c = self.chars.next()?;
-        Some(self.lang.apply_lowercase(c))
+        self.chars.next().map(|c| self.lang.apply_lowercase(c))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {

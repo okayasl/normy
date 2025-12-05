@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
     ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LowerCase,
@@ -96,10 +98,10 @@ where
 
 fn stage_matrix(c: &mut Criterion) {
     stage_benches_auto(c, "LowerCase", || LowerCase);
-    stage_benches_auto(c, "CaseFold", || CaseFold);
-    stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
-    stage_benches_auto(c, "Transliterate", || Transliterate);
-    stage_benches_auto(c, "SegmentWords", || SegmentWords);
+    // stage_benches_auto(c, "CaseFold", || CaseFold);
+    // stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
+    // stage_benches_auto(c, "Transliterate", || Transliterate);
+    // stage_benches_auto(c, "SegmentWords", || SegmentWords);
     // stage_benches_auto(c, "UnifyWidth", || UnifyWidth);
     // stage_benches_auto(c, "NFC", || NFC);
     // stage_benches_auto(c, "NFD", || NFD);
@@ -116,9 +118,9 @@ fn stage_matrix(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default()
-        .measurement_time(std::time::Duration::from_secs(5))
-        .warm_up_time(std::time::Duration::from_secs(3))
-        .sample_size(2000)
+        .measurement_time(Duration::from_secs(2))
+        .warm_up_time(Duration::from_secs(2))
+        .sample_size(1000)
         .noise_threshold(0.015)
         .significance_level(0.05);
     targets = stage_matrix

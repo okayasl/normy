@@ -51,15 +51,35 @@ pub enum StageError {
     Validation(&'static str, String),
 }
 
-/// A single normalisation step.
+/// # The Normy Stage Contract
+///
+/// Every stage in Normy follows this strict, performance-critical contract:
+///
+/// 1. `needs_apply`
+///    - Must be fast, cheap, and as accurate as possible.
+///    - False positives are acceptable only in astronomically rare cases.
+///    - If it returns `false`, the entire stage is skipped at compile-time / machine-code level.
+///    - This is the source of Normy’s extreme zero-copy performance.
+///
+/// 2. `apply`
+///    - Is called **only** when `needs_apply` returned `true`.
+///    - Is explicitly allowed to allocate and perform expensive work.
+///    - Must **never** attempt to "salvage" zero-copy by comparing output with input.
+///    - Must trust `needs_apply` unconditionally.
+///
+/// Stages that can transform text without allocation (e.g. pure character mappings)
+/// should implement `as_char_mapper()` or `into_dyn_char_mapper()` instead.
 pub trait Stage: Send + Sync {
     /// Human-readable name – used for profiling and error messages.
     fn name(&self) -> &'static str;
 
-    /// Fast pre-check.  Returning `Ok(false)` skips the whole stage.
+    /// Fast, cheap, usually perfect quick-check.
+    /// If this returns false → the entire stage is elided at compile time / machine-code level.
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError>;
 
-    /// Allocation-aware transformation.  Must always be correct.
+    /// You are only called when needs_apply returned true.
+    /// You may allocate. You may mutate. You may be slow.
+    /// You must never try to "be clever" and return the input unchanged.
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
 
     // ──────────────────────────────────────────────────────────────

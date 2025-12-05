@@ -22,7 +22,9 @@ pulldown-cmark = { version = "0.13", default-features = false }
 unicode-normalization = "0.1.25"
 simdutf8 = { version = "0.1.5", optional = true }
 smallvec = "1.15.1"
-icu_normalizer = { version = "2.1.1", default-features = false, features = ["compiled_data"] }
+icu_normalizer = { version = "2.1.1", default-features = false, features = [
+    "compiled_data",
+] }
 
 [dev-dependencies]
 lazy_static = "1.5.0"
@@ -33,16 +35,23 @@ tokenizers = "0.22.2"
 regex = "1.12.2"
 
 [[bench]]
-name = "normy_bench"
+name = "nb"
+path = "benches/normy_bench.rs"
 harness = false
 
 [[bench]]
-name = "stage_bench"
+name = "sb"
+path = "benches/stage_bench.rs"
 harness = false
 
 [[bench]]
 name = "cnb"
 path = "benches/comparison_normalization_bench.rs"
+harness = false
+
+[[bench]]
+name = "cpb"
+path = "benches/comparison_pipeline_bench.rs"
 harness = false
 
 [features]

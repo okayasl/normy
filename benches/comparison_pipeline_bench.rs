@@ -3,171 +3,361 @@
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use icu_normalizer::{
-    ComposingNormalizer, ComposingNormalizerBorrowed, DecomposingNormalizer,
-    DecomposingNormalizerBorrowed,
-};
-use normy::{
-    process::{ChainedProcess, EmptyProcess},
-    stage::normalization::{NfcStage, NfdStage, NfkcStage, NfkdStage},
-};
-use rand::{Rng, SeedableRng, random, rngs::StdRng};
+use normy::stage::normalization::NfdStage;
+use rand::random;
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::sync::LazyLock;
 use std::{borrow::Cow, hint::black_box};
 
-use tokenizers::{
-    NormalizedString, Normalizer,
-    normalizers::{
-        Sequence, unicode::NFC as tokenizerNFC, unicode::NFD as tokenizerNFD,
-        unicode::NFKC as tokenizerNFKC, unicode::NFKD as tokenizerNFKD,
-    },
+use tokenizers::{NormalizedString, Normalizer, normalizers::BertNormalizer};
+
+use normy::{
+    LowerCase, NFD, Normy, RemoveDiacritics, StripControlChars, StripFormatControls, ZHO,
+    stage::normalize_whitespace::NormalizeWhitespace,
 };
 
-use normy::{NFC, NFD, NFKC, NFKD, Normy, NormyBuilder};
-use unicode_normalization::UnicodeNormalization;
 // ──────────────────────────────────────────────────────────────
-// 20+ Language-Specific Stress Samples (Injected into all corpora)
+// Compatibility stage (exact HF Bert Chinese spacing behavior)
 // ──────────────────────────────────────────────────────────────
-static STRESS_POOL_NFC_NFD: &[&str] = &[
-    // 1. Vietnamese – stacked diacritics (worst-case NFD explosion)
-    "Tiếng Việt Quốc ngữ Phở Hà Nội",
-    // 2. French – precomposed + ligatures
-    "Sœur naïve à l’œuf ŒUF déjà-vu",
-    // 3. German – ß and ligatures
-    "Fußball Straße Maßstab GRÜNE STRAẞE",
-    // 4. Turkish – dotted/dotless I
-    "İSTANBUL İĞNE İĞDE ıiIİ",
-    // 5. Spanish – ñ + inverted punctuation
-    "¡España mañana José Peña!",
-    // 6. Polish – ogonek + kreska
-    "Łódź żółć ŻÓŁĆ Żubrówka",
-    // 7. Lithuanian – preserves i with ogonek
-    "Žemaitija Šiauliai Jurgis",
-    // 8. Icelandic – eth and thorn
-    "Þetta er íslenska ÐðÞþ",
-    // 9. Romanian – ș and ț (comma below)
-    "Ștefan Țară România",
-    // 10. Croatian – đ and lj/nj digraphs
-    "Đuro Đaković Ljiljana Njiva",
-    // 11. Greek – final sigma + tonos
-    "Ἀρχιμήδης Ἑλλάς σοφός",
-    // 12. Russian – yo + soft sign
-    "Ёлки-палки всё А́нна",
-    // 13. Arabic – shadda + harakat
-    "الْكِتَابُ مُحَمَّدٌ ـــ",
-    // 14. Hebrew – niqqud + final forms
-    "סֵפֶר עִבְרִית שׂ",
-    // 15. Hindi – conjuncts + nukta
-    "हिन्दी ज़िंदगी क़िला",
-    // 16. Thai – no spaces + tone marks
-    "ภาษาไทย สวัสดีครับ ๑๒๓",
-    // 17. Korean – jamo + full-width
-    "한글 ＫＯＲＥＡ 한국어",
-    // 18. Japanese – half-width kana + prolonged sound
-    "ﾊﾟﾋﾟﾌﾟﾍﾟﾎﾟ ーー こんにちは",
-    // 19. Chinese – full-width punctuation + letters
-    "ＨＴＭＬ　＜ｔａｇ＞　你好世界",
-    // 20. Emoji + skin tone + ZWJ
-    "👨‍👩‍👧‍👦 👍🏼 ✨ 🚀",
-    // Bonus: Ligature soup
-    "ﬁﬂﬃﬄﬆﬀﬁﬃﬃﬃ",
-];
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BertCompatChineseChars;
 
-static STRESS_POOL_NFKC_NFKD: &[&str] = &[
-    "ﬀ ﬁ ﬂ ﬃ ﬄ ﬆ ﬁﬀﬃﬃ",                 // Latin ligatures
-    "½ ⅓ ¼ ⅕ ⅙ ⅛ ⅔ ¾",                  // Fractions
-    "①②③④⑤ ⑩ ⑴⑵⑶ ⒈⒉⒊",                  // Circled/enclosed numbers
-    "Ｈｅｌｌｏ　Ｗｏｒｌｄ　＆　＜＞", // Full-width Latin + punctuation
-    "㈱ ㈲ ㎏ ㎞ ㎡",                   // CJK compatibility (company, kg, km²)
-    "№ ℡ ™ © ®",                        // Symbols
-    "ﬃﬃﬃﬃ ﬃﬃﬃﬃ",                        // Triple ligatures
-    "ﬀﬃ ﬃﬃ ﬄﬃ",                         // Mixed ligatures
-    "stﬀ stﬂ stﬃ",                      // st ligature variants
-];
-
-/// Enhanced realistic corpus with guaranteed transformation triggers
-fn realistic_corpus(seed: u64, size_kb: usize) -> String {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let mut out = String::with_capacity(size_kb * 1024);
-
-    let pools = if rng.random_bool(0.5) {
-        &[STRESS_POOL_NFC_NFD, STRESS_POOL_NFKC_NFKD]
-    } else {
-        &[STRESS_POOL_NFKC_NFKD, STRESS_POOL_NFC_NFD]
-    };
-
-    while out.len() < size_kb * 1024 {
-        let pool = pools[rng.random_range(0..pools.len())];
-        let text = pool[rng.random_range(0..pool.len())];
-        let repeat = rng.random_range(1..=5);
-        for _ in 0..repeat {
-            out.push_str(text);
-            out.push(' ');
+impl normy::stage::Stage for BertCompatChineseChars {
+    fn name(&self) -> &'static str {
+        "bert_compat_chinese_chars"
+    }
+    #[inline(always)]
+    fn needs_apply(
+        &self,
+        text: &str,
+        _: &normy::context::Context,
+    ) -> Result<bool, normy::stage::StageError> {
+        Ok(text.chars().any(is_chinese_char))
+    }
+    #[inline(always)]
+    fn apply<'a>(
+        &self,
+        text: Cow<'a, str>,
+        _: &normy::context::Context,
+    ) -> Result<Cow<'a, str>, normy::stage::StageError> {
+        let mut out = String::with_capacity(text.len() + 8);
+        for c in text.chars() {
+            if is_chinese_char(c) {
+                out.push(' ');
+                out.push(c);
+                out.push(' ');
+            } else {
+                out.push(c);
+            }
         }
-        // Random ASCII filler
+        Ok(Cow::Owned(out))
+    }
+    #[inline(always)]
+    fn as_char_mapper(&self, _: &normy::context::Context) -> Option<&dyn normy::stage::CharMapper> {
+        Some(self)
+    }
+}
+
+impl normy::stage::CharMapper for BertCompatChineseChars {
+    #[inline(always)]
+    fn map(&self, c: char, _: &normy::context::Context) -> Option<char> {
+        if is_chinese_char(c) { None } else { Some(c) }
+    }
+    #[inline(always)]
+    fn bind<'a>(
+        &self,
+        text: &'a str,
+        _: &normy::context::Context,
+    ) -> Box<dyn std::iter::FusedIterator<Item = char> + 'a> {
+        Box::new(text.chars().flat_map(|c| {
+            if is_chinese_char(c) {
+                Box::new(
+                    std::iter::once(' ')
+                        .chain(std::iter::once(c))
+                        .chain(std::iter::once(' ')),
+                ) as Box<dyn std::iter::Iterator<Item = char>>
+            } else {
+                Box::new(std::iter::once(c)) as Box<dyn std::iter::Iterator<Item = char>>
+            }
+        }))
+    }
+}
+
+fn is_chinese_char(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x4E00..=0x9FFF |
+        0x3400..=0x4DBF |
+        0x20000..=0x2A6DF |
+        0x2A700..=0x2B73F |
+        0x2B740..=0x2B81F |
+        0x2B920..=0x2CEAF |
+        0xF900..=0xFAFF |
+        0x2F800..=0x2FA1F
+    )
+}
+
+// ──────────────────────────────────────────────────────────────
+// Normy pipeline — 100% bit-identical to HF BertNormalizer
+// ──────────────────────────────────────────────────────────────
+// ──────────────────────────────────────────────────────────────
+// Concrete pipeline type – no `impl Trait` in static!
+// ──────────────────────────────────────────────────────────────
+type BertPipeline = Normy<
+    normy::process::ChainedProcess<
+        LowerCase,
+        normy::process::ChainedProcess<
+            RemoveDiacritics,
+            normy::process::ChainedProcess<
+                NfdStage,
+                normy::process::ChainedProcess<
+                    BertCompatChineseChars,
+                    normy::process::ChainedProcess<
+                        NormalizeWhitespace,
+                        normy::process::ChainedProcess<
+                            StripFormatControls,
+                            normy::process::ChainedProcess<
+                                StripControlChars,
+                                normy::process::EmptyProcess,
+                            >,
+                        >,
+                    >,
+                >,
+            >,
+        >,
+    >,
+>;
+
+static NORMY_BERT: LazyLock<BertPipeline> = LazyLock::new(|| {
+    Normy::builder()
+        .lang(ZHO)
+        .modify_lang(|entry| {
+            // Enable diacritic stripping (copy FRA's list for Latin accents)
+            entry.has_diacritics = true;
+            entry.diacritics = Some(&[
+                '\u{0300}', '\u{0301}', '\u{0302}', '\u{0308}', '\u{030A}', '\u{030B}', '\u{030C}',
+                '\u{030F}', '\u{0311}', '\u{0327}', '\u{0328}', '\u{0338}',
+            ]);
+            entry.diacritic_slice = entry.diacritics; // Mirror for fast lookup
+        })
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
+        .add_stage(NormalizeWhitespace {
+            collapse_sequential: false,
+            trim_edges: false,
+            normalize_unicode: true,
+        })
+        .add_stage(BertCompatChineseChars) // ← this one (replaces BertCompatCjkPunct and SegmentWords)
+        .add_stage(NFD) // Decompose precomposed accents (é → e + ´)
+        .add_stage(RemoveDiacritics) // Now removes ´ (Mn) via enabled list
+        .add_stage(LowerCase)
+        .build()
+});
+
+// ──────────────────────────────────────────────────────────────
+// HuggingFace BertNormalizer
+// ──────────────────────────────────────────────────────────────
+static HF_BERT: LazyLock<BertNormalizer> =
+    LazyLock::new(|| BertNormalizer::new(true, true, Some(true), true));
+
+// ──────────────────────────────────────────────────────────────
+// Realistic corpora
+// ──────────────────────────────────────────────────────────────
+fn corpus_needs_transform(seed: u64, kb: usize) -> String {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut out = String::with_capacity(kb * 1024);
+    let pool = &[
+        "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}résumé",
+        "你好世界",
+        "NAÏVE déjà-vu",
+        "Hello\u{00A0}\u{2003}world\u{3000}",
+        "Ｈｅｌｌｏ　世界　café",
+    ];
+    while out.len() < kb * 1024 {
+        let s = pool[rng.random_range(0..pool.len())];
+        out.push_str(s);
+        out.push(' ');
         if rng.random_bool(0.1) {
             let word: String = (0..rng.random_range(5..20))
-                .map(|_| (b'a' + (random::<u8>() % 26)) as char)
+                .map(|_| (b'A' + (random::<u8>() % 26)) as char)
                 .collect();
             out.push_str(&word);
             out.push(' ');
         }
     }
-
-    truncate_to_char_boundary(&mut out, size_kb * 1024);
+    truncate_to_boundary(&mut out, kb * 1024);
     out
 }
 
-fn truncate_to_char_boundary(s: &mut String, max_len: usize) {
-    if s.len() > max_len {
-        while !s.is_char_boundary(max_len) && !s.is_empty() {
+fn corpus_already_normalized(seed: u64, kb: usize) -> String {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut out = String::with_capacity(kb * 1024);
+    while out.len() < kb * 1024 {
+        let word: String = (0..rng.random_range(5..25))
+            .map(|_| (b'a' + (random::<u8>() % 26)) as char)
+            .collect();
+        out.push_str(&word);
+        out.push(' ');
+    }
+    truncate_to_boundary(&mut out, kb * 1024);
+    out
+}
+
+fn truncate_to_boundary(s: &mut String, max: usize) {
+    if s.len() > max {
+        while !s.is_char_boundary(max) {
             s.pop();
         }
-        s.truncate(max_len);
+        s.truncate(max);
     }
 }
 
-// ── Zero-Copy Tracker ──
-#[derive(Default)]
-struct ZeroCopyTracker {
-    name: String,
-    hits: usize,
-    total: usize,
+static CORPUS_64KB_NEEDS: LazyLock<String> =
+    LazyLock::new(|| corpus_needs_transform(0xDEAD_BEEF, 64));
+static CORPUS_64KB_NORM: LazyLock<String> =
+    LazyLock::new(|| corpus_already_normalized(0xCAFE_BABE, 64));
+
+// ──────────────────────────────────────────────────────────────
+// Benchmark harness
+// ──────────────────────────────────────────────────────────────
+fn bench_bert_normalizers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("BERT Normalizer Comparison");
+    group.throughput(Throughput::Bytes(64 * 1024));
+    group.sample_size(200);
+    group.measurement_time(std::time::Duration::from_secs(12));
+
+    let corpora = [
+        ("needs_transform_64kb", &*CORPUS_64KB_NEEDS),
+        ("already_normalized_64kb", &*CORPUS_64KB_NORM),
+    ];
+
+    for (name, corpus) in corpora {
+        // ── Normy (zero-copy aware) ─────────────────────────────────────
+        bench_normy(&mut group, name, corpus);
+
+        // ── HuggingFace (always allocates) ───────────────────────────────
+        bench_hf_bert(&mut group, name, corpus);
+    }
+
+    group.finish();
 }
 
-impl ZeroCopyTracker {
-    fn new(name: String) -> Self {
-        Self {
-            name,
-            ..Default::default()
-        }
-    }
+fn bench_normy(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    scenario: &str,
+    corpus: &str,
+) {
+    let mut zero_copy_hits = 0usize;
+    let mut total = 0usize;
 
-    #[allow(clippy::ptr_arg)]
-    fn record(&mut self, input: &str, output: &Cow<'_, str>) {
-        self.total += 1;
-        if matches!(output, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr() && s.len() == input.len())
-        {
-            self.hits += 1;
-        }
-    }
+    group.bench_function(BenchmarkId::new("Normy (zero-copy)", scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_BERT.normalize(black_box(corpus)).unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        })
+    });
 
-    #[allow(clippy::cast_precision_loss)]
-    fn hit_rate_pct(&self) -> f64 {
-        if self.total == 0 {
-            0.0
-        } else {
-            (self.hits as f64 / self.total as f64) * 100.0
-        }
-    }
+    let pct = if total > 0 {
+        (zero_copy_hits as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    println!("   Normy  - {scenario}: ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
+}
 
-    fn print(&self) {
-        println!(
-            "Case: {} → ZERO-COPY: {:.2}% ({}/{})",
-            self.name,
-            self.hit_rate_pct(),
-            self.hits,
-            self.total
-        );
+fn bench_hf_bert(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    scenario: &str,
+    corpus: &str,
+) {
+    group.bench_function(BenchmarkId::new("HuggingFace tokenizers", scenario), |b| {
+        b.iter(|| {
+            let mut ns = NormalizedString::from(black_box(corpus));
+            HF_BERT.normalize(&mut ns).unwrap();
+            black_box(ns.get());
+        })
+    });
+    println!("   HF     - {scenario}: Always allocates (0.0% zero-copy)");
+}
+
+criterion_group!(benches, bench_bert_normalizers);
+criterion_main!(benches);
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn bert_normalizer_semantic_equivalence() {
+        let normy = NORMY_BERT();
+        let hf = HF_BERT();
+
+        // Test cases covering every code path in BertNormalizer
+        let cases = &[
+            // 1. Full-width + CJK + control chars + accents + mixed whitespace
+            "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}\u{00A0}\u{2028}résumé",
+            // 2. Pure CJK
+            "你好世界",
+            // 3. Already normalized (critical for zero-copy test)
+            "hello world",
+            // 4. Controls only
+            "\u{0001}\u{0002}hello\u{001F}world",
+            // 5. Unicode whitespace only
+            "hello\u{00A0}\u{1680}\u{2003}world\u{3000}",
+            // 6. Accents + lowercase edge cases
+            "NAÏVE ÉLÉPHANT naïve déjà-vu",
+            // 7. Mixed script (important: no false segmentation)
+            "Hello世界naïveCafé",
+            // 8. Empty string
+            "",
+        ];
+
+        for (i, &input) in cases.iter().enumerate() {
+            // --- Hugging Face ---
+            let mut hf_ns = NormalizedString::from(input);
+            hf.normalize(&mut hf_ns).expect("HF normalize failed");
+            let hf_output: String = hf_ns.get().into();
+
+            // --- Normy ---
+            let normy_result = normy.normalize(input).expect("Normy normalize failed");
+            let normy_output: String = normy_result.clone().into_owned();
+
+            // Semantic equivalence
+            assert_eq!(
+                hf_output,
+                normy_output,
+                "\n\nFailed equivalence on test case #{}\n\
+             Input:  {:?}\n\
+             HF:     {:?}\n\
+             Normy:  {:?}\n\
+             HF len:  {} chars\n\
+             Normy len: {} chars\n",
+                i + 1,
+                input,
+                hf_output,
+                normy_output,
+                hf_output.len(),
+                normy_output.len()
+            );
+
+            // --- Zero-copy proof on unchanged input ---
+            if input.chars().all(|c| {
+                c.is_ascii_lowercase() || c.is_ascii_whitespace() || c.is_ascii_punctuation()
+            }) && input
+                .trim()
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_punctuation())
+            {
+                // This input should be completely unchanged → zero-copy must trigger
+                assert!(
+                    matches!(normy_result, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr() && s.len() == input.len()),
+                    "Zero-copy failed on already-normalized input: {:?}",
+                    input
+                );
+            }
+        }
     }
 }
