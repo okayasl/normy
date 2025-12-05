@@ -68,17 +68,25 @@ impl Stage for RemoveDiacritics {
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
         // Fast path: no rules defined for this language
-        if !ctx.lang_entry.has_strip_or_diacritics() {
+        if !ctx
+            .lang_entry
+            .has_pre_composed_to_base_map_or_spacing_diacritics()
+        {
             return Ok(false);
         }
 
         // Use the optimized method from LangEntry
-        Ok(ctx.lang_entry.needs_diacritic_removal(text))
+        Ok(ctx
+            .lang_entry
+            .needs_pre_composed_to_base_map_or_spacing_diacritics_removal(text))
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         // Fast path: language has no strip or diacritic rules
-        if !ctx.lang_entry.has_strip_or_diacritics() {
+        if !ctx
+            .lang_entry
+            .has_pre_composed_to_base_map_or_spacing_diacritics()
+        {
             return Ok(text);
         }
 
@@ -89,9 +97,9 @@ impl Stage for RemoveDiacritics {
         }
 
         // Pre-scan to detect if any work is needed (zero-copy fast path)
-        let needs_work = text
-            .chars()
-            .any(|c| ctx.lang_entry.is_strippable(c) || ctx.lang_entry.is_diacritic(c));
+        let needs_work = text.chars().any(|c| {
+            ctx.lang_entry.is_pre_composed_to_base_char(c) || ctx.lang_entry.is_spacing_diacritic(c)
+        });
 
         if !needs_work {
             return Ok(text);
@@ -103,11 +111,11 @@ impl Stage for RemoveDiacritics {
 
         for c in text.chars() {
             // 1. Check strip_map first (precomposed → base, e.g., é→e)
-            if let Some(base) = ctx.lang_entry.apply_strip(c) {
+            if let Some(base) = ctx.lang_entry.apply_pre_composed_to_base_map(c) {
                 out.push(base);
                 changed = true;
             // 2. Check if it's a combining diacritic (e.g., Arabic harakat)
-            } else if ctx.lang_entry.is_diacritic(c) {
+            } else if ctx.lang_entry.is_spacing_diacritic(c) {
                 changed = true;
                 // Skip this character (remove it)
             } else {
@@ -125,7 +133,10 @@ impl Stage for RemoveDiacritics {
     #[inline]
     fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
         // Only eligible if language has strip or diacritic rules
-        if ctx.lang_entry.has_strip_or_diacritics() {
+        if ctx
+            .lang_entry
+            .has_pre_composed_to_base_map_or_spacing_diacritics()
+        {
             Some(self)
         } else {
             None
@@ -134,7 +145,9 @@ impl Stage for RemoveDiacritics {
 
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        ctx.lang_entry.has_strip_or_diacritics().then_some(self)
+        ctx.lang_entry
+            .has_pre_composed_to_base_map_or_spacing_diacritics()
+            .then_some(self)
     }
 }
 
@@ -142,9 +155,9 @@ impl CharMapper for RemoveDiacritics {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         // Use the new semantic methods
-        if let Some(base) = ctx.lang_entry.apply_strip(c) {
+        if let Some(base) = ctx.lang_entry.apply_pre_composed_to_base_map(c) {
             Some(base)
-        } else if ctx.lang_entry.is_diacritic(c) {
+        } else if ctx.lang_entry.is_spacing_diacritic(c) {
             None // Remove combining diacritic
         } else {
             Some(c) // Keep unchanged
@@ -155,7 +168,7 @@ impl CharMapper for RemoveDiacritics {
         let lang = ctx.lang_entry;
 
         // Fast path: language has no rules → passthrough
-        if !lang.has_strip_or_diacritics() {
+        if !lang.has_pre_composed_to_base_map_or_spacing_diacritics() {
             return Box::new(text.chars());
         }
 
@@ -166,7 +179,7 @@ impl CharMapper for RemoveDiacritics {
 
         // Medium path: only precomposed strip map (French, Vietnamese, Polish, etc.)
         // → 1:1 mapping, zero decomposition needed
-        if lang.has_strip_map() && !lang.has_diacritics() {
+        if lang.has_pre_composed_to_base_map() && !lang.has_spacing_diacritics() {
             return Box::new(StripMapIter {
                 chars: text.chars(),
                 lang,
@@ -174,7 +187,7 @@ impl CharMapper for RemoveDiacritics {
         }
 
         // Slow path: has combining diacritics (Arabic, Hebrew) → must use NFD
-        if lang.has_diacritics() {
+        if lang.has_spacing_diacritics() {
             let nfd = text.nfd();
             let filtered = RemoveDiacriticsIter { chars: nfd, lang };
             let recomposed = Recompositions::new_canonical(filtered);
@@ -202,7 +215,7 @@ impl<'a> Iterator for StripMapIter<'a> {
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
         let c = self.chars.next()?;
-        Some(self.lang.apply_strip(c).unwrap_or(c))
+        Some(self.lang.apply_pre_composed_to_base_map(c).unwrap_or(c))
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -226,7 +239,7 @@ impl<I: Iterator<Item = char>> Iterator for RemoveDiacriticsIter<I> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let c = self.chars.next()?;
-            if !self.lang.is_diacritic(c) {
+            if !self.lang.is_spacing_diacritic(c) {
                 return Some(c);
             }
             // Skip diacritics
@@ -546,7 +559,10 @@ mod tests {
 
         for lang in [ENG, DEU, NLD] {
             let c = Context::new(lang);
-            assert!(!c.lang_entry.has_strip_or_diacritics());
+            assert!(
+                !c.lang_entry
+                    .has_pre_composed_to_base_map_or_spacing_diacritics()
+            );
             assert!(!stage.needs_apply("test café", &c).unwrap());
             assert!(stage.as_char_mapper(&c).is_none());
         }
@@ -632,20 +648,29 @@ mod tests {
     fn test_precomputed_flags() {
         // French: has strip_map, no diacritics
         let ctx = Context::new(FRA);
-        assert!(ctx.lang_entry.has_strip_map());
-        assert!(!ctx.lang_entry.has_diacritics());
-        assert!(ctx.lang_entry.has_strip_or_diacritics());
+        assert!(ctx.lang_entry.has_pre_composed_to_base_map());
+        assert!(!ctx.lang_entry.has_spacing_diacritics());
+        assert!(
+            ctx.lang_entry
+                .has_pre_composed_to_base_map_or_spacing_diacritics()
+        );
 
         // Arabic: no strip_map, has diacritics
         let ctx = Context::new(ARA);
-        assert!(!ctx.lang_entry.has_strip_map());
-        assert!(ctx.lang_entry.has_diacritics());
-        assert!(ctx.lang_entry.has_strip_or_diacritics());
+        assert!(!ctx.lang_entry.has_pre_composed_to_base_map());
+        assert!(ctx.lang_entry.has_spacing_diacritics());
+        assert!(
+            ctx.lang_entry
+                .has_pre_composed_to_base_map_or_spacing_diacritics()
+        );
 
         // English: no rules at all
         let ctx = Context::new(ENG);
-        assert!(!ctx.lang_entry.has_strip_map());
-        assert!(!ctx.lang_entry.has_diacritics());
-        assert!(!ctx.lang_entry.has_strip_or_diacritics());
+        assert!(!ctx.lang_entry.has_pre_composed_to_base_map());
+        assert!(!ctx.lang_entry.has_spacing_diacritics());
+        assert!(
+            !ctx.lang_entry
+                .has_pre_composed_to_base_map_or_spacing_diacritics()
+        );
     }
 }

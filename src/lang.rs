@@ -34,7 +34,7 @@ pub struct FoldMap {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct StripMap {
+pub struct PreComposedToBaseMap {
     pub from: char,
     pub to: char,
 }
@@ -61,8 +61,8 @@ pub struct LangEntry {
     pub has_case_map: bool,
     pub has_fold_map: bool,
     pub has_transliterate_map: bool,
-    pub has_strip_map: bool,
-    pub has_diacritics: bool,
+    pub has_pre_composed_to_base_map: bool,
+    pub has_spacing_diacritics: bool,
     pub has_peek_pairs: bool,
     pub has_segment_rules: bool,
 
@@ -80,10 +80,10 @@ pub struct LangEntry {
     pub case_map: &'static [CaseMap],
     pub fold_map: &'static [FoldMap],
     pub transliterate_map: &'static [FoldMap],
-    pub strip_map: &'static [StripMap],
-    pub strip_char_slice: &'static [char],
-    pub diacritics: Option<&'static [char]>,
-    pub diacritic_slice: Option<&'static [char]>,
+    pub pre_composed_to_base_map: &'static [PreComposedToBaseMap],
+    pub pre_composed_to_base_char_slice: &'static [char],
+    pub spacing_diacritics: Option<&'static [char]>,
+    pub spacing_diacritics_slice: Option<&'static [char]>,
     pub fold_char_slice: &'static [char],
     pub transliterate_char_slice: &'static [char],
     pub peek_pairs: &'static [PeekPair],
@@ -111,13 +111,13 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn has_strip_map(&self) -> bool {
-        self.has_strip_map
+    pub fn has_pre_composed_to_base_map(&self) -> bool {
+        self.has_pre_composed_to_base_map
     }
 
     #[inline(always)]
-    pub fn has_diacritics(&self) -> bool {
-        self.has_diacritics
+    pub fn has_spacing_diacritics(&self) -> bool {
+        self.has_spacing_diacritics
     }
 
     #[inline(always)]
@@ -141,8 +141,8 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn has_strip_or_diacritics(&self) -> bool {
-        self.has_strip_map || self.has_diacritics
+    pub fn has_pre_composed_to_base_map_or_spacing_diacritics(&self) -> bool {
+        self.has_pre_composed_to_base_map || self.has_spacing_diacritics
     }
 
     // Semantic queries (keep existing names)
@@ -166,8 +166,8 @@ impl LangEntry {
     // ============================================================
 
     #[inline(always)]
-    pub fn is_diacritic(&self, c: char) -> bool {
-        self.diacritic_slice
+    pub fn is_spacing_diacritic(&self, c: char) -> bool {
+        self.spacing_diacritics_slice
             .map(|slice| slice.contains(&c))
             .unwrap_or(false)
     }
@@ -183,8 +183,8 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn is_strippable(&self, c: char) -> bool {
-        self.strip_char_slice.contains(&c)
+    pub fn is_pre_composed_to_base_char(&self, c: char) -> bool {
+        self.pre_composed_to_base_char_slice.contains(&c)
     }
 
     // ============================================================
@@ -209,11 +209,12 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn needs_diacritic_removal(&self, text: &str) -> bool {
-        if self.has_strip_map {
-            text.chars().any(|c| self.strip_char_slice.contains(&c))
+    pub fn needs_pre_composed_to_base_map_or_spacing_diacritics_removal(&self, text: &str) -> bool {
+        if self.has_pre_composed_to_base_map {
+            text.chars()
+                .any(|c| self.pre_composed_to_base_char_slice.contains(&c))
         } else {
-            self.diacritics
+            self.spacing_diacritics
                 .map(|diacs| text.chars().any(|c| diacs.contains(&c)))
                 .unwrap_or(false)
         }
@@ -239,13 +240,13 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn strip_map(&self) -> &'static [StripMap] {
-        self.strip_map
+    pub fn pre_composed_to_base_map(&self) -> &'static [PreComposedToBaseMap] {
+        self.pre_composed_to_base_map
     }
 
     #[inline(always)]
-    pub fn diacritics(&self) -> Option<DiacriticSet> {
-        self.diacritics
+    pub fn spacing_diacritics(&self) -> Option<DiacriticSet> {
+        self.spacing_diacritics
     }
 
     #[inline(always)]
@@ -269,13 +270,13 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn strip_char_slice(&self) -> &'static [char] {
-        self.strip_char_slice
+    pub fn pre_composed_to_base_char_slice(&self) -> &'static [char] {
+        self.pre_composed_to_base_char_slice
     }
 
     #[inline(always)]
-    pub fn diacritic_slice(&self) -> Option<&'static [char]> {
-        self.diacritic_slice
+    pub fn spacing_diacritics_slice(&self) -> Option<&'static [char]> {
+        self.spacing_diacritics_slice
     }
 
     // ============================================================
@@ -309,11 +310,11 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn apply_strip(&self, c: char) -> Option<char> {
-        self.strip_map
+    pub fn apply_pre_composed_to_base_map(&self, c: char) -> Option<char> {
+        self.pre_composed_to_base_map
             .iter()
-            .find(|&&StripMap { from, .. }| from == c)
-            .map(|&StripMap { to, .. }| to)
+            .find(|&&PreComposedToBaseMap { from, .. }| from == c)
+            .map(|&PreComposedToBaseMap { to, .. }| to)
     }
 
     /// Check if a two-character sequence needs special handling.
@@ -493,9 +494,9 @@ mod tests {
     #[test]
     fn test_arabic_diacritics() {
         let entry = get_from_table("ARA");
-        assert!(entry.has_diacritics());
-        assert!(entry.is_diacritic('َ'));
-        assert!(!entry.is_diacritic('ا'));
+        assert!(entry.has_spacing_diacritics());
+        assert!(entry.is_spacing_diacritic('َ'));
+        assert!(!entry.is_spacing_diacritic('ا'));
         // assert!(entry.contains_diacritics("مَرْحَبًا"));
         // assert!(!entry.contains_diacritics("مرحبا"));
     }
@@ -566,9 +567,9 @@ mod tests {
                 }
             }
 
-            if entry.diacritics.is_some() {
-                assert!(entry.diacritic_slice.is_some());
-                assert!(entry.has_diacritics());
+            if entry.spacing_diacritics.is_some() {
+                assert!(entry.spacing_diacritics_slice.is_some());
+                assert!(entry.has_spacing_diacritics());
             }
         }
     }

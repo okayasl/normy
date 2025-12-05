@@ -3,7 +3,7 @@ use std::{borrow::Cow, time::Duration};
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
     ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LowerCase,
-    NFC, NFD, NFKC, NFKD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy, POL, RUS,
+    NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy, POL, RUS,
     RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA, TRIM_WHITESPACE_ONLY,
     TUR, Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
 };
@@ -40,7 +40,9 @@ const SAMPLES: &[(&str, Lang)] = &[
     // ("¡España mañana!", SPA),
     // // 15. Polish   – Polish ogonek + kreska
     // ("Łódź Żółć", POL),
-    // 16. English  – HTML + emoji + punctuation + control chars
+    // 16. Dutch  – HTML + emoji + punctuation + control chars
+    ("<b>IJssEL und Ĳssel</b>\t\r\n", NLD),
+    // 17. English  – HTML + emoji + punctuation + control chars
     ("<b>Hello naïve World!</b>\t\r\n  résumé 🇫🇷", ENG),
 ];
 
@@ -121,8 +123,8 @@ where
 }
 
 fn stage_matrix(c: &mut Criterion) {
-    stage_benches_auto(c, "LowerCase", || LowerCase);
-    // stage_benches_auto(c, "CaseFold", || CaseFold);
+    //stage_benches_auto(c, "LowerCase", || LowerCase);
+    stage_benches_auto(c, "CaseFold", || CaseFold);
     // stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
     // stage_benches_auto(c, "Transliterate", || Transliterate);
     // stage_benches_auto(c, "SegmentWords", || SegmentWords);

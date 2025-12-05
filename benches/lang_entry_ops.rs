@@ -31,7 +31,7 @@ fn bench_char_lookups(c: &mut Criterion) {
             BenchmarkId::new("is_diacritic", desc),
             &(entry, ch),
             |b, (entry, ch)| {
-                b.iter(|| black_box(entry.is_diacritic(black_box(*ch))));
+                b.iter(|| black_box(entry.is_spacing_diacritic(black_box(*ch))));
             },
         );
 
@@ -39,7 +39,7 @@ fn bench_char_lookups(c: &mut Criterion) {
             BenchmarkId::new("apply_strip", desc),
             &(entry, ch),
             |b, (entry, ch)| {
-                b.iter(|| black_box(entry.apply_strip(black_box(*ch))));
+                b.iter(|| black_box(entry.apply_pre_composed_to_base_map(black_box(*ch))));
             },
         );
     }
@@ -79,7 +79,11 @@ fn bench_text_operations(c: &mut Criterion) {
             BenchmarkId::new("needs_diacritic_removal", desc),
             &(entry, text),
             |b, (entry, text)| {
-                b.iter(|| black_box(entry.needs_diacritic_removal(text)));
+                b.iter(|| {
+                    black_box(
+                        entry.needs_pre_composed_to_base_map_or_spacing_diacritics_removal(text),
+                    )
+                });
             },
         );
 

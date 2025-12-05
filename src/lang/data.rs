@@ -1,4 +1,4 @@
-use crate::lang::{CaseMap, FoldMap, Lang, LangEntry, PeekPair, SegmentRule, StripMap};
+use crate::lang::{CaseMap, FoldMap, Lang, LangEntry, PeekPair, PreComposedToBaseMap, SegmentRule};
 
 use paste::paste;
 use phf::{Map, phf_map};
@@ -56,8 +56,8 @@ macro_rules! define_languages {
                         $(FoldMap { from: $tfrom, to: $tto }),*
                     ];
 
-                    pub static PRECOMPOSED_TO_BASE: &[StripMap] = &[
-                        $(StripMap { from: $sfrom, to: $sto }),*
+                    pub static PRECOMPOSED_TO_BASE: &[PreComposedToBaseMap] = &[
+                        $(PreComposedToBaseMap { from: $sfrom, to: $sto }),*
                     ];
 
                     pub static SPACING_DIACRITICS: &[char] = &[$($d),*];
@@ -67,8 +67,8 @@ macro_rules! define_languages {
 
                     pub static FOLD_CHAR_SLICE: &[char] = &[$($ffrom),*];
                     pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[$($tfrom),*];
-                    pub static STRIP_CHAR_SLICE: &[char] = &[$($sfrom),*];
-                    pub static DIACRITIC_SLICE: &[char] = &[$($d),*];
+                    pub static PRECOMPOSED_TO_BASE_CHAR_SLICE: &[char] = &[$($sfrom),*];
+                    pub static SPACING_DIACRITICS_SLICE: &[char] = &[$($d),*];
 
                     pub static PEEK_PAIRS: &[PeekPair] = &[
                         $( PeekPair { a: $pa, b: $pb, to: $pto } ),*
@@ -93,8 +93,8 @@ macro_rules! define_languages {
                         !arr.is_empty()
                     };
 
-                    pub const HAS_STRIP_MAP: bool = {
-                        let arr: &[StripMap] = &[$(StripMap { from: $sfrom, to: $sto }),*];
+                    pub const HAS_PRECOMPOSED_TO_BASE_MAP: bool = {
+                        let arr: &[PreComposedToBaseMap] = &[$(PreComposedToBaseMap { from: $sfrom, to: $sto }),*];
                         !arr.is_empty()
                     };
 
@@ -200,8 +200,8 @@ macro_rules! define_languages {
                         has_case_map: [<$code:lower _data>]::HAS_CASE_MAP,
                         has_fold_map: [<$code:lower _data>]::HAS_FOLD_MAP,
                         has_transliterate_map: [<$code:lower _data>]::HAS_TRANSLITERATE_MAP,
-                        has_strip_map: [<$code:lower _data>]::HAS_STRIP_MAP,
-                        has_diacritics: [<$code:lower _data>]::HAS_DIACRITICS,
+                        has_pre_composed_to_base_map: [<$code:lower _data>]::HAS_PRECOMPOSED_TO_BASE_MAP,
+                        has_spacing_diacritics: [<$code:lower _data>]::HAS_DIACRITICS,
                         has_peek_pairs: [<$code:lower _data>]::HAS_PEEK_PAIRS,
                         has_segment_rules: [<$code:lower _data>]::HAS_SEGMENT_RULES,
                         has_one_to_one_folds: [<$code:lower _data>]::HAS_ONE_TO_ONE_FOLDS,
@@ -215,19 +215,19 @@ macro_rules! define_languages {
                         case_map: [<$code:lower _data>]::CASE,
                         fold_map: [<$code:lower _data>]::FOLD,
                         transliterate_map: [<$code:lower _data>]::TRANSLITERATE,
-                        strip_map: [<$code:lower _data>]::PRECOMPOSED_TO_BASE,
-                        diacritics: if [<$code:lower _data>]::SPACING_DIACRITICS.is_empty() {
+                        pre_composed_to_base_map: [<$code:lower _data>]::PRECOMPOSED_TO_BASE,
+                        spacing_diacritics: if [<$code:lower _data>]::SPACING_DIACRITICS.is_empty() {
                             None
                         } else {
                             Some([<$code:lower _data>]::SPACING_DIACRITICS)
                         },
                         fold_char_slice: [<$code:lower _data>]::FOLD_CHAR_SLICE,
                         transliterate_char_slice: [<$code:lower _data>]::TRANSLITERATE_CHAR_SLICE,
-                        strip_char_slice: [<$code:lower _data>]::STRIP_CHAR_SLICE,
-                        diacritic_slice: if [<$code:lower _data>]::DIACRITIC_SLICE.is_empty() {
+                        pre_composed_to_base_char_slice: [<$code:lower _data>]::PRECOMPOSED_TO_BASE_CHAR_SLICE,
+                        spacing_diacritics_slice: if [<$code:lower _data>]::SPACING_DIACRITICS_SLICE.is_empty() {
                             None
                         } else {
-                            Some([<$code:lower _data>]::DIACRITIC_SLICE)
+                            Some([<$code:lower _data>]::SPACING_DIACRITICS_SLICE)
                         },
                         peek_pairs: [<$code:lower _data>]::PEEK_PAIRS,
                         segment_rules: [<$code:lower _data>]::SEGMENT_RULES,

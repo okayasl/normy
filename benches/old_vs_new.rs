@@ -33,7 +33,7 @@ fn bench_comparison(c: &mut Criterion) {
             BenchmarkId::new("is_diacritic_NEW", desc),
             &(entry, ch),
             |b, (entry, ch)| {
-                b.iter(|| black_box(entry.is_diacritic(black_box(**ch))));
+                b.iter(|| black_box(entry.is_spacing_diacritic(black_box(**ch))));
             },
         );
 
