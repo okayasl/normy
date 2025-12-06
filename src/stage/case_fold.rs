@@ -399,28 +399,6 @@ mod tests {
         assert!(CaseFold.needs_apply("Straße", &ctx).unwrap());
     }
 
-    // #[test]
-    // fn test_zero_copy_when_already_folded() {
-    //     // Turkish
-    //     let ctx = Context::new(TUR);
-    //     let text = "ısı"; // Already lowercase
-    //     let result = CaseFold.apply(Cow::Borrowed(text), &ctx).unwrap();
-    //     assert!(matches!(result, Cow::Borrowed(_)));
-    //     assert_eq!(result, text);
-
-    //     // Dutch
-    //     let ctx = Context::new(NLD);
-    //     let text = "ijssel";
-    //     let result = CaseFold.apply(Cow::Borrowed(text), &ctx).unwrap();
-    //     assert!(matches!(result, Cow::Borrowed(_)));
-
-    //     // German (already folded, no ß)
-    //     let ctx = Context::new(DEU);
-    //     let text = "strasse";
-    //     let result = CaseFold.apply(Cow::Borrowed(text), &ctx).unwrap();
-    //     assert!(matches!(result, Cow::Borrowed(_)));
-    // }
-
     #[test]
     fn test_capacity_hint_accuracy() {
         // German: ß→ss expands
@@ -460,7 +438,6 @@ mod tests {
 
         // Dutch: has fold_map (Ĳ→ij), requires peek-ahead
         assert!(ctx_nld.lang_entry.has_fold_map());
-        assert!(ctx_nld.lang_entry.requires_peek_ahead());
     }
 
     #[test]
@@ -471,8 +448,10 @@ mod tests {
         assert_eq!(CaseFold.apply(Cow::Borrowed("IJ"), &ctx).unwrap(), "ij");
         assert_eq!(CaseFold.apply(Cow::Borrowed("Ij"), &ctx).unwrap(), "ij");
         assert_eq!(CaseFold.apply(Cow::Borrowed("iJ"), &ctx).unwrap(), "ij");
+        assert_eq!(CaseFold.apply(Cow::Borrowed("Ĳ"), &ctx).unwrap(), "ij");
+        assert_eq!(CaseFold.apply(Cow::Borrowed("ĳ"), &ctx).unwrap(), "ij");
 
         // Single I or J should just lowercase normally
-        assert_eq!(CaseFold.apply(Cow::Borrowed("I am"), &ctx).unwrap(), "i am");
+        assert_eq!(CaseFold.apply(Cow::Borrowed("I am J"), &ctx).unwrap(), "i am j");
     }
 }

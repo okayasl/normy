@@ -291,8 +291,10 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: true,
-        peek_pairs: [ ('I', 'J' => "ij"), ('I', 'j' => "ij") ],
+        // requires_peek_ahead: true,
+        // peek_pairs: [ ('I', 'J' => "ij"), ('I', 'j' => "ij") ],
+        requires_peek_ahead: false,
+        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
