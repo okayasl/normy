@@ -65,6 +65,7 @@ macro_rules! define_languages {
                     pub const NEEDS_WORD_SEGMENTATION: bool = $needs_word_segmentation;
                     pub const REQUIRES_PEEK_AHEAD: bool = $requires_peek_ahead;
 
+                    pub static CASE_CHAR_SLICE: &[char] = &[$($cfrom),*];          // ← NEW
                     pub static FOLD_CHAR_SLICE: &[char] = &[$($ffrom),*];
                     pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[$($tfrom),*];
                     pub static PRECOMPOSED_TO_BASE_CHAR_SLICE: &[char] = &[$($sfrom),*];
@@ -221,6 +222,7 @@ macro_rules! define_languages {
                         } else {
                             Some([<$code:lower _data>]::SPACING_DIACRITICS)
                         },
+                        case_char_slice: [<$code:lower _data>]::CASE_CHAR_SLICE,
                         fold_char_slice: [<$code:lower _data>]::FOLD_CHAR_SLICE,
                         transliterate_char_slice: [<$code:lower _data>]::TRANSLITERATE_CHAR_SLICE,
                         pre_composed_to_base_char_slice: [<$code:lower _data>]::PRECOMPOSED_TO_BASE_CHAR_SLICE,

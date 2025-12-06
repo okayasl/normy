@@ -78,7 +78,7 @@ pub struct LangEntry {
     // === Data Arrays (Second Cache Line+) ===
     code: &'static str,
     case_map: &'static [CaseMap],
-    //   pub case_char_slice: &'static [char],
+    case_char_slice: &'static [char],
     fold_map: &'static [FoldMap],
     fold_char_slice: &'static [char],
     pre_composed_to_base_map: &'static [PreComposedToBaseMap],
@@ -266,6 +266,11 @@ impl LangEntry {
     }
 
     #[inline(always)]
+    pub fn case_char_slice(&self) -> &'static [char] {
+        self.case_char_slice
+    }
+
+    #[inline(always)]
     pub fn fold_char_slice(&self) -> &'static [char] {
         self.fold_char_slice
     }
@@ -310,16 +315,17 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn apply_case_fold(&self, c: char) -> Option<char> {
+        // if !self.has_case_map && !self.has_fold_map {
+        //     return c.to_lowercase().next();
+        // }
         if let Some(m) = self.fold_map.iter().find(|m| m.from == c) {
-            let mut chars = m.to.chars();
-            let first = chars.next()?;
-            if chars.next().is_none() {
-                Some(first)
+            if self.has_one_to_one_folds {
+                Some(m.to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
             } else {
                 None
             }
         } else if let Some(m) = self.case_map.iter().find(|m| m.from == c) {
-            Some(m.to) // e.g., 'İ' → 'i' via case_map
+            Some(m.to)
         } else {
             c.to_lowercase().next()
         }

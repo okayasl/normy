@@ -123,7 +123,7 @@ where
 }
 
 fn stage_matrix(c: &mut Criterion) {
-    //stage_benches_auto(c, "LowerCase", || LowerCase);
+    stage_benches_auto(c, "LowerCase", || LowerCase);
     stage_benches_auto(c, "CaseFold", || CaseFold);
     // stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
     // stage_benches_auto(c, "Transliterate", || Transliterate);
