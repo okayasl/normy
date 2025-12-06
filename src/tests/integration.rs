@@ -142,7 +142,7 @@ mod integration_tests {
 
         let normy = Normy::builder()
             .lang(JPN)
-            .modify_lang(|lang| lang.unigram_cjk = true)
+            .modify_lang(|lang| lang.set_unigram_cjk(true))
             .add_stage(SegmentWords)
             .build();
 
@@ -157,7 +157,7 @@ mod integration_tests {
 
         let normy = Normy::builder()
             .lang(ZHO)
-            .modify_lang(|lang| lang.unigram_cjk = false)
+            .modify_lang(|lang| lang.set_unigram_cjk(false))
             .add_stage(SegmentWords)
             .build();
 

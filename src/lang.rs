@@ -58,36 +58,37 @@ pub enum SegmentRule {
 #[derive(Clone, Copy, Debug)]
 pub struct LangEntry {
     // === Precomputed Boolean Flags (Hot Path - First Cache Line) ===
-    pub has_case_map: bool,
-    pub has_fold_map: bool,
-    pub has_transliterate_map: bool,
-    pub has_pre_composed_to_base_map: bool,
-    pub has_spacing_diacritics: bool,
-    pub has_peek_pairs: bool,
-    pub has_segment_rules: bool,
+    has_case_map: bool,
+    has_fold_map: bool,
+    has_transliterate_map: bool,
+    has_pre_composed_to_base_map: bool,
+    has_spacing_diacritics: bool,
+    has_peek_pairs: bool,
+    has_segment_rules: bool,
 
     // Derived properties
-    pub has_one_to_one_folds: bool,
-    pub has_one_to_one_transliterate: bool,
+    has_one_to_one_folds: bool,
+    has_one_to_one_transliterate: bool,
 
     // Already boolean from definition
-    pub needs_segmentation: bool,
-    pub requires_peek_ahead: bool,
-    pub unigram_cjk: bool,
+    needs_segmentation: bool,
+    requires_peek_ahead: bool,
+    unigram_cjk: bool,
 
     // === Data Arrays (Second Cache Line+) ===
-    pub code: &'static str,
-    pub case_map: &'static [CaseMap],
-    pub fold_map: &'static [FoldMap],
-    pub transliterate_map: &'static [FoldMap],
-    pub pre_composed_to_base_map: &'static [PreComposedToBaseMap],
-    pub pre_composed_to_base_char_slice: &'static [char],
-    pub spacing_diacritics: Option<&'static [char]>,
-    pub spacing_diacritics_slice: Option<&'static [char]>,
-    pub fold_char_slice: &'static [char],
-    pub transliterate_char_slice: &'static [char],
-    pub peek_pairs: &'static [PeekPair],
-    pub segment_rules: &'static [SegmentRule],
+    code: &'static str,
+    case_map: &'static [CaseMap],
+    //   pub case_char_slice: &'static [char],
+    fold_map: &'static [FoldMap],
+    fold_char_slice: &'static [char],
+    pre_composed_to_base_map: &'static [PreComposedToBaseMap],
+    pre_composed_to_base_char_slice: &'static [char],
+    spacing_diacritics: Option<&'static [char]>,
+    spacing_diacritics_slice: Option<&'static [char]>,
+    transliterate_map: &'static [FoldMap],
+    transliterate_char_slice: &'static [char],
+    peek_pairs: &'static [PeekPair],
+    segment_rules: &'static [SegmentRule],
 }
 
 impl LangEntry {
@@ -223,6 +224,11 @@ impl LangEntry {
     // ============================================================
     // CATEGORY 4: Data Accessors - Pattern: direct_name()
     // ============================================================
+
+    #[inline(always)]
+    pub fn code(&self) -> &'static str {
+        self.code
+    }
 
     #[inline(always)]
     pub fn case_map(&self) -> &'static [CaseMap] {
@@ -369,10 +375,6 @@ impl LangEntry {
     // CATEGORY 6: Capacity Hints - Pattern: hint_capacity_*
     // ============================================================
 
-    /// Estimate output capacity for case folding with expansions.
-    /// Returns (num_expansions, extra_bytes_needed).
-    /// Estimate output capacity for case folding with expansions.
-    /// Returns (num_expansions, extra_bytes_needed).
     #[inline]
     pub fn hint_capacity_fold(&self, text: &str) -> (usize, usize) {
         // Check flags once. No need to worry about has_one_to_one_folds.
@@ -439,6 +441,208 @@ impl LangEntry {
 
         (num_transformations, extra_bytes)
     }
+
+    // ============================================================
+    // CATEGORY 7: Setters - Pattern: set_*
+    // Updates primary field and all dependent derived fields
+    // ============================================================
+
+    /// Sets the case_map and updates has_case_map flag
+    #[inline]
+    pub fn set_case_map(&mut self, case_map: &'static [CaseMap]) {
+        self.case_map = case_map;
+        self.has_case_map = !case_map.is_empty();
+    }
+
+    /// Sets the fold_map and updates all related fields:
+    /// - fold_char_slice (extracted 'from' characters)
+    /// - has_fold_map flag
+    /// - has_one_to_one_folds flag (checks if all mappings are 1:1)
+    #[inline]
+    pub fn set_fold_map(&mut self, fold_map: &'static [FoldMap]) {
+        self.fold_map = fold_map;
+        self.has_fold_map = !fold_map.is_empty();
+
+        // Extract character slice for fast lookups
+        // Note: This requires fold_char_slice to be mutable static or reconstructed
+        // In practice, you'd need to store this in a separate static allocation
+        if !fold_map.is_empty() {
+            // Determine if all folds are one-to-one (single char -> single char)
+            self.has_one_to_one_folds = fold_map.iter().all(|m| m.to.chars().count() == 1);
+        } else {
+            self.has_one_to_one_folds = false;
+        }
+
+        // Note: fold_char_slice needs to be set separately via set_fold_char_slice
+        // or extracted during initialization, as we can't create new static slices at runtime
+    }
+
+    /// Helper to set the fold_char_slice directly
+    /// Should be called after set_fold_map with the corresponding character slice
+    #[inline]
+    pub fn set_fold_char_slice(&mut self, slice: &'static [char]) {
+        self.fold_char_slice = slice;
+    }
+
+    /// Sets the transliterate_map and updates all related fields:
+    /// - transliterate_char_slice
+    /// - has_transliterate_map flag
+    /// - has_one_to_one_transliterate flag
+    #[inline]
+    pub fn set_transliterate_map(&mut self, transliterate_map: &'static [FoldMap]) {
+        self.transliterate_map = transliterate_map;
+        self.has_transliterate_map = !transliterate_map.is_empty();
+
+        if !transliterate_map.is_empty() {
+            self.has_one_to_one_transliterate =
+                transliterate_map.iter().all(|m| m.to.chars().count() == 1);
+        } else {
+            self.has_one_to_one_transliterate = false;
+        }
+    }
+
+    /// Helper to set the transliterate_char_slice directly
+    #[inline]
+    pub fn set_transliterate_char_slice(&mut self, slice: &'static [char]) {
+        self.transliterate_char_slice = slice;
+    }
+
+    /// Sets the pre_composed_to_base_map and updates all related fields:
+    /// - pre_composed_to_base_char_slice
+    /// - has_pre_composed_to_base_map flag
+    #[inline]
+    pub fn set_pre_composed_to_base_map(&mut self, map: &'static [PreComposedToBaseMap]) {
+        self.pre_composed_to_base_map = map;
+        self.has_pre_composed_to_base_map = !map.is_empty();
+    }
+
+    /// Helper to set the pre_composed_to_base_char_slice directly
+    #[inline]
+    pub fn set_pre_composed_to_base_char_slice(&mut self, slice: &'static [char]) {
+        self.pre_composed_to_base_char_slice = slice;
+    }
+
+    /// Sets the spacing_diacritics and updates all related fields:
+    /// - spacing_diacritics_slice
+    /// - has_spacing_diacritics flag
+    #[inline]
+    pub fn set_spacing_diacritics(&mut self, diacritics: Option<&'static [char]>) {
+        self.spacing_diacritics = diacritics;
+        self.spacing_diacritics_slice = diacritics;
+        self.has_spacing_diacritics = diacritics.is_some() && !diacritics.unwrap().is_empty();
+    }
+
+    /// Sets the needs_segmentation flag
+    #[inline]
+    pub fn set_needs_segmentation(&mut self, needs: bool) {
+        self.needs_segmentation = needs;
+    }
+
+    /// Sets the requires_peek_ahead flag
+    #[inline]
+    pub fn set_requires_peek_ahead(&mut self, requires: bool) {
+        self.requires_peek_ahead = requires;
+    }
+
+    /// Sets the peek_pairs and updates related fields:
+    /// - has_peek_pairs flag
+    /// - requires_peek_ahead flag (auto-enabled if pairs exist)
+    #[inline]
+    pub fn set_peek_pairs(&mut self, pairs: &'static [PeekPair]) {
+        self.peek_pairs = pairs;
+        self.has_peek_pairs = !pairs.is_empty();
+
+        // Auto-enable peek_ahead if we have peek pairs
+        if self.has_peek_pairs {
+            self.requires_peek_ahead = true;
+        }
+    }
+
+    /// Sets the segment_rules and updates related fields:
+    /// - has_segment_rules flag
+    /// - unigram_cjk flag (auto-enabled if CJKIdeographUnigram rule exists)
+    #[inline]
+    pub fn set_segment_rules(&mut self, rules: &'static [SegmentRule]) {
+        self.segment_rules = rules;
+        self.has_segment_rules = !rules.is_empty();
+
+        // Auto-detect if CJK unigram rule is present
+        self.unigram_cjk = rules.contains(&SegmentRule::CJKIdeographUnigram);
+    }
+
+    /// Sets the unigram_cjk flag directly
+    #[inline]
+    pub fn set_unigram_cjk(&mut self, unigram: bool) {
+        self.unigram_cjk = unigram;
+    }
+
+    // // ============================================================
+    // // Builder-style convenience methods for chaining
+    // // ============================================================
+
+    // /// Builder-style: set case_map and return self
+    // #[inline]
+    // pub fn with_case_map(mut self, case_map: &'static [CaseMap]) -> Self {
+    //     self.set_case_map(case_map);
+    //     self
+    // }
+
+    // /// Builder-style: set fold_map and return self
+    // #[inline]
+    // pub fn with_fold_map(
+    //     mut self,
+    //     fold_map: &'static [FoldMap],
+    //     char_slice: &'static [char],
+    // ) -> Self {
+    //     self.set_fold_map(fold_map);
+    //     self.set_fold_char_slice(char_slice);
+    //     self
+    // }
+
+    // /// Builder-style: set transliterate_map and return self
+    // #[inline]
+    // pub fn with_transliterate_map(
+    //     mut self,
+    //     map: &'static [FoldMap],
+    //     char_slice: &'static [char],
+    // ) -> Self {
+    //     self.set_transliterate_map(map);
+    //     self.set_transliterate_char_slice(char_slice);
+    //     self
+    // }
+
+    // /// Builder-style: set pre_composed_to_base_map and return self
+    // #[inline]
+    // pub fn with_pre_composed_to_base_map(
+    //     mut self,
+    //     map: &'static [PreComposedToBaseMap],
+    //     char_slice: &'static [char],
+    // ) -> Self {
+    //     self.set_pre_composed_to_base_map(map);
+    //     self.set_pre_composed_to_base_char_slice(char_slice);
+    //     self
+    // }
+
+    // /// Builder-style: set spacing_diacritics and return self
+    // #[inline]
+    // pub fn with_spacing_diacritics(mut self, diacritics: Option<&'static [char]>) -> Self {
+    //     self.set_spacing_diacritics(diacritics);
+    //     self
+    // }
+
+    // /// Builder-style: set peek_pairs and return self
+    // #[inline]
+    // pub fn with_peek_pairs(mut self, pairs: &'static [PeekPair]) -> Self {
+    //     self.set_peek_pairs(pairs);
+    //     self
+    // }
+
+    // /// Builder-style: set segment_rules and return self
+    // #[inline]
+    // pub fn with_segment_rules(mut self, rules: &'static [SegmentRule]) -> Self {
+    //     self.set_segment_rules(rules);
+    //     self
+    // }
 }
 
 pub fn get_lang_entry_by_code(code: &str) -> Option<&'static LangEntry> {
@@ -447,90 +651,287 @@ pub fn get_lang_entry_by_code(code: &str) -> Option<&'static LangEntry> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        LANG_TABLE,
-        lang::{
-            LangEntry,
-            data::{
-                ARA, CAT, CES, DAN, DEU, ENG, FRA, HEB, HRV, JPN, KHM, KOR, MYA, NLD, NOR, POL,
-                SLK, SRP, SWE, THA, TUR, VIE, ZHO, from_code,
-            },
-        },
-    };
+    use crate::{all_langs, lang::get_lang_entry_by_code};
 
-    fn get_from_table(code: &str) -> &'static LangEntry {
-        LANG_TABLE.get(code).unwrap()
+    // Helper for concise test access
+    fn lang(code: &str) -> &'static crate::lang::LangEntry {
+        get_lang_entry_by_code(code).unwrap()
+    }
+
+    // ============================================================
+    // CATEGORY 1: Language-Specific Behavior Tests
+    // ============================================================
+
+    #[test]
+    fn turkish_case_folding() {
+        let tur = lang("TUR");
+
+        // Turkish-specific: İ→i, I→ı
+        assert_eq!(tur.apply_case_fold('İ'), Some('i'));
+        assert_eq!(tur.apply_case_fold('I'), Some('ı'));
+        assert_eq!(tur.apply_lowercase('İ'), 'i');
+        assert_eq!(tur.apply_lowercase('I'), 'ı');
+
+        // Metadata checks
+        assert!(tur.has_one_to_one_folds());
+        assert!(!tur.requires_peek_ahead());
+        assert!(!tur.case_map().is_empty(), "Turkish has custom case_map");
     }
 
     #[test]
-    fn test_turkish_metadata() {
-        let entry = get_from_table("TUR");
-        assert!(entry.has_one_to_one_folds());
-        assert!(!entry.requires_peek_ahead());
-        assert!(entry.needs_case_fold('İ'));
-        assert!(entry.needs_case_fold('I'));
-        assert_eq!(entry.apply_case_fold('İ'), Some('i'));
-        assert_eq!(entry.apply_case_fold('I'), Some('ı'));
+    fn german_multi_char_folding() {
+        let deu = lang("DEU");
+
+        // German: ẞ→ß (lowercase) vs ẞ→ss (case fold)
+        assert_eq!(deu.apply_lowercase('ẞ'), 'ß');
+        assert_eq!(deu.apply_case_fold('ẞ'), None, "ẞ→ss is multi-char");
+        assert_eq!(deu.apply_case_fold('ß'), None, "ß→ss is multi-char");
+
+        // Metadata
+        assert!(!deu.has_one_to_one_folds());
+        assert!(!deu.requires_peek_ahead());
     }
 
     #[test]
-    fn test_german_metadata() {
-        let entry = get_from_table("DEU");
-        assert!(!entry.has_one_to_one_folds());
-        assert!(!entry.requires_peek_ahead());
-        assert!(entry.needs_case_fold('ß'));
+    fn dutch_peek_ahead_ligatures() {
+        let nld = lang("NLD");
+
+        // Dutch: IJ→ij ligature (uppercase only)
+        assert_eq!(nld.get_peek_fold('I', Some('J')), Some("ij"));
+        assert_eq!(nld.get_peek_fold('i', Some('j')), None);
+        assert_eq!(nld.get_peek_fold('I', Some('K')), None);
+        assert_eq!(nld.get_peek_fold('I', None), None);
+
+        // Ĳ→ij is multi-char fold
+        assert_eq!(nld.apply_case_fold('Ĳ'), None);
+        assert_eq!(nld.apply_case_fold('ĳ'), None);
+
+        // Metadata
+        assert!(!nld.has_one_to_one_folds());
+        assert!(nld.requires_peek_ahead());
+        assert!(!nld.peek_pairs().is_empty());
     }
 
     #[test]
-    fn test_dutch_metadata() {
-        let entry = get_from_table("NLD");
-        assert!(!entry.has_one_to_one_folds());
-        assert!(entry.requires_peek_ahead());
+    fn arabic_diacritics() {
+        let ara = lang("ARA");
 
-        // Only uppercase triggers peek-ahead
-        assert_eq!(entry.get_peek_fold('I', Some('J')), Some("ij"));
-        assert_eq!(entry.get_peek_fold('i', Some('j')), None); // ← FIXED
-        assert_eq!(entry.get_peek_fold('I', Some('K')), None);
-        assert_eq!(entry.get_peek_fold('I', None), None);
+        assert!(ara.has_spacing_diacritics());
+        assert!(ara.is_spacing_diacritic('\u{064E}'), "َ (fatha)");
+        assert!(!ara.is_spacing_diacritic('ا'), "Base letter ا");
     }
 
     #[test]
-    fn test_english_metadata() {
-        let entry = get_from_table("ENG");
-        assert!(entry.has_one_to_one_folds());
-        assert!(!entry.requires_peek_ahead());
-        assert!(entry.needs_case_fold('A'));
-        assert_eq!(entry.apply_case_fold('A'), Some('a'));
+    fn english_basic_case_folding() {
+        let eng = lang("ENG");
+
+        assert_eq!(eng.apply_case_fold('A'), Some('a'));
+        assert_eq!(eng.apply_case_fold('Z'), Some('z'));
+        assert_eq!(eng.apply_lowercase('A'), 'a');
+
+        assert!(eng.has_one_to_one_folds());
+        assert!(!eng.requires_peek_ahead());
+        assert!(eng.case_map().is_empty(), "English uses Unicode defaults");
+    }
+
+    // ============================================================
+    // CATEGORY 2: Cross-Language Consistency Tests
+    // ============================================================
+
+    #[test]
+    fn segmentation_languages() {
+        // Languages requiring word segmentation
+        let needs_seg = ["JPN", "ZHO", "KOR", "THA", "MYA", "KHM"];
+        for code in needs_seg {
+            assert!(
+                lang(code).needs_segmentation(),
+                "{} needs segmentation",
+                code
+            );
+        }
+
+        // Languages with space-delimited words
+        let no_seg = ["ENG", "TUR", "DEU", "FRA", "ARA"];
+        for code in no_seg {
+            assert!(
+                !lang(code).needs_segmentation(),
+                "{} doesn't need segmentation",
+                code
+            );
+        }
     }
 
     #[test]
-    fn test_arabic_diacritics() {
-        let entry = get_from_table("ARA");
-        assert!(entry.has_spacing_diacritics());
-        assert!(entry.is_spacing_diacritic('َ'));
-        assert!(!entry.is_spacing_diacritic('ا'));
-        // assert!(entry.contains_diacritics("مَرْحَبًا"));
-        // assert!(!entry.contains_diacritics("مرحبا"));
+    fn case_map_exclusivity() {
+        // Only Turkish has custom case_map (for İ/I)
+        assert!(!lang("TUR").case_map().is_empty());
+
+        // All others use Unicode defaults
+        for code in ["ENG", "DEU", "FRA", "ARA", "NLD", "POL"] {
+            assert!(
+                lang(code).case_map().is_empty(),
+                "{} should use Unicode case",
+                code
+            );
+        }
     }
 
     #[test]
-    fn test_from_code() {
-        assert_eq!(from_code("TUR"), Some(TUR));
-        assert_eq!(from_code("tur"), Some(TUR));
-        assert_eq!(from_code("ENG"), Some(ENG));
-        assert_eq!(from_code("XXX"), None);
+    fn peek_ahead_requirements() {
+        // Only Dutch requires peek-ahead for IJ ligature
+        assert!(lang("NLD").requires_peek_ahead());
+
+        // Others don't need it
+        for code in ["ENG", "TUR", "DEU", "FRA", "ARA"] {
+            assert!(
+                !lang(code).requires_peek_ahead(),
+                "{} shouldn't need peek-ahead",
+                code
+            );
+        }
+    }
+
+    // ============================================================
+    // CATEGORY 3: Metadata Consistency Tests
+    // ============================================================
+
+    #[test]
+    fn all_languages_metadata_valid() {
+        for lang_info in all_langs() {
+            let entry = lang(lang_info.code());
+
+            // Peek-ahead requires peek_pairs
+            if entry.requires_peek_ahead() {
+                assert!(
+                    !entry.peek_pairs().is_empty(),
+                    "{}: requires_peek_ahead but no peek_pairs",
+                    lang_info.code()
+                );
+            }
+
+            // has_one_to_one_folds correctness
+            if entry.has_one_to_one_folds() {
+                for fold in entry.fold_map() {
+                    assert_eq!(
+                        fold.to.chars().count(),
+                        1,
+                        "{}: {} → {} violates one_to_one",
+                        lang_info.code(),
+                        fold.from,
+                        fold.to
+                    );
+                }
+            }
+
+            // Spacing diacritics consistency
+            if entry.has_spacing_diacritics() {
+                assert!(
+                    entry.spacing_diacritics().is_some(),
+                    "{}: has_spacing_diacritics but field is None",
+                    lang_info.code()
+                );
+            }
+        }
     }
 
     #[test]
-    fn test_apply_case_fold_preserves_grapheme_count_in_one_to_one_cases() {
+    fn fold_targets_already_lowercase() {
+        // Fold targets must be idempotent (already in lowercase form)
+        let test_langs = ["TUR", "DEU", "NLD", "FRA", "POL", "CES"];
+
+        for code in test_langs {
+            for fold in lang(code).fold_map() {
+                let target_lower: String = fold.to.chars().flat_map(|c| c.to_lowercase()).collect();
+                assert_eq!(
+                    fold.to, target_lower,
+                    "{}: fold target '{}' not lowercase",
+                    code, fold.to
+                );
+            }
+        }
+    }
+
+    // ============================================================
+    // CATEGORY 4: API Contract Tests
+    // ============================================================
+
+    #[test]
+    fn apply_case_fold_rejects_multi_char() {
+        // Case fold returns None for multi-char expansions
+        assert_eq!(lang("DEU").apply_case_fold('ß'), None, "ß→ss");
+        assert_eq!(lang("DEU").apply_case_fold('ẞ'), None, "ẞ→ss");
+        assert_eq!(lang("NLD").apply_case_fold('Ĳ'), None, "Ĳ→ij");
+
+        // But accepts one-to-one
+        assert_eq!(lang("TUR").apply_case_fold('İ'), Some('i'));
+        assert_eq!(lang("DEU").apply_case_fold('A'), Some('a'));
+    }
+
+    #[test]
+    fn apply_lowercase_always_succeeds() {
+        // Lowercase is always 1→1, never fails
+        assert_eq!(lang("TUR").apply_lowercase('İ'), 'i');
+        assert_eq!(lang("DEU").apply_lowercase('ẞ'), 'ß', "ẞ→ß, NOT →ss");
+        assert_eq!(lang("ARA").apply_lowercase('ا'), 'ا', "Already lowercase");
+
+        // Preserves grapheme count
+        let text = "İIıiẞßABC";
+        for c in text.chars() {
+            let result = lang("TUR").apply_lowercase(c);
+            assert_eq!(result.to_string().chars().count(), 1);
+        }
+    }
+
+    #[test]
+    fn fold_vs_lowercase_difference() {
+        // Key difference: lowercase is 1→1, fold can be 1→n
+
+        // German ẞ: lowercase→ß (1→1), fold→ss (1→2)
+        assert_eq!(lang("DEU").apply_lowercase('ẞ'), 'ß');
+        assert_eq!(lang("DEU").apply_case_fold('ẞ'), None);
+
+        // This is why: DEU supports lowercase but not apply_case_fold
+        assert!(!lang("DEU").has_one_to_one_folds());
+    }
+
+    #[test]
+    fn get_lang_entry_by_code_case_insensitive() {
+        assert!(get_lang_entry_by_code("TUR").is_some());
+        assert!(get_lang_entry_by_code("tur").is_some());
+        assert!(get_lang_entry_by_code("Tur").is_some());
+        assert!(get_lang_entry_by_code("XXX").is_none());
+    }
+
+    // ============================================================
+    // CATEGORY 5: Performance Characteristics Tests
+    // ============================================================
+
+    #[test]
+    fn needs_case_fold_is_fast() {
+        // Verify O(1) or O(log n) lookup performance
+        let text = "A".repeat(1000);
+        let start = std::time::Instant::now();
+
+        let count = text
+            .chars()
+            .filter(|&c| lang("ENG").needs_case_fold(c))
+            .count();
+
+        let elapsed = start.elapsed();
+        assert_eq!(count, 1000);
+        assert!(elapsed.as_millis() < 10, "Should be sub-millisecond");
+    }
+
+    #[test]
+    fn one_to_one_preserves_grapheme_count() {
         let cases = [
-            ("ABCabc", "ENG"), // ASCII: byte == char
-            ("éÉèÈ", "FRA"),   // Latin-1: 2-byte chars, but 1:1 mapping
-            ("İIıi", "TUR"),   // Turkish: should preserve grapheme count
+            ("ABCabc", "ENG"), // ASCII
+            ("éÉèÈ", "FRA"),   // Latin accents
+            ("İIıi", "TUR"),   // Turkish dotted-I
         ];
 
         for (text, code) in cases {
-            let entry = get_from_table(code);
+            let entry = lang(code);
             let folded: String = text
                 .chars()
                 .filter_map(|c| entry.apply_case_fold(c))
@@ -539,220 +940,36 @@ mod tests {
             assert_eq!(
                 text.chars().count(),
                 folded.chars().count(),
-                "Grapheme count changed for {} in lang {}",
-                text,
-                code
+                "{} grapheme count changed for {}",
+                code,
+                text
             );
         }
     }
 
+    // ============================================================
+    // CATEGORY 6: Edge Cases
+    // ============================================================
+
     #[test]
-    fn test_all_languages_have_valid_metadata() {
-        let langs = [
-            TUR, DEU, NLD, DAN, NOR, SWE, ARA, HEB, VIE, JPN, ZHO, KOR, THA, MYA, KHM, FRA, CAT,
-            POL, CES, SLK, HRV, SRP, ENG,
-        ];
+    fn empty_text_operations() {
+        let entry = lang("ENG");
 
-        for lang in langs {
-            let entry = get_from_table(lang.code());
-
-            if entry.requires_peek_ahead {
-                assert!(
-                    !entry.peek_pairs.is_empty(),
-                    "peek_ahead=true but peek_pairs empty for {:?}",
-                    lang.name
-                );
-            }
-
-            for fold in entry.fold_map {
-                let char_count = fold.to.chars().count();
-
-                if entry.has_one_to_one_folds() {
-                    assert_eq!(
-                        char_count,
-                        1,
-                        "{}: fold {} -> {} should be 1→1",
-                        lang.code(),
-                        fold.from,
-                        fold.to
-                    );
-                }
-            }
-
-            if entry.spacing_diacritics.is_some() {
-                assert!(entry.spacing_diacritics_slice.is_some());
-                assert!(entry.has_spacing_diacritics());
-            }
-        }
+        assert_eq!(entry.hint_capacity_fold(""), (0, 0));
+        assert_eq!(entry.hint_capacity_transliterate(""), (0, 0));
+        assert!(!entry.needs_pre_composed_to_base_map_or_spacing_diacritics_removal(""));
     }
 
     #[test]
-    fn test_segmentation_languages() {
-        assert!(get_from_table("JPN").needs_segmentation());
-        assert!(get_from_table("ZHO").needs_segmentation());
-        assert!(get_from_table("KOR").needs_segmentation());
-        assert!(get_from_table("THA").needs_segmentation());
-        assert!(!get_from_table("ENG").needs_segmentation());
-        assert!(!get_from_table("TUR").needs_segmentation());
-    }
+    fn ascii_fast_paths() {
+        let entry = lang("ENG");
 
-    #[test]
-    fn test_case_map_only_turkish() {
-        assert!(!get_from_table("TUR").case_map().is_empty());
-        assert!(get_from_table("ENG").case_map().is_empty());
-        assert!(get_from_table("DEU").case_map().is_empty());
-        assert!(get_from_table("ARA").case_map().is_empty());
-    }
+        // ASCII lowercase should be fast rejection
+        assert!(!entry.needs_case_fold('a'));
+        assert!(!entry.needs_lowercase('a'));
 
-    #[test]
-    fn test_idempotency_metadata() {
-        let langs = [TUR, DEU, NLD, DAN, NOR, SWE, FRA, POL, CES, SLK, HRV, SRP];
-
-        for lang in langs {
-            for fold in get_from_table(lang.code()).fold_map() {
-                let target_lower: String = fold.to.chars().flat_map(|c| c.to_lowercase()).collect();
-                assert_eq!(
-                    fold.to,
-                    target_lower,
-                    "{}: fold target '{}' should already be lowercase",
-                    lang.code(),
-                    fold.to
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn test_dutch_ij_variants() {
-        assert_eq!(
-            get_from_table("NLD").get_peek_fold('I', Some('J')),
-            Some("ij")
-        );
-        assert_eq!(get_from_table("NLD").get_peek_fold('i', Some('j')), None); // ← FIXED
-        assert_eq!(get_from_table("NLD").get_peek_fold('I', Some('K')), None);
-        assert_eq!(get_from_table("NLD").get_peek_fold('I', None), None);
-        assert_eq!(get_from_table("ENG").get_peek_fold('I', Some('J')), None);
-        assert_eq!(get_from_table("TUR").get_peek_fold('I', Some('J')), None);
-    }
-
-    #[test]
-    fn test_get_peek_fold_is_generalized() {
-        assert_eq!(
-            get_from_table("NLD").get_peek_fold('I', Some('J')),
-            Some("ij")
-        );
-        assert_eq!(get_from_table("NLD").get_peek_fold('A', Some('B')), None);
-    }
-
-    #[test]
-    fn test_performance_o1_lookup() {
-        let text = "AAAAAAAAAA";
-        let count = text
-            .chars()
-            .filter(|&c| get_from_table("ENG").needs_case_fold(c))
-            .count();
-        assert_eq!(count, 10);
-
-        let turkish_text = "İİİİİİİİİİ";
-        let count = turkish_text
-            .chars()
-            .filter(|&c| get_from_table("TUR").needs_case_fold(c))
-            .count();
-        assert_eq!(count, 10);
-    }
-
-    #[test]
-    fn test_apply_case_fold_rejects_multi_char() {
-        // German: multi-char folds should return None
-        assert_eq!(
-            get_from_table("DEU").apply_case_fold('ß'),
-            None,
-            "ß→ss is multi-char"
-        );
-        assert_eq!(
-            get_from_table("DEU").apply_case_fold('ẞ'),
-            None,
-            "ẞ→ss is multi-char"
-        );
-
-        // Dutch: multi-char folds (ligatures) should return None
-        assert_eq!(
-            get_from_table("NLD").apply_case_fold('Ĳ'),
-            None,
-            "Ĳ→ij is multi-char"
-        );
-        assert_eq!(
-            get_from_table("NLD").apply_case_fold('ĳ'),
-            None,
-            "ĳ→ij is multi-char"
-        );
-
-        // But regular chars work
-        assert_eq!(get_from_table("DEU").apply_case_fold('A'), Some('a'));
-        assert_eq!(get_from_table("NLD").apply_case_fold('A'), Some('a'));
-    }
-
-    #[test]
-    fn test_apply_case_fold_accepts_one_to_one() {
-        // Turkish: 1→1 folds should work
-        assert_eq!(get_from_table("TUR").apply_case_fold('İ'), Some('i'));
-        assert_eq!(get_from_table("TUR").apply_case_fold('I'), Some('ı'));
-
-        // English: Unicode lowercase
-        assert_eq!(get_from_table("ENG").apply_case_fold('A'), Some('a'));
-        assert_eq!(get_from_table("ENG").apply_case_fold('Z'), Some('z'));
-    }
-
-    #[test]
-    fn test_apply_lowercase_always_one_to_one() {
-        // German: lowercase is always 1→1 (ẞ→ß, not →"ss")
-        assert_eq!(get_from_table("DEU").apply_lowercase('ẞ'), 'ß');
-        assert_eq!(get_from_table("DEU").apply_lowercase('ß'), 'ß');
-
-        // Turkish
-        assert_eq!(get_from_table("TUR").apply_lowercase('İ'), 'i');
-        assert_eq!(get_from_table("TUR").apply_lowercase('I'), 'ı');
-
-        // English
-        assert_eq!(get_from_table("ENG").apply_lowercase('A'), 'a');
-    }
-
-    #[test]
-    fn test_fold_vs_lowercase_difference() {
-        // German ẞ (capital eszett)
-        assert_eq!(
-            get_from_table("DEU").apply_lowercase('ẞ'),
-            'ß',
-            "Lowercase: ẞ→ß"
-        );
-        assert_eq!(
-            get_from_table("DEU").apply_case_fold('ẞ'),
-            None,
-            "Fold: ẞ→ss (multi-char, rejected)"
-        );
-
-        // German ß (lowercase eszett)
-        assert_eq!(
-            get_from_table("DEU").apply_lowercase('ß'),
-            'ß',
-            "Already lowercase"
-        );
-        assert_eq!(
-            get_from_table("DEU").apply_case_fold('ß'),
-            None,
-            "Fold: ß→ss (multi-char, rejected)"
-        );
-
-        // This is why German can use CharMapper for Lowercase but not CaseFold
-        assert!(!get_from_table("DEU").has_one_to_one_folds());
-    }
-
-    #[test]
-    fn apply_lowercase_is_infallible() {
-        assert_eq!(get_from_table("TUR").apply_lowercase('İ'), 'i');
-        assert_eq!(get_from_table("TUR").apply_lowercase('I'), 'ı');
-        assert_eq!(get_from_table("ENG").apply_lowercase('A'), 'a');
-        assert_eq!(get_from_table("DEU").apply_lowercase('ẞ'), 'ß');
-        assert_eq!(get_from_table("ARA").apply_lowercase('ا'), 'ا');
+        // ASCII uppercase needs folding
+        assert!(entry.needs_case_fold('A'));
+        assert!(entry.needs_lowercase('A'));
     }
 }

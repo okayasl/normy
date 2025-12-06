@@ -339,7 +339,7 @@ pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
             && prev_class == Some(Indic)
             && is_virama(p_char)
             && curr_class == Indic
-            && !(lang.code == HIN.code && should_prevent_indic_break(curr))
+            && !(lang.code() == HIN.code && should_prevent_indic_break(curr))
         {
             return true;
         }
@@ -430,7 +430,7 @@ where
                         && curr_class == Indic
                     {
                         // Hindi exception: skip certain conjuncts
-                        if !(self.lang.code == HIN.code && should_prevent_indic_break(curr)) {
+                        if !(self.lang.code() == HIN.code && should_prevent_indic_break(curr)) {
                             need_boundary = true;
                             use_zwsp = true;
                         }
