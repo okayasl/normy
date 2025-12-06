@@ -78,9 +78,9 @@ pub struct LangEntry {
     // === Data Arrays (Second Cache Line+) ===
     code: &'static str,
     case_map: &'static [CaseMap],
-    case_char_slice: &'static [char],
+    // case_char_slice: &'static [char],
     fold_map: &'static [FoldMap],
-    fold_char_slice: &'static [char],
+    // fold_char_slice: &'static [char],
     pre_composed_to_base_map: &'static [PreComposedToBaseMap],
     pre_composed_to_base_char_slice: &'static [char],
     spacing_diacritics: Option<&'static [char]>,
@@ -173,10 +173,10 @@ impl LangEntry {
             .unwrap_or(false)
     }
 
-    #[inline(always)]
-    pub fn is_foldable(&self, c: char) -> bool {
-        self.fold_char_slice.contains(&c)
-    }
+    // #[inline(always)]
+    // pub fn is_foldable(&self, c: char) -> bool {
+    //     self.fold_char_slice.contains(&c)
+    // }
 
     #[inline(always)]
     pub fn is_transliterable(&self, c: char) -> bool {
@@ -194,18 +194,16 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn needs_case_fold(&self, c: char) -> bool {
-        self.fold_char_slice.contains(&c)
+        self.fold_map.iter().any(|m| m.from == c)
             || self.case_map.iter().any(|m| m.from == c)
             || c.to_lowercase().next() != Some(c)
     }
 
     #[inline(always)]
     pub fn needs_lowercase(&self, c: char) -> bool {
-        // Check language-specific case_map first
         if self.case_map.iter().any(|m| m.from == c) {
             return true;
         }
-        // Fallback to Unicode lowercase check
         c.to_lowercase().next() != Some(c)
     }
 
@@ -265,15 +263,15 @@ impl LangEntry {
         self.segment_rules
     }
 
-    #[inline(always)]
-    pub fn case_char_slice(&self) -> &'static [char] {
-        self.case_char_slice
-    }
+    // #[inline(always)]
+    // pub fn case_char_slice(&self) -> &'static [char] {
+    //     self.case_char_slice
+    // }
 
-    #[inline(always)]
-    pub fn fold_char_slice(&self) -> &'static [char] {
-        self.fold_char_slice
-    }
+    // #[inline(always)]
+    // pub fn fold_char_slice(&self) -> &'static [char] {
+    //     self.fold_char_slice
+    // }
 
     #[inline(always)]
     pub fn transliterate_char_slice(&self) -> &'static [char] {
@@ -315,9 +313,6 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn apply_case_fold(&self, c: char) -> Option<char> {
-        // if !self.has_case_map && !self.has_fold_map {
-        //     return c.to_lowercase().next();
-        // }
         if let Some(m) = self.fold_map.iter().find(|m| m.from == c) {
             if self.has_one_to_one_folds {
                 Some(m.to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
@@ -483,12 +478,12 @@ impl LangEntry {
         // or extracted during initialization, as we can't create new static slices at runtime
     }
 
-    /// Helper to set the fold_char_slice directly
-    /// Should be called after set_fold_map with the corresponding character slice
-    #[inline]
-    pub fn set_fold_char_slice(&mut self, slice: &'static [char]) {
-        self.fold_char_slice = slice;
-    }
+    // /// Helper to set the fold_char_slice directly
+    // /// Should be called after set_fold_map with the corresponding character slice
+    // #[inline]
+    // pub fn set_fold_char_slice(&mut self, slice: &'static [char]) {
+    //     self.fold_char_slice = slice;
+    // }
 
     /// Sets the transliterate_map and updates all related fields:
     /// - transliterate_char_slice

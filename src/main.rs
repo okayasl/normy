@@ -42,7 +42,7 @@ mod tests {
         let mut casemap = BTreeMap::<&str, usize>::new();
         let mut fold = BTreeMap::<&str, usize>::new();
         let mut transliterate = BTreeMap::<&str, usize>::new();
-        let mut precomposed = BTreeSet::<&str>::new();
+        let mut precomposed = BTreeMap::<&str, usize>::new();
         let mut spacing_diacritics = BTreeMap::<&str, usize>::new();
         let mut peek_pairs = BTreeMap::<&str, usize>::new();
         let mut has_segment_rules = BTreeSet::<&str>::new();
@@ -62,7 +62,7 @@ mod tests {
                 *transliterate.entry(lang.code()).or_default() += e.transliterate_map().len();
             }
             if e.has_pre_composed_to_base_map() {
-                precomposed.insert(lang.code());
+                *precomposed.entry(lang.code()).or_default() += e.pre_composed_to_base_map().len();
             }
             if e.has_spacing_diacritics() {
                 let cnt = e.spacing_diacritics_slice().unwrap_or(&[]).len();
@@ -127,12 +127,12 @@ mod tests {
         print_stat!(casemap, "casemap");
         print_stat!(fold, "fold");
         print_stat!(transliterate, "transliterate");
-        print_set!(precomposed, "precomposed_to_base");
+        print_stat!(precomposed, "precomposed_to_base");
         print_stat!(spacing_diacritics, "spacing_diacritics");
-        print_stat!(peek_pairs, "peek_pairs");
         print_set!(has_segment_rules, "segment_rules (any)");
-        print_set!(needs_segmentation, "needs_segmentation");
+        //print_set!(needs_segmentation, "needs_segmentation");
         print_set!(unigram_cjk, "unigram_cjk");
+        print_stat!(peek_pairs, "peek_pairs");
     }
 
     #[test]

@@ -70,19 +70,82 @@ static UNICODE_WHITESPACE: phf::Set<char> = phf_set! {
     '\u{3000}', // Fullwidth / ideographic space
 };
 
-#[inline(always)]
-pub fn is_format_control(c: char) -> bool {
-    FORMAT_CONTROLS.contains(&c)
+// Fast scan to check for any format controls.
+#[inline]
+pub fn contains_format_controls(text: &str) -> bool {
+    text.chars().any(is_format_control)
 }
 
+// Replace phf set lookup with an inlined, pattern/range-based check.
+// This is very fast and avoids hash/table indirections.
 #[inline(always)]
 pub fn is_unicode_whitespace(c: char) -> bool {
-    UNICODE_WHITESPACE.contains(&c)
+    // Fast common-case checks (ASCII whitespace excluded here on purpose).
+    // These ranges / code points cover the Unicode whitespace characters you listed:
+    // U+00A0, U+1680, U+2000..=U+200A, U+2028, U+2029, U+202F, U+205F, U+3000
+    //
+    // Note: char::is_whitespace covers a superset; we only want the
+    // additional "unicode whitespace mapped to ASCII space" set.
+    match c as u32 {
+        0x00A0 => true,          // NO-BREAK SPACE
+        0x1680 => true,          // OGHAM SPACE MARK
+        0x2000..=0x200A => true, // EN/EM/THIN/... spaces
+        0x2028 | 0x2029 => true, // LINE/PARAGRAPH SEPARATORS
+        0x202F => true,          // NARROW NO-BREAK SPACE
+        0x205F => true,          // MEDIUM MATHEMATICAL SPACE
+        0x3000 => true,          // IDEOGRAPHIC SPACE
+        _ => false,
+    }
 }
 
 #[inline(always)]
 pub fn is_any_whitespace(c: char) -> bool {
+    // Use char::is_whitespace (covers ASCII + many Unicode WS)
+    // plus our explicit set to capture any whitespace not included
+    // by the standard predicate that we want to normalize.
     c.is_whitespace() || is_unicode_whitespace(c)
+}
+
+// Fast ASCII whitespace check using lookup table (unchanged semantics).
+// Kept small and annotated for inlining.
+static ASCII_WS_TABLE: [bool; 256] = {
+    let mut table = [false; 256];
+    table[b' ' as usize] = true;
+    table[b'\t' as usize] = true;
+    table[b'\n' as usize] = true;
+    table[b'\r' as usize] = true;
+    table[b'\x0B' as usize] = true; // Vertical tab
+    table[b'\x0C' as usize] = true; // Form feed
+    table
+};
+
+#[inline(always)]
+pub fn is_ascii_whitespace_fast(b: u8) -> bool {
+    // direct table lookup - extremely cheap
+    ASCII_WS_TABLE[b as usize]
+}
+
+/// Fast check if a byte could be the start of Unicode whitespace in UTF-8.
+///
+/// This is intentionally conservative: it returns true for lead bytes
+/// that commonly begin the target whitespace code points. It helps
+/// avoid a full UTF-8/char decode for mostly-ASCII text.
+///
+/// It's kept intentionally simple (single-byte check) because it is
+/// only used as a quick pre-screen in `needs_apply`.
+#[inline(always)]
+pub fn could_be_unicode_ws_start(b: u8) -> bool {
+    // The UTF-8 lead bytes for our target whitespace codepoints:
+    // 0xC2 -> U+00A0,
+    // 0xE1 -> U+1680,
+    // 0xE2 -> many U+2000.. range and 0x202F, 0x205F
+    // 0xE3 -> U+3000
+    matches!(b, 0xC2 | 0xE1 | 0xE2 | 0xE3)
+}
+
+#[inline(always)]
+pub fn is_format_control(c: char) -> bool {
+    FORMAT_CONTROLS.contains(&c)
 }
 
 // Control characters (Category Cc). Format controls (Cf) are handled separately.
@@ -90,12 +153,6 @@ pub fn is_any_whitespace(c: char) -> bool {
 pub fn is_control(c: char) -> bool {
     let cp = c as u32;
     cp <= 0x1F || (0x7F..=0x9F).contains(&cp)
-}
-
-// Fast scan to check for any format controls.
-#[inline]
-pub fn contains_format_controls(text: &str) -> bool {
-    text.chars().any(is_format_control)
 }
 
 // Fullwidth Latin punctuation/letters in FF01–FF5E plus ideographic space.

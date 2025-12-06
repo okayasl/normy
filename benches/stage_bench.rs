@@ -2,10 +2,10 @@ use std::{borrow::Cow, time::Duration};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
-    ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LowerCase,
-    NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy, POL, RUS,
-    RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA, TRIM_WHITESPACE_ONLY,
-    TUR, Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
+    ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LIT,
+    LowerCase, NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy,
+    POL, RUS, RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA,
+    TRIM_WHITESPACE_ONLY, TUR, Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
 };
 
 // 16 languages — the exact set that will appear in the Normy white paper
@@ -44,6 +44,7 @@ const SAMPLES: &[(&str, Lang)] = &[
     ("<b>IJssEL und Ĳssel</b>\t\r\n", NLD),
     // 17. English  – HTML + emoji + punctuation + control chars
     ("<b>Hello naïve World!</b>\t\r\n  résumé 🇫🇷", ENG),
+    ("IÌ Í Ĩ IĮ ĖĖ ŲŲ – Lithuanian edge cases", LIT),
 ];
 
 // S is the concrete stage type (e.g. LowerCase, CaseFold, ...)
@@ -144,9 +145,9 @@ fn stage_matrix(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default()
-        .measurement_time(Duration::from_secs(2))
-        .warm_up_time(Duration::from_secs(2))
-        .sample_size(1000)
+        .measurement_time(Duration::from_secs(1))
+        .warm_up_time(Duration::from_secs(1))
+        .sample_size(500)
         .noise_threshold(0.015)
         .significance_level(0.05);
     targets = stage_matrix

@@ -35,6 +35,7 @@ const SAMPLES: &[(&str, Lang)] = &[
     ("ספר עִבְרִית", normy::HEB),
     ("¡España mañana!", normy::SPA),
     ("Łódź Żółć", normy::POL),
+    ("IÌ Í Ĩ IĮ ĖĖ ŲŲ – Lithuanian edge cases", normy::LIT),
 ];
 
 // ---------------------------------------------------------------------------
@@ -44,31 +45,43 @@ mod current {
     use normy::lang::LangEntry;
 
     #[inline(always)]
-    pub fn needs_case_fold(entry: &LangEntry, c: char) -> bool {
-        entry.fold_char_slice().contains(&c)
-            || entry.case_map().iter().any(|m| m.from == c)
-            || c.to_lowercase().next() != Some(c)
-    }
-
-    #[inline(always)]
-    pub fn needs_lowercase(entry: &LangEntry, c: char) -> bool {
-        entry.case_map().iter().any(|m| m.from == c) || c.to_lowercase().next() != Some(c)
+    pub fn apply_case_fold(entry: &LangEntry, c: char) -> Option<char> {
+        // if !self.has_case_map && !self.has_fold_map {
+        //     return c.to_lowercase().next();
+        // }
+        if let Some(m) = entry.fold_map().iter().find(|m| m.from == c) {
+            if entry.has_one_to_one_folds() {
+                Some(m.to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
+            } else {
+                None
+            }
+        } else if let Some(m) = entry.case_map().iter().find(|m| m.from == c) {
+            Some(m.to)
+        } else {
+            c.to_lowercase().next()
+        }
     }
 }
 
-mod fast_slice {
+mod new {
     use normy::lang::LangEntry;
 
     #[inline(always)]
-    pub fn needs_case_fold(entry: &LangEntry, c: char) -> bool {
-        entry.fold_char_slice().contains(&c)
-            || entry.case_char_slice().contains(&c)
-            || c.to_lowercase().next() != Some(c)
-    }
-
-    #[inline(always)]
-    pub fn needs_lowercase(entry: &LangEntry, c: char) -> bool {
-        entry.case_char_slice().contains(&c) || c.to_lowercase().next() != Some(c)
+    pub fn apply_case_fold(entry: &LangEntry, c: char) -> Option<char> {
+        if !entry.has_case_map() && !entry.has_fold_map() {
+            return c.to_lowercase().next();
+        }
+        if let Some(m) = entry.fold_map().iter().find(|m| m.from == c) {
+            if entry.has_one_to_one_folds() {
+                Some(m.to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
+            } else {
+                None
+            }
+        } else if let Some(m) = entry.case_map().iter().find(|m| m.from == c) {
+            Some(m.to)
+        } else {
+            c.to_lowercase().next()
+        }
     }
 }
 
@@ -86,14 +99,44 @@ fn bench_lang_entry(c: &mut Criterion) {
         let chars: Vec<char> = text.chars().cycle().take(10_000).collect();
 
         // ---- needs_case_fold ----
+        // group.bench_function(
+        //     BenchmarkId::new("needs_case_fold/current", lang.code()),
+        //     |b| {
+        //         b.iter_batched(
+        //             || chars.clone(),
+        //             |data| {
+        //                 for &c in &data {
+        //                     black_box(current::needs_case_fold(entry, c));
+        //                 }
+        //             },
+        //             BatchSize::SmallInput,
+        //         )
+        //     },
+        // );
+
+        // group.bench_function(
+        //     BenchmarkId::new("needs_case_fold/new", lang.code()),
+        //     |b| {
+        //         b.iter_batched(
+        //             || chars.clone(),
+        //             |data| {
+        //                 for &c in &data {
+        //                     black_box(new::needs_case_fold(entry, c));
+        //                 }
+        //             },
+        //             BatchSize::SmallInput,
+        //         )
+        //     },
+        // );
+
         group.bench_function(
-            BenchmarkId::new("needs_case_fold/current", lang.code()),
+            BenchmarkId::new("apply_case_fold/current", lang.code()),
             |b| {
                 b.iter_batched(
                     || chars.clone(),
                     |data| {
                         for &c in &data {
-                            black_box(current::needs_case_fold(entry, c));
+                            black_box(current::apply_case_fold(entry, c));
                         }
                     },
                     BatchSize::SmallInput,
@@ -101,51 +144,17 @@ fn bench_lang_entry(c: &mut Criterion) {
             },
         );
 
-        group.bench_function(
-            BenchmarkId::new("needs_case_fold/fast_slice", lang.code()),
-            |b| {
-                b.iter_batched(
-                    || chars.clone(),
-                    |data| {
-                        for &c in &data {
-                            black_box(fast_slice::needs_case_fold(entry, c));
-                        }
-                    },
-                    BatchSize::SmallInput,
-                )
-            },
-        );
-
-        // ---- needs_lowercase ----
-        group.bench_function(
-            BenchmarkId::new("needs_lowercase/current", lang.code()),
-            |b| {
-                b.iter_batched(
-                    || chars.clone(),
-                    |data| {
-                        for &c in &data {
-                            black_box(current::needs_lowercase(entry, c));
-                        }
-                    },
-                    BatchSize::SmallInput,
-                )
-            },
-        );
-
-        group.bench_function(
-            BenchmarkId::new("needs_lowercase/fast_slice", lang.code()),
-            |b| {
-                b.iter_batched(
-                    || chars.clone(),
-                    |data| {
-                        for &c in &data {
-                            black_box(fast_slice::needs_lowercase(entry, c));
-                        }
-                    },
-                    BatchSize::SmallInput,
-                )
-            },
-        );
+        group.bench_function(BenchmarkId::new("apply_case_fold/new", lang.code()), |b| {
+            b.iter_batched(
+                || chars.clone(),
+                |data| {
+                    for &c in &data {
+                        black_box(new::apply_case_fold(entry, c));
+                    }
+                },
+                BatchSize::SmallInput,
+            )
+        });
     }
 
     group.finish();
@@ -154,8 +163,8 @@ fn bench_lang_entry(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default()
-        .measurement_time(std::time::Duration::from_secs(4))
-        .warm_up_time(std::time::Duration::from_secs(2))
+        .measurement_time(std::time::Duration::from_secs(1))
+        .warm_up_time(std::time::Duration::from_secs(1))
         .sample_size(200)
         .noise_threshold(0.02);
     targets = bench_lang_entry

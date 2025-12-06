@@ -452,6 +452,9 @@ mod tests {
         assert_eq!(CaseFold.apply(Cow::Borrowed("ĳ"), &ctx).unwrap(), "ij");
 
         // Single I or J should just lowercase normally
-        assert_eq!(CaseFold.apply(Cow::Borrowed("I am J"), &ctx).unwrap(), "i am j");
+        assert_eq!(
+            CaseFold.apply(Cow::Borrowed("I am J"), &ctx).unwrap(),
+            "i am j"
+        );
     }
 }

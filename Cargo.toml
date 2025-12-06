@@ -59,6 +59,11 @@ name = "lb"
 path = "benches/lang_bench.rs"
 harness = false
 
+[[bench]]
+name = "wb"
+path = "benches/whitespace_bench.rs"
+harness = false
+
 [features]
 default = ["simd"]
 simd = ["simdutf8"]
