@@ -86,16 +86,18 @@ pub fn is_unicode_whitespace(c: char) -> bool {
     //
     // Note: char::is_whitespace covers a superset; we only want the
     // additional "unicode whitespace mapped to ASCII space" set.
-    match c as u32 {
-        0x00A0 => true,          // NO-BREAK SPACE
-        0x1680 => true,          // OGHAM SPACE MARK
-        0x2000..=0x200A => true, // EN/EM/THIN/... spaces
-        0x2028 | 0x2029 => true, // LINE/PARAGRAPH SEPARATORS
-        0x202F => true,          // NARROW NO-BREAK SPACE
-        0x205F => true,          // MEDIUM MATHEMATICAL SPACE
-        0x3000 => true,          // IDEOGRAPHIC SPACE
-        _ => false,
-    }
+    matches!(
+        c as u32,
+        0x00A0         | // NO-BREAK SPACE
+        0x1680         | // OGHAM SPACE MARK
+        0x2000
+            ..=0x200A| // EN/EM/THIN/... spaces
+        0x2028         | // LINE SEPARATOR
+        0x2029         | // PARAGRAPH SEPARATOR
+        0x202F         | // NARROW NO-BREAK SPACE
+        0x205F         | // MEDIUM MATHEMATICAL SPACE
+        0x3000 // IDEOGRAPHIC SPACE
+    )
 }
 
 #[inline(always)]

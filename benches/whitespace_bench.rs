@@ -119,7 +119,7 @@ criterion_group! {
     config = Criterion::default()
         .measurement_time(std::time::Duration::from_secs(2))
         .warm_up_time(std::time::Duration::from_secs(2))
-        .sample_size(500)           // High for stable zero-copy stats
+        .sample_size(500)
         .noise_threshold(0.02)
         .significance_level(0.05);
     targets = bench_whitespace_variants

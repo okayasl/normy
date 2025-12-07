@@ -664,4 +664,30 @@ mod tests {
         assert_eq!(output, "hello world");
         // Crucial: no allocation if only leading WS
     }
+
+    #[test]
+    fn handles_u0085_next_line() {
+        let stage = TRIM_WHITESPACE_ONLY;
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("\u{85}hello\u{85}"), &Context::new(ENG))
+                .unwrap(),
+            "hello"
+        );
+    }
+
+    #[test]
+    fn preserves_u0085_when_not_normalizing() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: false,
+            trim_edges: false,
+            normalize_unicode: false,
+        };
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("a\u{85}b"), &Context::new(ENG))
+                .unwrap(),
+            "a\u{85}b"
+        );
+    }
 }
