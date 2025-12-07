@@ -4,7 +4,7 @@
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use normy::{
-    Normy,
+    COLLAPSE_WHITESPACE_UNICODE, Normy, TRIM_WHITESPACE_UNICODE,
     stage::normalize_whitespace::{
         COLLAPSE_WHITESPACE_ONLY, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace,
         TRIM_WHITESPACE_ONLY,
@@ -17,27 +17,38 @@ use std::{borrow::Cow, hint::black_box};
 // user-generated content, and tokenizer pipelines.
 
 const SAMPLES: &[&str] = &[
-    // 1. Leading/trailing + mixed ASCII whitespace
-    "   hello\tworld  \n\r   ",
-    // 2. Unicode whitespace soup (NBSP, EM SPACE, IDEOGRAPHIC SPACE, etc.)
-    "hello\u{00A0}\u{2003}\u{3000}world\u{2009}\u{202F}test",
-    // 3. Sequential collapse required
-    "a   b\t\tc\n\nd   e",
-    // 4. Already perfectly normalized → must be 100% zero-copy
-    "hello world",
-    // 5. Only trimming needed
-    "  clean text  ",
-    // 6. Only collapse needed (no trim, no unicode)
-    "a  b   c    d",
-    // 7. Mixed unicode + ASCII + line separators
-    "line1\nline2\u{00A0}\u{2007}\u{2028}line3",
-    // 8. Very long run of spaces — stress capacity hinting & allocation path
-    // Generated at runtime, not in const context
-    "", // placeholder — will be replaced in setup
-    // 9. Edge cases
+    // --- 1. Zero-Copy Fast Paths (Crucial) ---
+    // S1: Already perfectly normalized ASCII
+    "hello world text",
+    // S2: Empty string
     "",
-    "unchanged",
-    "no_whitespace_here!",
+    // S3: Already perfectly normalized Unicode text (no WS, no need for collapse/trim)
+    "Hélló Wörld!ß",
+    // S4: Single space (minimal)
+    " ",
+    // --- 2. ASCII Collapse/Preservation Edge Cases (Stress apply_ascii_fast) ---
+    // S5: Leading/trailing mixed ASCII WS (trim + collapse)
+    "   hello\tworld  \n\r   ",
+    // S6: Collapse-Only, preserves \t identity (must result in 'a\tb')
+    "a\t\t\tb\r\rc",
+    // S7: Trim-Only, preserves internal runs (must result in 'a   b')
+    "  a   b  ",
+    // S8: Newline preservation (must result in "a\n\nb")
+    "a\n\n b",
+    // --- 3. Unicode Normalization Edge Cases (Stress apply_full) ---
+    // S9: Unicode WS trim (must be empty with TRIM_WHITESPACE_UNICODE)
+    "\u{00A0}\u{2003}\u{3000}",
+    // S10: Mixed Unicode/ASCII collapse (must result in 'a b')
+    "a\u{00A0}\t b\u{2003}\n c",
+    // S11: Unicode Trim-Only (must result in 'clean\u{00A0}text')
+    "\u{3000}clean\u{00A0}text\u{2003}",
+    // --- 4. Stress and Allocation Tests ---
+    // S12: Very long run of spaces (tests capacity & heap spill/copy)
+    "start{}end", // Placeholder for 10,000 spaces run
+    // S13: Single Unicode WS char (tests minimal allocation)
+    "\u{00A0}",
+    // S14: Non-ASCII text with embedded ASCII WS (ensures proper byte/char transition)
+    "El niño\t está \u{3000} aquí.",
 ];
 
 fn bench_whitespace_variants(c: &mut Criterion) {
@@ -46,7 +57,7 @@ fn bench_whitespace_variants(c: &mut Criterion) {
     // Generate the long space string once, outside the hot loop
     let long_spaces = format!("start{}end", " ".repeat(10_000));
     let mut samples = SAMPLES.to_vec();
-    samples[7] = Box::leak(long_spaces.into_boxed_str()); // 'static leak, safe in bench
+    samples[12] = Box::leak(long_spaces.into_boxed_str()); // 'static leak, safe in bench
 
     // Reusable closure — now mutable because we mutate `group`
     let mut bench_variant = |name: &str, stage: NormalizeWhitespace| {
@@ -100,6 +111,8 @@ fn bench_whitespace_variants(c: &mut Criterion) {
     bench_variant("FULL", NORMALIZE_WHITESPACE_FULL);
     bench_variant("COLLAPSE_ONLY", COLLAPSE_WHITESPACE_ONLY);
     bench_variant("TRIM_ONLY", TRIM_WHITESPACE_ONLY);
+    bench_variant("TRIM_UNICODE", TRIM_WHITESPACE_UNICODE);
+    bench_variant("COLLAPSE_UNICODE", COLLAPSE_WHITESPACE_UNICODE);
 
     // Prove the value of the flag — this should be noticeably faster on ASCII-only
     bench_variant(

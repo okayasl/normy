@@ -51,24 +51,24 @@ static FORMAT_CONTROLS: phf::Set<char> = phf_set! {
 // Unicode whitespace characters excluding ASCII space, tab, LF, CR.
 //
 // These are normalized to plain ASCII space when `normalize_unicode = true`.
-static UNICODE_WHITESPACE: phf::Set<char> = phf_set! {
-    '\u{00A0}', // No-break space
-    '\u{1680}', // Ogham space mark
-    '\u{2000}', // En quad
-    '\u{2001}', // Em quad
-    '\u{2002}', // En space
-    '\u{2003}', // Em space
-    '\u{2004}', // Three-per-em space
-    '\u{2005}', // Four-per-em space
-    '\u{2006}', // Six-per-em space
-    '\u{2007}', // Figure space
-    '\u{2008}', // Punctuation space
-    '\u{2009}', // Thin space
-    '\u{200A}', // Hair space
-    '\u{202F}', // Narrow no-break space
-    '\u{205F}', // Medium mathematical space
-    '\u{3000}', // Fullwidth / ideographic space
-};
+// static UNICODE_WHITESPACE: phf::Set<char> = phf_set! {
+//     '\u{00A0}', // No-break space
+//     '\u{1680}', // Ogham space mark
+//     '\u{2000}', // En quad
+//     '\u{2001}', // Em quad
+//     '\u{2002}', // En space
+//     '\u{2003}', // Em space
+//     '\u{2004}', // Three-per-em space
+//     '\u{2005}', // Four-per-em space
+//     '\u{2006}', // Six-per-em space
+//     '\u{2007}', // Figure space
+//     '\u{2008}', // Punctuation space
+//     '\u{2009}', // Thin space
+//     '\u{200A}', // Hair space
+//     '\u{202F}', // Narrow no-break space
+//     '\u{205F}', // Medium mathematical space
+//     '\u{3000}', // Fullwidth / ideographic space
+// };
 
 // Fast scan to check for any format controls.
 #[inline]
@@ -88,14 +88,15 @@ pub fn is_unicode_whitespace(c: char) -> bool {
     // additional "unicode whitespace mapped to ASCII space" set.
     matches!(
         c as u32,
-        0x00A0         | // NO-BREAK SPACE
-        0x1680         | // OGHAM SPACE MARK
+        0x0085 | // NEXT LINE (NEL)
+        0x00A0 | // NO-BREAK SPACE
+        0x1680 | // OGHAM SPACE MARK
         0x2000
-            ..=0x200A| // EN/EM/THIN/... spaces
-        0x2028         | // LINE SEPARATOR
-        0x2029         | // PARAGRAPH SEPARATOR
-        0x202F         | // NARROW NO-BREAK SPACE
-        0x205F         | // MEDIUM MATHEMATICAL SPACE
+            ..=0x200A | // EN QUAD through HAIR SPACE
+        0x2028 | // LINE SEPARATOR
+        0x2029 | // PARAGRAPH SEPARATOR
+        0x202F | // NARROW NO-BREAK SPACE
+        0x205F | // MEDIUM MATHEMATICAL SPACE
         0x3000 // IDEOGRAPHIC SPACE
     )
 }

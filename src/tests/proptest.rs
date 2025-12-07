@@ -1,5 +1,5 @@
 mod prop_tests {
-    use crate::{DEU, ENG, FRA, CaseFold, LowerCase, Normy, RemoveDiacritics, TUR, TRIM_WHITESPACE_ONLY};
+    use crate::{DEU, ENG, FRA, CaseFold, LowerCase, Normy, RemoveDiacritics, TUR, TRIM_WHITESPACE_UNICODE};
     use proptest::prelude::*;
 
     proptest! {
@@ -42,9 +42,9 @@ mod prop_tests {
             prop_assert!(matches!(result, std::borrow::Cow::Borrowed(b) if b.as_ptr() == input.as_ptr()));
         }
 
-            #[test]
+        #[test]
         fn trim_idempotent(s in ".{0,1000}") {
-            let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_ONLY).build();
+            let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_UNICODE).build();
             let once = normy.normalize(&s).unwrap().into_owned();
             let twice = normy.normalize(&once).unwrap().into_owned();
             prop_assert_eq!(once, twice);
@@ -52,7 +52,7 @@ mod prop_tests {
 
         #[test]
         fn zero_copy_when_no_whitespace(s in "[^\\s]+") {
-            let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_ONLY).build();
+            let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_UNICODE).build();
 
             // Additional check: ensure string has no leading/trailing whitespace
             prop_assume!(!s.is_empty());
@@ -66,7 +66,7 @@ mod prop_tests {
 
         #[test]
         fn trims_all_unicode_whitespace(s in "\\p{Zs}{0,10}.*\\p{Zs}{0,10}") {
-            let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_ONLY).build();
+            let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_UNICODE).build();
             let result = normy.normalize(&s).unwrap();
             let trimmed = s.trim();
             prop_assert_eq!(&*result, trimmed);

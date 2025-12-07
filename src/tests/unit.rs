@@ -2,8 +2,8 @@
 mod unit_tests {
 
     use crate::{
-        DEU, ENG, FRA, CaseFold, JPN, LowerCase, NLD, Normy, RemoveDiacritics, TUR,
-        TRIM_WHITESPACE_ONLY,
+        CaseFold, DEU, ENG, FRA, JPN, LowerCase, NLD, Normy, RemoveDiacritics,
+        TRIM_WHITESPACE_ONLY, TRIM_WHITESPACE_UNICODE, TUR,
     };
     use std::borrow::Cow;
     #[test]
@@ -51,7 +51,7 @@ mod unit_tests {
             .add_stage(RemoveDiacritics)
             .build();
         let result = n.normalize("café résumé naïve").unwrap();
-        assert_eq!(result,"cafe resume naive");
+        assert_eq!(result, "cafe resume naive");
         // Edge: composed → decomposed → stripped
         assert_eq!(n.normalize(" naïve").unwrap(), " naive"); // U+00E9 → e + ́ → e
     }
@@ -92,7 +92,7 @@ mod unit_tests {
     fn full_width_spaces_japanese() {
         let normy = Normy::builder()
             .lang(JPN)
-            .add_stage(TRIM_WHITESPACE_ONLY)
+            .add_stage(TRIM_WHITESPACE_UNICODE)
             .build();
         assert_eq!(normy.normalize("　こんにちは　").unwrap(), "こんにちは");
     }
