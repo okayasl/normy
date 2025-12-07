@@ -101,14 +101,6 @@ pub fn is_unicode_whitespace(c: char) -> bool {
     )
 }
 
-#[inline(always)]
-pub fn is_any_whitespace(c: char) -> bool {
-    // Use char::is_whitespace (covers ASCII + many Unicode WS)
-    // plus our explicit set to capture any whitespace not included
-    // by the standard predicate that we want to normalize.
-    c.is_whitespace() || is_unicode_whitespace(c)
-}
-
 // Fast ASCII whitespace check using lookup table (unchanged semantics).
 // Kept small and annotated for inlining.
 static ASCII_WS_TABLE: [bool; 256] = {
@@ -126,6 +118,14 @@ static ASCII_WS_TABLE: [bool; 256] = {
 pub fn is_ascii_whitespace_fast(b: u8) -> bool {
     // direct table lookup - extremely cheap
     ASCII_WS_TABLE[b as usize]
+}
+
+#[inline(always)]
+pub fn is_any_whitespace(c: char) -> bool {
+    // Use char::is_whitespace (covers ASCII + many Unicode WS)
+    // plus our explicit set to capture any whitespace not included
+    // by the standard predicate that we want to normalize.
+    c.is_whitespace() || is_unicode_whitespace(c)
 }
 
 /// Fast check if a byte could be the start of Unicode whitespace in UTF-8.

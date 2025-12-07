@@ -219,36 +219,40 @@ impl Stage for NormalizeWhitespace {
 }
 
 impl NormalizeWhitespace {
+    #[inline(always)]
+    fn collapse_replacement(&self) -> char {
+        ' '
+    }
     /// Optimized ASCII-only fast path (no Unicode normalization needed).
     /// Single-pass, byte-level operations with at most one allocation.
     #[inline(always)]
     fn apply_ascii_fast<'a>(&self, text: Cow<'a, str>) -> Cow<'a, str> {
         let s = text.as_ref();
         let bytes = s.as_bytes();
-
         // ═══════════════════════════════════════════════════════════
         // Single-pass transformation (trust needs_apply() contract)
         // ═══════════════════════════════════════════════════════════
         let mut result = String::with_capacity(bytes.len());
         let mut prev_ws = false;
         let mut started = false;
-
         for &b in bytes {
             let is_ws = is_ascii_whitespace_fast(b);
-
             if is_ws {
                 // Skip leading whitespace if trimming
                 if self.trim_edges && !started {
                     prev_ws = true;
                     continue;
                 }
-
                 // Handle sequential collapse
                 if self.collapse_sequential && prev_ws {
                     continue;
                 }
-
-                result.push(b as char);
+                // Emit WS: normalized if collapsing, original otherwise
+                if self.collapse_sequential {
+                    result.push(self.collapse_replacement());
+                } else {
+                    result.push(b as char);
+                }
                 prev_ws = true;
             } else {
                 result.push(b as char);
@@ -256,7 +260,6 @@ impl NormalizeWhitespace {
                 started = true;
             }
         }
-
         // Trim trailing whitespace if requested
         if self.trim_edges {
             let trimmed_len = result
@@ -267,10 +270,8 @@ impl NormalizeWhitespace {
                 .unwrap_or(0);
             result.truncate(trimmed_len);
         }
-
         Cow::Owned(result)
     }
-
     /// Full Unicode-aware transformation with optimal single-pass processing.
     /// Handles all whitespace types, all configurations, with at most one allocation.
     ///
@@ -281,70 +282,50 @@ impl NormalizeWhitespace {
     #[inline(always)]
     fn apply_full<'a>(&self, text: Cow<'a, str>) -> Cow<'a, str> {
         let s = text.as_ref();
-
         // ═══════════════════════════════════════════════════════════
         // Single-pass transformation (trust needs_apply() contract)
         // ═══════════════════════════════════════════════════════════
         let mut result = String::with_capacity(s.len());
         let mut started = false;
-
         // Simple Vec for pending WS (most runs are 1-2 chars)
         let mut pending_ws: Vec<char> = Vec::new();
-        let mut run_has_unicode_ws = false;
-
         for c in s.chars() {
             // Determine if this is whitespace
             let is_std_ws = self.is_whitespace_for_config(c);
             let is_uni_ws = self.is_unicode_whitespace_only(c);
             let is_ws = is_std_ws || is_uni_ws;
-
             if is_ws {
-                if is_uni_ws {
-                    run_has_unicode_ws = true;
-                }
                 pending_ws.push(c);
                 continue;
             }
-
             // ═══════════════════════════════════════════════════════════
             // Non-whitespace: flush pending WS run
             // ═══════════════════════════════════════════════════════════
             if !pending_ws.is_empty() {
                 let should_emit = !self.trim_edges || started;
-
                 if should_emit {
                     if self.collapse_sequential {
-                        result.push(' ');
+                        result.push(self.collapse_replacement());
                     } else {
                         // Emit all WS chars as-is
                         result.extend(pending_ws.drain(..));
                     }
                 }
-
                 pending_ws.clear();
-                run_has_unicode_ws = false;
             }
-
             result.push(c);
             started = true;
         }
-
         // End-of-string: handle trailing WS
         if !pending_ws.is_empty() && !self.trim_edges {
             if self.collapse_sequential {
-                if run_has_unicode_ws {
-                    result.push(' ');
-                } else {
-                    result.push(pending_ws[0]);
-                }
+                result.push(self.collapse_replacement());
             } else {
                 result.extend(pending_ws);
             }
         }
-
         Cow::Owned(result)
     }
-
     #[inline(always)]
     fn is_whitespace_for_config(&self, c: char) -> bool {
         if self.normalize_unicode {
@@ -353,7 +334,6 @@ impl NormalizeWhitespace {
             c.is_ascii_whitespace()
         }
     }
-
     #[inline(always)]
     fn is_unicode_whitespace_only(&self, c: char) -> bool {
         self.normalize_unicode && !c.is_ascii_whitespace() && c.is_whitespace()
@@ -383,14 +363,6 @@ impl StageTestConfig for NormalizeWhitespace {
             "abc def",
             "",
         ]
-    }
-
-    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
-        &[]
-    }
-
-    fn skip_needs_apply_test() -> bool {
-        true
     }
 
     fn skip_zero_copy_apply_test() -> bool {
@@ -543,11 +515,24 @@ mod tests {
     }
 
     #[test]
-    fn preserves_tabs_in_collapsed_run() {
+    fn removes_tabs_in_collapsed_run() {
         let stage = NORMALIZE_WHITESPACE_FULL;
         assert_eq!(
             stage.apply(Cow::Borrowed("a\t \t b"), &ctx()).unwrap(),
-            "a\tb"
+            "a b"
+        );
+    }
+
+    #[test]
+    fn preserves_tabs_in_collapsed_run() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: true,
+            trim_edges: true,
+            normalize_unicode: false,
+        };
+        assert_eq!(
+            stage.apply(Cow::Borrowed("a\t \t b"), &ctx()).unwrap(),
+            "a b"
         );
     }
 
@@ -611,5 +596,108 @@ mod tests {
             stage.apply(input.into(), &ctx()).unwrap(),
             "\u{00A0}hello world\u{00A0}"
         );
+    }
+
+    #[test]
+    fn ascii_and_full_paths_consistent() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: true,
+            trim_edges: false,
+            normalize_unicode: false,
+        };
+        let ctx = Context::new(ENG);
+        let inputs = [
+            "a  b",
+            "a\t\tb\n\nc",
+            "\t a \n",
+            "single ",
+            "",
+            "no_ws_at_all",
+        ];
+        let expecteds = ["a b", "a b c", " a ", "single ", "", "no_ws_at_all"];
+
+        for (i, input) in inputs.iter().enumerate() {
+            // Normal apply (takes ASCII fast path)
+            let output_ascii = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            // Direct full path call (Unicode-aware, but on ASCII)
+            let output_full = stage.apply_full(Cow::Borrowed(input));
+            let expected = expecteds[i];
+
+            assert_eq!(
+                output_ascii.as_ref(),
+                expected,
+                "ASCII path mismatch for: {}",
+                input
+            );
+            assert_eq!(
+                output_full.as_ref(),
+                expected,
+                "Full path mismatch for: {}",
+                input
+            );
+            assert_eq!(
+                output_ascii, output_full,
+                "Paths inconsistent for: {}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn ascii_and_full_paths_consistent_no_collapse() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: false,
+            trim_edges: false,
+            normalize_unicode: false,
+        };
+        let ctx = Context::new(ENG);
+        let inputs = ["a  b", "a\t\tb\n\nc", "\t a \n"];
+        let expecteds = ["a  b", "a\t\tb\n\nc", "\t a \n"];
+
+        for (i, input) in inputs.iter().enumerate() {
+            let output_ascii = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+            let output_full = stage.apply_full(Cow::Borrowed(input));
+            let expected = expecteds[i];
+
+            assert_eq!(
+                output_ascii.as_ref(),
+                expected,
+                "ASCII path mismatch for: {}",
+                input
+            );
+            assert_eq!(
+                output_full.as_ref(),
+                expected,
+                "Full path mismatch for: {}",
+                input
+            );
+            assert_eq!(
+                output_ascii, output_full,
+                "Paths inconsistent for: {}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_ws_preserved_when_normalize_disabled() {
+        let stage = COLLAPSE_WHITESPACE_ONLY; // normalize_unicode = false
+        let input = "a\u{00A0} hello    \u{00A0}b";
+        let output = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
+        assert_eq!(output.as_ref(), "a\u{00A0} hello \u{00A0}b");
+        let input = "a\u{00A0} hello\t\t    \u{00A0}\u{00A0}b";
+        let output = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
+        assert_eq!(output.as_ref(), "a\u{00A0} hello \u{00A0}\u{00A0}b");
+    }
+
+    #[test]
+    fn unicode_ws_collapsed_when_normalize_enabled() {
+        let stage = COLLAPSE_WHITESPACE_UNICODE; // normalize_unicode = true
+        let input = "a\u{00A0} hello    \u{00A0}b";
+        let output = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
+        assert_eq!(output.as_ref(), "a hello b");
+        let input = "a\u{00A0} hello\t\t   \u{00A0}\u{00A0}b";
+        let output = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
+        assert_eq!(output.as_ref(), "a hello b");
     }
 }
