@@ -146,7 +146,7 @@ impl Stage for NormalizeWhitespace {
     }
 
     fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        // ⚡ FAST PATH 0: Empty string
+        // Fast path 0: Empty string or no operations
         if text.is_empty() || (!self.trim_edges && !self.collapse_sequential) {
             return Ok(false);
         }
@@ -154,7 +154,7 @@ impl Stage for NormalizeWhitespace {
         let bytes = text.as_bytes();
         let len = bytes.len();
 
-        // ⚡ FAST PATH 1: Trim edges check
+        // Fast path 1: Trim edges check
         if self.trim_edges {
             // Leading/trailing ASCII whitespace
             if is_ascii_whitespace_fast(bytes[0]) || is_ascii_whitespace_fast(bytes[len - 1]) {
@@ -171,7 +171,7 @@ impl Stage for NormalizeWhitespace {
         }
 
         if self.collapse_sequential {
-            // ⚡ FAST PATH 2: ASCII-only text
+            // Fast path 2: ASCII-only text
             if text.is_ascii() {
                 let mut prev_ws = false;
                 for &b in bytes {
@@ -184,7 +184,7 @@ impl Stage for NormalizeWhitespace {
                 return Ok(false); // Pure ASCII, no sequential WS
             }
 
-            // ⚡ MEDIUM PATH: Mixed Unicode text
+            // Medium path: Mixed Unicode text
             // If Unicode normalization is enabled and we see any byte that could start a Unicode WS char,
             // we conservatively return true — it's cheaper than decoding chars here.
             if self.normalize_unicode && bytes.iter().any(|&b| could_be_unicode_ws_start(b)) {
@@ -192,13 +192,12 @@ impl Stage for NormalizeWhitespace {
                 return Ok(true);
             }
 
-            // 🐌 SLOW PATH: Full char iteration
+            // Slow path: Full char iteration
             let mut prev_ws = false;
             for c in text.chars() {
-                let is_ws =
-                    (self.normalize_unicode && is_unicode_whitespace(c)) || c.is_whitespace();
+                let is_ws = self.is_whitespace_for_config(c);
 
-                //only check collapsing, trim already checked
+                // Only check collapsing, trim already checked
                 if is_ws && prev_ws {
                     return Ok(true);
                 }
@@ -209,8 +208,9 @@ impl Stage for NormalizeWhitespace {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // Hot path: pure ASCII + no Unicode normalization → byte-level micro-optimization
-        if !self.normalize_unicode && text.is_ascii() {
+        // Hot path: pure ASCII text → byte-level optimization (even with normalize_unicode=true)
+        // Rationale: ASCII has no Unicode whitespace, so normalize_unicode is a no-op
+        if text.is_ascii() {
             return Ok(self.apply_ascii_fast(text));
         }
         // Canonical path: handles all whitespace, all configurations, one pass, one allocation
@@ -227,49 +227,11 @@ impl NormalizeWhitespace {
         let bytes = s.as_bytes();
 
         // ═══════════════════════════════════════════════════════════
-        // PHASE 1: Detect if input is already clean (can return borrowed)
-        // ═══════════════════════════════════════════════════════════
-        let mut needs_change = false;
-
-        // Check trim requirements
-        if self.trim_edges {
-            if let Some(&first) = bytes.first()
-                && is_ascii_whitespace_fast(first)
-            {
-                needs_change = true;
-            }
-            if !needs_change
-                && let Some(&last) = bytes.last()
-                && is_ascii_whitespace_fast(last)
-            {
-                needs_change = true;
-            }
-        }
-
-        // Check collapse requirements (sequential whitespace)
-        if !needs_change && self.collapse_sequential {
-            let mut prev_ws = false;
-            for &b in bytes {
-                let is_ws = is_ascii_whitespace_fast(b);
-                if is_ws && prev_ws {
-                    needs_change = true;
-                    break;
-                }
-                prev_ws = is_ws;
-            }
-        }
-
-        // Input is already clean for requested operations
-        if !needs_change {
-            return text;
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        // PHASE 2: Transform (guaranteed to need changes)
+        // Single-pass transformation (trust needs_apply() contract)
         // ═══════════════════════════════════════════════════════════
         let mut result = String::with_capacity(bytes.len());
         let mut prev_ws = false;
-        let mut started = false; // Track if we've emitted any non-WS yet
+        let mut started = false;
 
         for &b in bytes {
             let is_ws = is_ascii_whitespace_fast(b);
@@ -283,14 +245,12 @@ impl NormalizeWhitespace {
 
                 // Handle sequential collapse
                 if self.collapse_sequential && prev_ws {
-                    continue; // Skip this WS char (already have one in the run)
+                    continue;
                 }
 
-                // Emit whitespace
                 result.push(b as char);
                 prev_ws = true;
             } else {
-                // Non-whitespace character
                 result.push(b as char);
                 prev_ws = false;
                 started = true;
@@ -299,7 +259,6 @@ impl NormalizeWhitespace {
 
         // Trim trailing whitespace if requested
         if self.trim_edges {
-            // Find last non-whitespace position
             let trimmed_len = result
                 .as_bytes()
                 .iter()
@@ -324,114 +283,80 @@ impl NormalizeWhitespace {
         let s = text.as_ref();
 
         // ═══════════════════════════════════════════════════════════
-        // PHASE 1: Single-pass transformation with pending WS buffer
+        // Single-pass transformation (trust needs_apply() contract)
         // ═══════════════════════════════════════════════════════════
         let mut result = String::with_capacity(s.len());
-        let mut started = false; // Have we emitted any non-WS?
+        let mut started = false;
 
-        // Pending whitespace run state
-        // Using inline buffer optimization: most WS runs are 1-4 chars
-        let mut pending_ws_inline: [char; 4] = ['\0'; 4];
-        let mut pending_ws_len: usize = 0;
-        let mut pending_ws_heap: Vec<char> = Vec::new();
+        // Simple Vec for pending WS (most runs are 1-2 chars)
+        let mut pending_ws: Vec<char> = Vec::new();
         let mut run_has_unicode_ws = false;
 
         for c in s.chars() {
-            // Determine if this is whitespace based on current config
-            let is_std_ws = c.is_whitespace();
-            let is_uni_ws = self.normalize_unicode && is_unicode_whitespace(c);
+            // Determine if this is whitespace
+            let is_std_ws = self.is_whitespace_for_config(c);
+            let is_uni_ws = self.is_unicode_whitespace_only(c);
             let is_ws = is_std_ws || is_uni_ws;
 
             if is_ws {
-                // Track if this run contains any normalizable Unicode WS
                 if is_uni_ws {
                     run_has_unicode_ws = true;
                 }
-
-                // Buffer this whitespace character
-                if pending_ws_len < 4 {
-                    pending_ws_inline[pending_ws_len] = c;
-                } else {
-                    // Spill to heap (rare case)
-                    if pending_ws_heap.is_empty() {
-                        // First spill: copy inline buffer to heap
-                        pending_ws_heap.extend_from_slice(&pending_ws_inline);
-                    }
-                    pending_ws_heap.push(c);
-                }
-                pending_ws_len += 1;
+                pending_ws.push(c);
                 continue;
             }
 
             // ═══════════════════════════════════════════════════════════
-            // Non-whitespace char: flush pending WS run according to rules
+            // Non-whitespace: flush pending WS run
             // ═══════════════════════════════════════════════════════════
-            if pending_ws_len > 0 {
-                // Only emit WS if: (1) not trimming, OR (2) already started (not leading)
-                let should_emit_ws = !self.trim_edges || started;
+            if !pending_ws.is_empty() {
+                let should_emit = !self.trim_edges || started;
 
-                if should_emit_ws {
+                if should_emit {
                     if self.collapse_sequential {
-                        // Collapse mode: emit single character
-                        // Rule: collapse_sequential + normalize_unicode → normalize to ' '
-                        if run_has_unicode_ws {
-                            result.push(' '); // Normalize Unicode WS to ASCII space
-                        } else {
-                            result.push(pending_ws_inline[0]); // Preserve first ASCII WS
-                        }
+                        result.push(' ');
                     } else {
-                        // No collapse: emit each WS character AS-IS
-                        // Rule: trim_edges + normalize_unicode → trim but don't normalize internal
-                        let ws_iter = if pending_ws_heap.is_empty() {
-                            pending_ws_inline[..pending_ws_len].iter()
-                        } else {
-                            pending_ws_heap.iter()
-                        };
-
-                        for &wc in ws_iter {
-                            result.push(wc); // Preserve original whitespace
-                        }
+                        // Emit all WS chars as-is
+                        result.extend(pending_ws.drain(..));
                     }
                 }
 
-                // Reset pending WS state
-                pending_ws_len = 0;
-                pending_ws_heap.clear();
+                pending_ws.clear();
                 run_has_unicode_ws = false;
             }
 
-            // Emit the non-whitespace character
             result.push(c);
             started = true;
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // End-of-string: handle trailing whitespace
-        // ═══════════════════════════════════════════════════════════
-        if pending_ws_len > 0 && !self.trim_edges {
-            // Not trimming: emit trailing WS
+        // End-of-string: handle trailing WS
+        if !pending_ws.is_empty() && !self.trim_edges {
             if self.collapse_sequential {
-                // Collapse + normalize if Unicode WS present
                 if run_has_unicode_ws {
                     result.push(' ');
                 } else {
-                    result.push(pending_ws_inline[0]);
+                    result.push(pending_ws[0]);
                 }
             } else {
-                // No collapse: emit AS-IS (preserve original)
-                let ws_iter = if pending_ws_heap.is_empty() {
-                    pending_ws_inline[..pending_ws_len].iter()
-                } else {
-                    pending_ws_heap.iter()
-                };
-
-                for &wc in ws_iter {
-                    result.push(wc);
-                }
+                result.extend(pending_ws);
             }
         }
 
         Cow::Owned(result)
+    }
+
+    #[inline(always)]
+    fn is_whitespace_for_config(&self, c: char) -> bool {
+        if self.normalize_unicode {
+            c.is_whitespace()
+        } else {
+            c.is_ascii_whitespace()
+        }
+    }
+
+    #[inline(always)]
+    fn is_unicode_whitespace_only(&self, c: char) -> bool {
+        self.normalize_unicode && !c.is_ascii_whitespace() && c.is_whitespace()
     }
 }
 
@@ -634,15 +559,16 @@ mod tests {
     fn all_unicode_whitespace_types() {
         let ctx = ctx();
 
-        // NEL with normalize_unicode=false
+        // Case 1: COLLAPSE_WHITESPACE_ONLY → normalize_unicode = false
+        // → Unicode whitespace (NEL) must NOT be collapsed
         assert_eq!(
             COLLAPSE_WHITESPACE_ONLY
                 .apply(Cow::Borrowed("a\u{85}\u{85}b"), &ctx)
                 .unwrap(),
-            "a\u{85}b"
+            "a\u{85}\u{85}b" // ← FIXED: preserve both NELs
         );
 
-        // NBSP with normalize_unicode=true
+        // Case 2: FULL → normalize_unicode = true → collapse + normalize to space
         assert_eq!(
             NORMALIZE_WHITESPACE_FULL
                 .apply(Cow::Borrowed("a\u{00A0}b"), &ctx)
@@ -650,7 +576,7 @@ mod tests {
             "a b"
         );
 
-        // Mixed NEL + NBSP
+        // Case 3: Mixed NEL + NBSP with FULL → all become space
         assert_eq!(
             NORMALIZE_WHITESPACE_FULL
                 .apply(Cow::Borrowed("a\u{85}\u{00A0}b"), &ctx)
@@ -670,6 +596,20 @@ mod tests {
         assert_eq!(
             stage.apply(Cow::Borrowed("a\u{00A0}b"), &ctx()).unwrap(),
             "a\u{00A0}b"
+        );
+    }
+
+    #[test]
+    fn preserve_unicode_ws_when_normalize_disabled_with_collapse_trim() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: true,
+            trim_edges: true,
+            normalize_unicode: false,
+        };
+        let input = "\u{00A0}hello   world\u{00A0}";
+        assert_eq!(
+            stage.apply(input.into(), &ctx()).unwrap(),
+            "\u{00A0}hello world\u{00A0}"
         );
     }
 }
