@@ -3,11 +3,11 @@ use smallvec::SmallVec;
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError},
+    stage::{CharMapper, Stage, StageError},
     testing::stage_contract::StageTestConfig,
     unicode::{could_be_unicode_ws_start, is_ascii_whitespace_fast, is_unicode_whitespace},
 };
-use std::borrow::Cow;
+use std::{borrow::Cow, iter::FusedIterator};
 
 /// Normalize and standardize whitespace in text pipelines.
 ///
@@ -227,6 +227,11 @@ impl Stage for NormalizeWhitespace {
         // Canonical path: handles all whitespace, all configurations, one pass, one allocation
         Ok(self.apply_full(text))
     }
+
+    #[inline]
+    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+        Some(self)
+    }
 }
 
 impl NormalizeWhitespace {
@@ -375,6 +380,73 @@ impl NormalizeWhitespace {
         Cow::Owned(result)
     }
 }
+
+impl CharMapper for NormalizeWhitespace {
+    #[inline(always)]
+    fn map(&self, _c: char, _ctx: &Context) -> Option<char> {
+        // We don't use the stateless path — bind() is the fast path
+        None
+    }
+
+    fn bind<'a>(
+        &self,
+        text: &'a str,
+        _ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(WhitespaceIterator {
+            inner: text.chars(),
+            config: *self,
+            state: IteratorState::default(),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct WhitespaceIterator<'a> {
+    inner: std::str::Chars<'a>,
+    config: NormalizeWhitespace,
+    state: IteratorState,
+}
+
+#[derive(Debug, Default)]
+struct IteratorState {
+    prev_was_ws: bool,
+    started: bool,
+}
+
+impl<'a> Iterator for WhitespaceIterator<'a> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let c = self.inner.next()?;
+
+        let is_ws = self.config.is_whitespace_for_config(c);
+
+        if is_ws {
+            // Leading trim
+            if self.config.trim_edges && !self.state.started {
+                self.state.prev_was_ws = true;
+                return self.next();
+            }
+
+            // Collapse sequential
+            if self.config.collapse_sequential && self.state.prev_was_ws {
+                return self.next();
+            }
+
+            self.state.prev_was_ws = true;
+            return Some(self.config.collapse_replacement);
+        }
+
+        // Non-whitespace
+        self.state.prev_was_ws = false;
+        self.state.started = true;
+        Some(c)
+    }
+}
+
+impl<'a> FusedIterator for WhitespaceIterator<'a> {}
 
 impl StageTestConfig for NormalizeWhitespace {
     fn one_to_one_languages() -> &'static [Lang] {
@@ -793,5 +865,139 @@ mod tests {
         };
         let input = "x\u{00A0}\u{1680}\t y";
         assert_eq!(stage.apply(Cow::Borrowed(input), &ctx()).unwrap(), "x_y");
+    }
+}
+
+#[cfg(test)]
+mod charmapper_vs_apply_equivalence {
+    use super::*;
+    use crate::ENG;
+    use rand::{Rng, SeedableRng, rngs::StdRng, seq::IndexedRandom};
+    use std::borrow::Cow;
+
+    fn ctx() -> Context {
+        Context::new(ENG)
+    }
+
+    /// Core equivalence test: apply() vs bind() + collect must be identical
+    fn assert_equivalence(stage: &NormalizeWhitespace, input: &str) {
+        let ctx = ctx();
+
+        // 1. Legacy apply() path (goes through apply_ascii_fast / apply_full)
+        let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+
+        // 2. CharMapper path — this is what monomorphised pipelines use
+        let via_iterator: String = stage.bind(input, &ctx).collect();
+        let via_iterator = Cow::<str>::Owned(via_iterator);
+
+        // 3. Direct manual collect — proves iterator is pure
+        let mut direct = String::with_capacity(input.len());
+        for c in stage.bind(input, &ctx) {
+            direct.push(c);
+        }
+        let via_direct = Cow::<str>::Owned(direct);
+
+        assert_eq!(
+            via_apply, via_iterator,
+            "\nCharMapper bind() ≠ apply() on input:\n{:?}\nConfig: {:?}\n",
+            input, stage
+        );
+
+        assert_eq!(
+            via_apply, via_direct,
+            "\nDirect collect ≠ apply() on input: {:?}\n",
+            input
+        );
+
+        // Bonus: needs_apply() must be correct
+        let needs = stage.needs_apply(input, &ctx).unwrap();
+        let changed = via_apply.as_ref() != input;
+        assert_eq!(needs, changed, "needs_apply() mismatch on: {:?}", input);
+    }
+
+    #[test]
+    fn equivalence_exhaustive_deterministic() {
+        let configs = [
+            NORMALIZE_WHITESPACE_FULL,
+            COLLAPSE_WHITESPACE_ONLY,
+            COLLAPSE_WHITESPACE_UNICODE,
+            TRIM_WHITESPACE_ONLY,
+            TRIM_WHITESPACE_UNICODE,
+            NormalizeWhitespace {
+                collapse_sequential: true,
+                trim_edges: true,
+                normalize_unicode: true,
+                collapse_replacement: '-',
+            },
+            NormalizeWhitespace {
+                collapse_sequential: true,
+                trim_edges: false,
+                normalize_unicode: true,
+                collapse_replacement: '\u{200B}',
+            },
+        ];
+
+        let inputs = [
+            "",
+            "hello",
+            "  hello world  ",
+            "a\t\tb\n\nc",
+            " \u{00A0} hello \u{202F} world \u{3000} ",
+            "   ",
+            "\u{00A0}\u{1680}\u{2003}xyz",
+            "a b c",
+            "a  b   c    ",
+            "\t\n\r \u{0085}\u{2028}",
+            "  leading and trailing  ",
+            "preserve   internal   spaces",
+            "mixed \t \u{00A0}  unicode \u{205F} ascii",
+            "single\u{00A0}space",
+            "trailing\u{00A0}",
+            "\u{00A0}leading",
+        ];
+
+        for &config in &configs {
+            for &input in &inputs {
+                assert_equivalence(&config, input);
+            }
+        }
+    }
+
+    #[test]
+    fn equivalence_property_random() {
+        let mut rng = StdRng::seed_from_u64(0xCAFEBABE_DEADBEEF);
+
+        for _ in 0..5_000 {
+            let len = rng.random_range(0..256);
+            let input: String = (0..len)
+                .map(|_| {
+                    let choice = rng.random_range(0..100);
+                    if choice < 10 {
+                        // 10% Unicode whitespace
+                        *[
+                            '\u{00A0}', '\u{1680}', '\u{2000}', '\u{2003}', '\u{202F}', '\u{205F}',
+                            '\u{3000}', '\u{0085}', '\u{2028}', '\u{2029}',
+                        ]
+                        .choose(&mut rng)
+                        .unwrap()
+                    } else if choice < 30 {
+                        // 20% ASCII whitespace
+                        *[' ', '\t', '\n', '\r'].choose(&mut rng).unwrap()
+                    } else {
+                        // 70% letters
+                        (b'a' + rng.random_range(0..26)) as char
+                    }
+                })
+                .collect();
+
+            let config = NormalizeWhitespace {
+                collapse_sequential: rng.random(),
+                trim_edges: rng.random(),
+                normalize_unicode: rng.random(),
+                collapse_replacement: if rng.random() { ' ' } else { '-' },
+            };
+
+            assert_equivalence(&config, &input);
+        }
     }
 }
