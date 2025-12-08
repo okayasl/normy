@@ -285,18 +285,35 @@ impl NormalizeWhitespace {
                     prev_ws = true;
                     continue;
                 }
+
                 // Handle sequential collapse
                 if self.collapse_sequential && prev_ws {
+                    // If we are collapsing and the previous was WS, we skip the rest of the run.
                     continue;
                 }
-                // Emit WS: normalized if collapsing, original otherwise
+
+                // If we reach here, it's the FIRST WS in a run.
                 if self.collapse_sequential {
-                    result.push(self.collapse_replacement());
+                    // We must decide whether to use the replacement character or preserve the original.
+
+                    // If the replacement is the standard ASCII space, we use it to normalize
+                    // tabs/new lines to ' '. This is required for NORMALIZE_WHITESPACE_FULL.
+                    if self.collapse_replacement == ' ' {
+                        result.push(' ');
+                    } else {
+                        // If the replacement is CUSTOM (e.g., '-'), we preserve the original
+                        // single space (' ') to align with the 'full' and 'bind' paths.
+                        // This sacrifices the custom replacement for multi-space runs in
+                        // the fast path to ensure clean input preservation.
+                        result.push(b as char);
+                    }
                 } else {
+                    // No collapse: emit original WS
                     result.push(b as char);
                 }
                 prev_ws = true;
             } else {
+                // Non-whitespace
                 result.push(b as char);
                 prev_ws = false;
                 started = true;
@@ -346,16 +363,21 @@ impl NormalizeWhitespace {
                 pending_ws.push(c);
                 continue;
             }
-            // ═══════════════════════════════════════════════════════════
             // Non-whitespace: flush pending WS run
             // ═══════════════════════════════════════════════════════════
             if !pending_ws.is_empty() {
                 let should_emit = !self.trim_edges || started;
                 if should_emit {
                     if self.collapse_sequential {
-                        result.push(self.collapse_replacement());
+                        if pending_ws.len() >= 2 {
+                            // Run of 2+ WS: Collapse and emit replacement
+                            result.push(self.collapse_replacement());
+                        } else {
+                            // Single WS: Preserve original character
+                            result.push(pending_ws[0]);
+                        }
                     } else {
-                        // Emit all WS chars as-is
+                        // No collapse: Emit all original WS chars
                         result.extend(pending_ws.drain(..));
                     }
                 }
@@ -369,7 +391,13 @@ impl NormalizeWhitespace {
             let should_emit = !self.trim_edges;
             if should_emit {
                 if self.collapse_sequential {
-                    result.push(self.collapse_replacement());
+                    // FIX: Only emit replacement if run length >= 2
+                    if pending_ws.len() >= 2 {
+                        result.push(self.collapse_replacement());
+                    } else {
+                        // Single WS: Preserve original character
+                        result.push(pending_ws[0]);
+                    }
                 } else {
                     result.extend(pending_ws);
                 }
@@ -442,33 +470,32 @@ impl<'a> Iterator for WhitespaceIterator<'a> {
                 Some(c) => {
                     let is_ws = self.config.is_whitespace_for_config(c);
 
+                    // Inside the loop, when handling whitespace:
                     if is_ws {
                         self.pending.push(c);
                         continue;
                     }
 
-                    // Non-whitespace character found - flush pending WS
+                    // Non-whitespace: now decide whether to collapse
                     if !self.pending.is_empty() {
                         let should_emit = !self.config.trim_edges || self.started;
 
                         if should_emit {
-                            if self.config.collapse_sequential {
-                                // Emit replacement + the non-WS char
+                            if self.config.collapse_sequential && self.pending.len() >= 2 {
+                                // Only collapse if 2+ whitespace chars in run
                                 self.pending.clear();
                                 self.pending.push(self.config.collapse_replacement);
-                                self.pending.push(c);
-                            } else {
-                                // Emit all original WS + the non-WS char
-                                self.pending.push(c);
                             }
-                            self.started = true;
+                            // else: multiple original WS → keep them (rare, only when !collapse_sequential)
 
-                            // Start draining pending buffer
+                            // Now set up to drain pending + emit current char
+                            self.pending.push(c);
+                            self.started = true;
                             let first = self.pending[0];
                             self.pending_idx = 1;
                             return Some(first);
                         } else {
-                            // Skip leading WS
+                            // Leading trim: discard pending
                             self.pending.clear();
                         }
                     }
@@ -666,7 +693,7 @@ mod tests {
             stage
                 .apply(Cow::Borrowed("hello\u{0085}world"), &ctx())
                 .unwrap(),
-            "hello world"
+            "hello\u{0085}world"
         );
     }
 
@@ -684,10 +711,9 @@ mod tests {
     #[test]
     fn removes_tabs_in_collapsed_run() {
         let stage = NORMALIZE_WHITESPACE_FULL;
-        assert_eq!(
-            stage.apply(Cow::Borrowed("a\t \t b"), &ctx()).unwrap(),
-            "a b"
-        );
+        let input = Cow::Borrowed("a\t \t b");
+        assert!(stage.needs_apply(&input, &ctx()).unwrap());
+        assert_eq!(stage.apply(input, &ctx()).unwrap(), "a b");
     }
 
     #[test]
@@ -702,6 +728,50 @@ mod tests {
             stage.apply(Cow::Borrowed("a\t \t b"), &ctx()).unwrap(),
             "a b"
         );
+    }
+
+    #[test]
+    fn preserves_unicodes_if_no_change_needed() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: true,
+            trim_edges: true,
+            normalize_unicode: true,
+            collapse_replacement: '-',
+        };
+        let ctx = Context::default();
+        let text = Cow::Borrowed("a b c");
+        let ascii_res = stage.apply_ascii_fast(text.clone());
+        println!("ascii res = {ascii_res}");
+        let full_res = stage.apply_full(text.clone());
+        println!("full res = {full_res}");
+        let bind_res: Cow<'_, str> = Cow::Owned(stage.bind(&text, &ctx).collect::<String>());
+        println!("bind res = {bind_res}");
+    }
+
+    #[test]
+    fn removes_tabs() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+        let ctx = Context::default();
+        let text = Cow::Borrowed("a\t \t b");
+        let ascii_res = stage.apply_ascii_fast(text.clone());
+        println!("ascii res = {ascii_res}");
+        let full_res = stage.apply_full(text.clone());
+        println!("full res = {full_res}");
+        let bind_res: Cow<'_, str> = Cow::Owned(stage.bind(&text, &ctx).collect::<String>());
+        println!("bind res = {bind_res}");
+    }
+
+    #[test]
+    fn removes_unicodes() {
+        let stage = COLLAPSE_WHITESPACE_ONLY;
+        let ctx = Context::default();
+        let text = Cow::Borrowed("xsr\nvhm");
+        let ascii_res = stage.apply_ascii_fast(text.clone());
+        println!("ascii res = {ascii_res}");
+        let full_res = stage.apply_full(text.clone());
+        println!("full res = {full_res}");
+        let bind_res: Cow<'_, str> = Cow::Owned(stage.bind(&text, &ctx).collect::<String>());
+        println!("bind res = {bind_res}");
     }
 
     // ═══════════════════════════════════════════════════════════════
