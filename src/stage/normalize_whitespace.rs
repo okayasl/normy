@@ -1,5 +1,3 @@
-use smallvec::SmallVec;
-
 use crate::{
     context::Context,
     lang::Lang,
@@ -7,6 +5,7 @@ use crate::{
     testing::stage_contract::StageTestConfig,
     unicode::{could_be_unicode_ws_start, is_ascii_whitespace_fast, is_unicode_whitespace},
 };
+use smallvec::SmallVec;
 use std::{borrow::Cow, iter::FusedIterator};
 
 /// Normalize and standardize whitespace in text pipelines.
@@ -394,55 +393,115 @@ impl CharMapper for NormalizeWhitespace {
         _ctx: &'a Context,
     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
         Box::new(WhitespaceIterator {
-            inner: text.chars(),
+            chars: text.chars(),
+            pending: SmallVec::new(),
+            pending_idx: 0,
             config: *self,
-            state: IteratorState::default(),
+            started: false,
+            done: false,
         })
     }
 }
 
 #[derive(Debug)]
 struct WhitespaceIterator<'a> {
-    inner: std::str::Chars<'a>,
+    chars: std::str::Chars<'a>,
+    pending: SmallVec<[char; 4]>,
+    pending_idx: usize,
     config: NormalizeWhitespace,
-    state: IteratorState,
-}
-
-#[derive(Debug, Default)]
-struct IteratorState {
-    prev_was_ws: bool,
     started: bool,
+    done: bool,
 }
 
 impl<'a> Iterator for WhitespaceIterator<'a> {
     type Item = char;
 
-    #[inline(always)]
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let c = self.inner.next()?;
-
-        let is_ws = self.config.is_whitespace_for_config(c);
-
-        if is_ws {
-            // Leading trim
-            if self.config.trim_edges && !self.state.started {
-                self.state.prev_was_ws = true;
-                return self.next();
-            }
-
-            // Collapse sequential
-            if self.config.collapse_sequential && self.state.prev_was_ws {
-                return self.next();
-            }
-
-            self.state.prev_was_ws = true;
-            return Some(self.config.collapse_replacement);
+        // First, drain any pending characters from previous flush
+        if self.pending_idx < self.pending.len() {
+            let c = self.pending[self.pending_idx];
+            self.pending_idx += 1;
+            return Some(c);
         }
 
-        // Non-whitespace
-        self.state.prev_was_ws = false;
-        self.state.started = true;
-        Some(c)
+        // Reset pending buffer if fully drained
+        if self.pending_idx > 0 {
+            self.pending.clear();
+            self.pending_idx = 0;
+        }
+
+        // If we've already finished the input, we're done
+        if self.done {
+            return None;
+        }
+
+        // Scan for the next non-whitespace character
+        loop {
+            match self.chars.next() {
+                Some(c) => {
+                    let is_ws = self.config.is_whitespace_for_config(c);
+
+                    if is_ws {
+                        self.pending.push(c);
+                        continue;
+                    }
+
+                    // Non-whitespace character found - flush pending WS
+                    if !self.pending.is_empty() {
+                        let should_emit = !self.config.trim_edges || self.started;
+
+                        if should_emit {
+                            if self.config.collapse_sequential {
+                                // Emit replacement + the non-WS char
+                                self.pending.clear();
+                                self.pending.push(self.config.collapse_replacement);
+                                self.pending.push(c);
+                            } else {
+                                // Emit all original WS + the non-WS char
+                                self.pending.push(c);
+                            }
+                            self.started = true;
+
+                            // Start draining pending buffer
+                            let first = self.pending[0];
+                            self.pending_idx = 1;
+                            return Some(first);
+                        } else {
+                            // Skip leading WS
+                            self.pending.clear();
+                        }
+                    }
+
+                    self.started = true;
+                    return Some(c);
+                }
+                None => {
+                    // End of input - handle trailing whitespace
+                    self.done = true;
+
+                    if !self.pending.is_empty() {
+                        let should_emit = !self.config.trim_edges;
+
+                        if should_emit {
+                            if self.config.collapse_sequential {
+                                // Emit single replacement
+                                let rep = self.config.collapse_replacement;
+                                self.pending.clear();
+                                return Some(rep);
+                            } else {
+                                // Emit all original trailing WS
+                                let first = self.pending[0];
+                                self.pending_idx = 1;
+                                return Some(first);
+                            }
+                        }
+                    }
+
+                    return None;
+                }
+            }
+        }
     }
 }
 
@@ -912,7 +971,11 @@ mod charmapper_vs_apply_equivalence {
         // Bonus: needs_apply() must be correct
         let needs = stage.needs_apply(input, &ctx).unwrap();
         let changed = via_apply.as_ref() != input;
-        assert_eq!(needs, changed, "needs_apply() mismatch on: {:?}", input);
+        assert_eq!(
+            needs, changed,
+            "needs_apply()={needs} -> mismatch on: {:?} , changed: {changed} to {via_apply}",
+            input
+        );
     }
 
     #[test]
