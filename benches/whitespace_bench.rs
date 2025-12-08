@@ -121,6 +121,7 @@ fn bench_whitespace_variants(c: &mut Criterion) {
             collapse_sequential: true,
             trim_edges: true,
             normalize_unicode: false,
+            collapse_replacement: ' ',
         },
     );
 

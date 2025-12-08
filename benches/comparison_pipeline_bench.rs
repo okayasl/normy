@@ -144,6 +144,7 @@ static NORMY_BERT: LazyLock<BertPipeline> = LazyLock::new(|| {
             collapse_sequential: false,
             trim_edges: false,
             normalize_unicode: true,
+            collapse_replacement: ' ',
         })
         .add_stage(BertCompatChineseChars) // ← this one (replaces BertCompatCjkPunct and SegmentWords)
         .add_stage(NFD) // Decompose precomposed accents (é → e + ´)

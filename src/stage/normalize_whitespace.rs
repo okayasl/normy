@@ -1,3 +1,5 @@
+use smallvec::SmallVec;
+
 use crate::{
     context::Context,
     lang::Lang,
@@ -19,6 +21,7 @@ use std::borrow::Cow;
 /// | **Collapse sequential WS**    | `collapse_sequential`    | Multiple consecutive whitespace → single ASCII space `' '`                            |
 /// | **Trim edges**                | `trim_edges`             | Remove leading and trailing whitespace                                                |
 /// | **Normalize Unicode WS**      | `normalize_unicode`      | Modifier flag: extends trim/collapse to recognize Unicode whitespace                  |
+/// | **Custom replacement**        | `collapse_replacement`   | Character emitted when collapsing (default `' '`; can be ZWSP, etc.)                |
 ///
 /// All three operations are performed in a **single forward pass** over the string,
 /// guaranteeing ≤1 heap allocation regardless of configuration.
@@ -93,6 +96,9 @@ pub struct NormalizeWhitespace {
 
     /// Convert Unicode whitespace (NBSP, etc.) to ASCII space
     pub normalize_unicode: bool,
+
+    /// Convert Unicode whitespace (NBSP, etc.) to this character
+    pub collapse_replacement: char,
 }
 
 // ------------------------------------------------------------------------
@@ -104,6 +110,7 @@ pub const NORMALIZE_WHITESPACE_FULL: NormalizeWhitespace = NormalizeWhitespace {
     collapse_sequential: true,
     trim_edges: true,
     normalize_unicode: true,
+    collapse_replacement: ' ',
 };
 
 /// Collapse sequential whitespace only, preserve edges
@@ -111,6 +118,7 @@ pub const COLLAPSE_WHITESPACE_ONLY: NormalizeWhitespace = NormalizeWhitespace {
     collapse_sequential: true,
     trim_edges: false,
     normalize_unicode: false,
+    collapse_replacement: ' ',
 };
 
 /// Collapse sequential unicode whitespace, preserve edges
@@ -118,6 +126,7 @@ pub const COLLAPSE_WHITESPACE_UNICODE: NormalizeWhitespace = NormalizeWhitespace
     collapse_sequential: true,
     trim_edges: false,
     normalize_unicode: true,
+    collapse_replacement: ' ',
 };
 
 /// Trim edges only, preserve internal spacing
@@ -125,6 +134,7 @@ pub const TRIM_WHITESPACE_ONLY: NormalizeWhitespace = NormalizeWhitespace {
     collapse_sequential: false,
     trim_edges: true,
     normalize_unicode: false,
+    collapse_replacement: ' ',
 };
 
 /// Trim unicode edges, preserve internal spacing
@@ -132,6 +142,7 @@ pub const TRIM_WHITESPACE_UNICODE: NormalizeWhitespace = NormalizeWhitespace {
     collapse_sequential: false,
     trim_edges: true,
     normalize_unicode: true,
+    collapse_replacement: ' ',
 };
 
 impl Default for NormalizeWhitespace {
@@ -219,9 +230,36 @@ impl Stage for NormalizeWhitespace {
 }
 
 impl NormalizeWhitespace {
+    /// Change the character emitted character when collapsing whitespace runs.
+    ///
+    /// Useful for CJK pipelines that want zero-width space instead of ASCII space:
+    /// ```rust
+    /// use normy::NORMALIZE_WHITESPACE_FULL;
+    /// let zwsp_stage = NORMALIZE_WHITESPACE_FULL.replace_collapsed_with('\u{200B}');
+    /// ```
+    #[inline(always)]
+    pub const fn replace_collapsed_with(mut self, c: char) -> Self {
+        self.collapse_replacement = c;
+        self
+    }
+
     #[inline(always)]
     fn collapse_replacement(&self) -> char {
-        ' '
+        self.collapse_replacement
+    }
+
+    #[inline(always)]
+    fn is_whitespace_for_config(&self, c: char) -> bool {
+        if self.normalize_unicode {
+            c.is_whitespace()
+        } else {
+            c.is_ascii_whitespace()
+        }
+    }
+
+    #[inline(always)]
+    fn is_unicode_whitespace_only(&self, c: char) -> bool {
+        self.normalize_unicode && !c.is_ascii_whitespace() && c.is_whitespace()
     }
     /// Optimized ASCII-only fast path (no Unicode normalization needed).
     /// Single-pass, byte-level operations with at most one allocation.
@@ -262,13 +300,18 @@ impl NormalizeWhitespace {
         }
         // Trim trailing whitespace if requested
         if self.trim_edges {
-            let trimmed_len = result
-                .as_bytes()
-                .iter()
-                .rposition(|&b| !is_ascii_whitespace_fast(b))
-                .map(|pos| pos + 1)
-                .unwrap_or(0);
-            result.truncate(trimmed_len);
+            while let Some(&last_byte) = result.as_bytes().last() {
+                let last_char = last_byte as char;
+                // If the last emitted char is the collapse replacement AND it came from a trailing WS run,
+                // we must remove it. Otherwise, keep it.
+                if (last_char == self.collapse_replacement() && self.collapse_sequential)
+                    || is_ascii_whitespace_fast(last_byte)
+                {
+                    result.pop();
+                } else {
+                    break;
+                }
+            }
         }
         Cow::Owned(result)
     }
@@ -288,7 +331,8 @@ impl NormalizeWhitespace {
         let mut result = String::with_capacity(s.len());
         let mut started = false;
         // Simple Vec for pending WS (most runs are 1-2 chars)
-        let mut pending_ws: Vec<char> = Vec::new();
+        // Almost all whitespace runs are ≤4 chars in real text → zero-heap
+        let mut pending_ws: SmallVec<[char; 4]> = SmallVec::new();
         for c in s.chars() {
             // Determine if this is whitespace
             let is_std_ws = self.is_whitespace_for_config(c);
@@ -317,26 +361,18 @@ impl NormalizeWhitespace {
             started = true;
         }
         // End-of-string: handle trailing WS
-        if !pending_ws.is_empty() && !self.trim_edges {
-            if self.collapse_sequential {
-                result.push(self.collapse_replacement());
-            } else {
-                result.extend(pending_ws);
+        if !pending_ws.is_empty() {
+            let should_emit = !self.trim_edges;
+            if should_emit {
+                if self.collapse_sequential {
+                    result.push(self.collapse_replacement());
+                } else {
+                    result.extend(pending_ws);
+                }
             }
+            // If trimming, we silently drop trailing WS — correct behavior
         }
         Cow::Owned(result)
-    }
-    #[inline(always)]
-    fn is_whitespace_for_config(&self, c: char) -> bool {
-        if self.normalize_unicode {
-            c.is_whitespace()
-        } else {
-            c.is_ascii_whitespace()
-        }
-    }
-    #[inline(always)]
-    fn is_unicode_whitespace_only(&self, c: char) -> bool {
-        self.normalize_unicode && !c.is_ascii_whitespace() && c.is_whitespace()
     }
 }
 
@@ -529,6 +565,7 @@ mod tests {
             collapse_sequential: true,
             trim_edges: true,
             normalize_unicode: false,
+            collapse_replacement: ' ',
         };
         assert_eq!(
             stage.apply(Cow::Borrowed("a\t \t b"), &ctx()).unwrap(),
@@ -576,6 +613,7 @@ mod tests {
             collapse_sequential: false,
             trim_edges: false,
             normalize_unicode: false,
+            collapse_replacement: ' ',
         };
 
         assert_eq!(
@@ -590,6 +628,7 @@ mod tests {
             collapse_sequential: true,
             trim_edges: true,
             normalize_unicode: false,
+            collapse_replacement: ' ',
         };
         let input = "\u{00A0}hello   world\u{00A0}";
         assert_eq!(
@@ -604,6 +643,7 @@ mod tests {
             collapse_sequential: true,
             trim_edges: false,
             normalize_unicode: false,
+            collapse_replacement: ' ',
         };
         let ctx = Context::new(ENG);
         let inputs = [
@@ -649,6 +689,7 @@ mod tests {
             collapse_sequential: false,
             trim_edges: false,
             normalize_unicode: false,
+            collapse_replacement: ' ',
         };
         let ctx = Context::new(ENG);
         let inputs = ["a  b", "a\t\tb\n\nc", "\t a \n"];
@@ -699,5 +740,58 @@ mod tests {
         let input = "a\u{00A0} hello\t\t   \u{00A0}\u{00A0}b";
         let output = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
         assert_eq!(output.as_ref(), "a hello b");
+    }
+
+    #[test]
+    fn custom_collapse_replacement_zwsp() {
+        let stage = NORMALIZE_WHITESPACE_FULL.replace_collapsed_with('\u{200B}');
+        let input = "hello   \t  \u{00A0}\u{3000}  world";
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx()).unwrap(),
+            "hello\u{200B}world"
+        );
+    }
+
+    #[test]
+    fn custom_replacement_with_no_collapse_is_ignored() {
+        // collapse_sequential = false → replacement char never used
+        let stage = NormalizeWhitespace {
+            collapse_sequential: false,
+            trim_edges: true,
+            normalize_unicode: true,
+            collapse_replacement: '\u{200B}',
+        };
+        let input = "\u{00A0}  hello  world  \u{00A0}";
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx()).unwrap(),
+            "hello  world"
+        );
+    }
+
+    #[test]
+    fn custom_replacement_ascii_fast_path() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: true,
+            trim_edges: true,
+            normalize_unicode: false,
+            collapse_replacement: '-',
+        };
+        let input = "  a   b\t\tc  ";
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx()).unwrap(),
+            "a-b-c" // ← no trailing WS removed, not replaced with '-'
+        );
+    }
+
+    #[test]
+    fn custom_replacement_full_path_mixed_ws() {
+        let stage = NormalizeWhitespace {
+            collapse_sequential: true,
+            trim_edges: false,
+            normalize_unicode: true,
+            collapse_replacement: '_',
+        };
+        let input = "x\u{00A0}\u{1680}\t y";
+        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx()).unwrap(), "x_y");
     }
 }
