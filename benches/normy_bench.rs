@@ -29,8 +29,8 @@ use tokenizers::{
 
 use normy::{
     CaseFold, DEU, ENG, LowerCase, NFC, NFKC, NORMALIZE_WHITESPACE_FULL, Normy, NormyBuilder,
-    RemoveDiacritics, SegmentWords, StripHtml, TRIM_WHITESPACE_ONLY, TUR, Transliterate,
-    UnifyWidth, lang::Lang, process::Process,
+    RemoveDiacritics, SegmentWords, StripHtml, TRIM_WHITESPACE, TUR, Transliterate, UnifyWidth,
+    lang::Lang, process::Process,
 };
 use unicode_normalization::UnicodeNormalization;
 
@@ -210,7 +210,7 @@ fn display_pipeline(lang: Lang) -> Normy<impl Process> {
         .add_stage(LowerCase)
         .add_stage(StripHtml)
         .add_stage(UnifyWidth)
-        .add_stage(TRIM_WHITESPACE_ONLY)
+        .add_stage(TRIM_WHITESPACE)
         .build()
 }
 
@@ -509,7 +509,7 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
         .lang(ENG)
         .add_stage(NFC)
         .add_stage(LowerCase)
-        .add_stage(TRIM_WHITESPACE_ONLY)
+        .add_stage(TRIM_WHITESPACE)
         .build();
 
     let mut tracker_uppercase = ZeroCopyTracker::default();
@@ -549,7 +549,7 @@ fn bench_zero_copy_micro(c: &mut Criterion) {
     // Test case 3: Fast-path (no transformations needed)
     let fast_pipeline = NormyBuilder::default()
         .lang(ENG)
-        .add_stage(TRIM_WHITESPACE_ONLY)
+        .add_stage(TRIM_WHITESPACE)
         .build();
 
     let mut tracker_fast = ZeroCopyTracker::default();

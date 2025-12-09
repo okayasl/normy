@@ -3,7 +3,7 @@ mod unit_tests {
 
     use crate::{
         CaseFold, DEU, ENG, FRA, JPN, LowerCase, NLD, Normy, RemoveDiacritics,
-        TRIM_WHITESPACE_ONLY, TRIM_WHITESPACE_UNICODE, TUR,
+        TRIM_WHITESPACE, TRIM_WHITESPACE_UNICODE, TUR,
     };
     use std::borrow::Cow;
     #[test]
@@ -69,7 +69,7 @@ mod unit_tests {
     fn zero_copy_no_whitespace() {
         let normy = Normy::builder()
             .lang(ENG)
-            .add_stage(TRIM_WHITESPACE_ONLY)
+            .add_stage(TRIM_WHITESPACE)
             .build();
         let input = "hello";
         let result = normy.normalize(input).unwrap();
@@ -80,7 +80,7 @@ mod unit_tests {
     fn trims_all_ascii_whitespace() {
         let normy = Normy::builder()
             .lang(ENG)
-            .add_stage(TRIM_WHITESPACE_ONLY)
+            .add_stage(TRIM_WHITESPACE)
             .build();
         assert_eq!(
             normy.normalize(" \t\n hello \r\n pop ").unwrap(),

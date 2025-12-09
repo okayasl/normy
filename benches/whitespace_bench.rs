@@ -6,8 +6,7 @@ use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, 
 use normy::{
     COLLAPSE_WHITESPACE_UNICODE, Normy, TRIM_WHITESPACE_UNICODE,
     stage::normalize_whitespace::{
-        COLLAPSE_WHITESPACE_ONLY, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace,
-        TRIM_WHITESPACE_ONLY,
+        COLLAPSE_WHITESPACE, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace, TRIM_WHITESPACE,
     },
 };
 use std::{borrow::Cow, hint::black_box};
@@ -109,8 +108,8 @@ fn bench_whitespace_variants(c: &mut Criterion) {
 
     // Run all variants
     bench_variant("FULL", NORMALIZE_WHITESPACE_FULL);
-    bench_variant("COLLAPSE_ONLY", COLLAPSE_WHITESPACE_ONLY);
-    bench_variant("TRIM_ONLY", TRIM_WHITESPACE_ONLY);
+    bench_variant("COLLAPSE_ONLY", COLLAPSE_WHITESPACE);
+    bench_variant("TRIM_ONLY", TRIM_WHITESPACE);
     bench_variant("TRIM_UNICODE", TRIM_WHITESPACE_UNICODE);
     bench_variant("COLLAPSE_UNICODE", COLLAPSE_WHITESPACE_UNICODE);
 
@@ -118,10 +117,10 @@ fn bench_whitespace_variants(c: &mut Criterion) {
     bench_variant(
         "CUSTOM_no_unicode",
         NormalizeWhitespace {
-            collapse_sequential: true,
-            trim_edges: true,
+            collapse: true,
+            trim: true,
             normalize_unicode: false,
-            collapse_replacement: ' ',
+            replacement_char: ' ',
         },
     );
 

@@ -141,10 +141,10 @@ static NORMY_BERT: LazyLock<BertPipeline> = LazyLock::new(|| {
         .add_stage(StripControlChars)
         .add_stage(StripFormatControls)
         .add_stage(NormalizeWhitespace {
-            collapse_sequential: false,
-            trim_edges: false,
+            collapse: false,
+            trim: false,
             normalize_unicode: true,
-            collapse_replacement: ' ',
+            replacement_char: ' ',
         })
         .add_stage(BertCompatChineseChars) // ← this one (replaces BertCompatCjkPunct and SegmentWords)
         .add_stage(NFD) // Decompose precomposed accents (é → e + ´)

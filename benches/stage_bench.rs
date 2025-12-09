@@ -2,10 +2,10 @@ use std::{borrow::Cow, time::Duration};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
-    ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LIT,
-    LowerCase, NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy,
-    POL, RUS, RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA,
-    TRIM_WHITESPACE_ONLY, TUR, Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
+    ARA, COLLAPSE_WHITESPACE, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LIT, LowerCase,
+    NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy, POL, RUS,
+    RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA, TRIM_WHITESPACE, TUR,
+    Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
 };
 
 // 16 languages — the exact set that will appear in the Normy white paper

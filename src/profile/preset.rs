@@ -1,8 +1,7 @@
 use crate::{
-    COLLAPSE_WHITESPACE_ONLY, CaseFold, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL,
-    RemoveDiacritics, SegmentWords, StripControlChars, StripFormatControls, StripHtml,
-    StripMarkdown, UnifyWidth, process::Process, profile::Profile,
-    stage::normalize_punctuation::NormalizePunctuation,
+    COLLAPSE_WHITESPACE, CaseFold, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL, RemoveDiacritics,
+    SegmentWords, StripControlChars, StripFormatControls, StripHtml, StripMarkdown, UnifyWidth,
+    process::Process, profile::Profile, stage::normalize_punctuation::NormalizePunctuation,
 };
 
 /// Ultra-fast path for clean or ASCII-only text
@@ -78,7 +77,7 @@ pub fn minimum() -> Profile<impl Process> {
     Profile::builder("minimum")
         .add_stage(NFKC)
         .add_stage(StripControlChars)
-        .add_stage(COLLAPSE_WHITESPACE_ONLY)
+        .add_stage(COLLAPSE_WHITESPACE)
         .build()
 }
 

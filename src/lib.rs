@@ -18,8 +18,8 @@ pub use stage::lower_case::LowerCase;
 pub use stage::normalization::{NFC, NFD, NFKC, NFKD};
 pub use stage::normalize_punctuation::NormalizePunctuation;
 pub use stage::normalize_whitespace::{
-    COLLAPSE_WHITESPACE_ONLY, COLLAPSE_WHITESPACE_UNICODE, NORMALIZE_WHITESPACE_FULL,
-    TRIM_WHITESPACE_ONLY, TRIM_WHITESPACE_UNICODE,
+    COLLAPSE_WHITESPACE, COLLAPSE_WHITESPACE_UNICODE, NORMALIZE_WHITESPACE_FULL, TRIM_WHITESPACE,
+    TRIM_WHITESPACE_UNICODE,
 };
 pub use stage::remove_diacritics::RemoveDiacritics;
 pub use stage::segment_words::SegmentWords;

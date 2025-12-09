@@ -2,8 +2,8 @@
 mod integration_tests {
 
     use crate::{
-        ARA, COLLAPSE_WHITESPACE_ONLY, CaseFold, DEU, JPN, LowerCase, NLD, Normy,
-        TRIM_WHITESPACE_ONLY, TUR, ZHO,SegmentWords,
+        ARA, COLLAPSE_WHITESPACE, CaseFold, DEU, JPN, LowerCase, NLD, Normy,
+        TRIM_WHITESPACE, TUR, ZHO,SegmentWords,
         stage::{
             normalize_punctuation::NormalizePunctuation,
             remove_diacritics::RemoveDiacritics, strip_control_chars::StripControlChars,
@@ -15,7 +15,7 @@ mod integration_tests {
     fn production_pipeline_turkish() {
         let normy = Normy::builder()
             .lang(TUR)
-            .add_stage(TRIM_WHITESPACE_ONLY)
+            .add_stage(TRIM_WHITESPACE)
             .add_stage(LowerCase)
             .build();
 
@@ -28,7 +28,7 @@ mod integration_tests {
     fn production_pipeline_arabic_diacritics() {
         let normy = Normy::builder()
             .lang(ARA)
-            .add_stage(TRIM_WHITESPACE_ONLY)
+            .add_stage(TRIM_WHITESPACE)
             .add_stage(RemoveDiacritics)
             .add_stage(CaseFold)
             .build();
@@ -42,7 +42,7 @@ mod integration_tests {
     fn production_pipeline_german() {
         let normy = Normy::builder()
             .lang(DEU)
-            .add_stage(TRIM_WHITESPACE_ONLY)
+            .add_stage(TRIM_WHITESPACE)
             .add_stage(CaseFold)
             .build();
 
@@ -100,7 +100,7 @@ mod integration_tests {
     fn whitespace_triming_works() {
         let normy = Normy::builder()
             .lang(TUR)
-            .add_stage(COLLAPSE_WHITESPACE_ONLY)
+            .add_stage(COLLAPSE_WHITESPACE)
             .add_stage(LowerCase)
             .build();
 
