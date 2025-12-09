@@ -237,7 +237,7 @@ impl NormalizeWhitespace {
     /// Useful for CJK pipelines that want zero-width space instead of ASCII space:
     /// ```rust
     /// use normy::NORMALIZE_WHITESPACE_FULL;
-    /// let zwsp_stage = NORMALIZE_WHITESPACE_FULL.replace_collapsed_with('\u{200B}');
+    /// let zwsp_stage = NORMALIZE_WHITESPACE_FULL.replace_whitespace_with('\u{200B}');
     /// ```
     #[inline(always)]
     pub const fn replace_whitespace_with(mut self, c: char) -> Self {
@@ -476,19 +476,22 @@ impl<'a> Iterator for WhitespaceIterator<'a> {
 
                         if should_emit {
                             if self.config.collapse && self.pending.len() >= 2 {
-                                // Only collapse if 2+ whitespace chars in run
+                                // Collapse multi-char run
                                 self.pending.clear();
                                 self.pending.push(self.config.replacement_char);
+                            } else if self.config.collapse {
+                                // Collapse single-char: normalize if Unicode
+                                let first = self.pending[0];
+                                if config.is_unicode_whitespace_only(first) {
+                                    self.pending[0] = self.config.replacement_char;
+                                }
                             }
-                            // else: multiple original WS → keep them (rare, only when !collapse)
+                            // else: collapse=false, keep original chars in pending
 
-                            // Now set up to drain pending + emit current char
-                            self.pending.push(c);
+                            self.pending.push(c); // Add the non-WS char
                             self.started = true;
-                            let mut first = self.pending[0];
-                            if self.config.collapse && config.is_unicode_whitespace_only(first) {
-                                first = self.config.replacement_char;
-                            }
+
+                            let first = self.pending[0];
                             self.pending_idx = 1;
                             return Some(first);
                         } else {
@@ -508,16 +511,21 @@ impl<'a> Iterator for WhitespaceIterator<'a> {
 
                         if should_emit {
                             if self.config.collapse && self.pending.len() >= 2 {
-                                // Emit single replacement
+                                // Collapse multi-char run
                                 let rep = self.config.replacement_char;
                                 self.pending.clear();
                                 return Some(rep);
-                            } else {
-                                // Emit all original trailing WS
+                            } else if self.config.collapse {
+                                // Collapse single-char: normalize if Unicode
                                 let mut first = self.pending[0];
                                 if config.is_unicode_whitespace_only(first) {
                                     first = self.config.replacement_char;
                                 }
+                                self.pending_idx = 1;
+                                return Some(first);
+                            } else {
+                                // NO collapse: emit original char (no normalization!)
+                                let first = self.pending[0];
                                 self.pending_idx = 1;
                                 return Some(first);
                             }
