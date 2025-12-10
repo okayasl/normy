@@ -248,24 +248,6 @@ impl NormalizeWhitespace {
         self
     }
 
-    /// OPTIMIZATION: Single-call whitespace classification
-    /// Returns (is_whitespace, needs_replacement)
-    ///
-    /// This eliminates redundant is_ascii_whitespace() calls in hot paths.
-    #[inline(always)]
-    fn classify_char(&self, c: char) -> (bool, bool) {
-        if c.is_ascii_whitespace() {
-            // ASCII WS: always whitespace, never needs replacement
-            (true, false)
-        } else if self.normalize_unicode && c.is_whitespace() {
-            // Unicode WS: is whitespace, needs replacement
-            (true, true)
-        } else {
-            // Not whitespace
-            (false, false)
-        }
-    }
-
     /// OPTIMIZATION: Conservative capacity estimation
     /// Avoids over-allocation while preventing reallocation in 95%+ of cases
     #[inline(always)]
@@ -280,14 +262,6 @@ impl NormalizeWhitespace {
             // Neither: should never allocate (caught by needs_apply)
             (false, false) => input_len,
         }
-    }
-
-    /// OPTIMIZATION: Helper for safe first element access
-    /// Marked inline(always) to eliminate function call overhead
-    #[inline(always)]
-    fn get_first_pending(&self, pending: &SmallVec<[char; 4]>) -> char {
-        debug_assert!(!pending.is_empty(), "get_first_pending called on empty vec");
-        pending[0]
     }
 
     #[inline(always)]
@@ -372,17 +346,14 @@ impl NormalizeWhitespace {
         // ═══════════════════════════════════════════════════════════
         // Single-pass transformation (trust needs_apply() contract)
         // ═══════════════════════════════════════════════════════════
-        let mut result = String::with_capacity(s.len());
+        let mut result = String::with_capacity(self.estimate_output_capacity(s.len()));
         let mut started = false;
         // Simple Vec for pending WS (most runs are 1-2 chars)
         // Almost all whitespace runs are ≤4 chars in real text → zero-heap
         let mut pending_ws: SmallVec<[char; 4]> = SmallVec::new();
         for c in s.chars() {
             // Determine if this is whitespace
-            let is_std_ws = self.is_whitespace_for_config(c);
-            let is_uni_ws = self.is_unicode_whitespace_only(c);
-            let is_ws = is_std_ws || is_uni_ws;
-            if is_ws {
+            if self.is_whitespace_for_config(c) {
                 pending_ws.push(c);
                 continue;
             }
@@ -430,7 +401,7 @@ impl NormalizeWhitespace {
                         result.push(first);
                     }
                 } else {
-                    result.extend(pending_ws);
+                    result.extend(pending_ws.drain(..));
                 }
             }
             // If trimming, we silently drop trailing WS — correct behavior
