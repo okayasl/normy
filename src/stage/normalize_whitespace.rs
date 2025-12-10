@@ -6,7 +6,7 @@ use crate::{
     unicode::{could_be_unicode_ws_start, is_ascii_whitespace_fast, is_unicode_whitespace},
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, iter::FusedIterator};
+use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 /// Normalize and standardize whitespace in text pipelines.
 ///
@@ -227,6 +227,11 @@ impl Stage for NormalizeWhitespace {
     fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
         Some(self)
     }
+
+    #[inline]
+    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+        Some(self)
+    }
 }
 
 impl NormalizeWhitespace {
@@ -413,8 +418,7 @@ impl NormalizeWhitespace {
 impl CharMapper for NormalizeWhitespace {
     #[inline(always)]
     fn map(&self, _c: char, _ctx: &Context) -> Option<char> {
-        // We don't use the stateless path — bind() is the fast path
-        None
+        None // We use bind() exclusively for optimal performance
     }
 
     fn bind<'a>(
@@ -422,88 +426,174 @@ impl CharMapper for NormalizeWhitespace {
         text: &'a str,
         _ctx: &'a Context,
     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(WhitespaceIterator {
-            chars: text.chars(),
-            pending: SmallVec::new(),
-            pending_idx: 0,
-            config: *self,
-            started: false,
-            done: false,
-        })
+        // Fast path: collapse mode uses specialized zero-SmallVec iterator
+        if self.collapse {
+            Box::new(WhitespaceCollapseIter {
+                chars: text.chars(),
+                config: *self,
+                ws_count: 0,
+                first_ws: '\0',
+                next_char: None,
+                started: false,
+            })
+        } else {
+            // Slow path: preserve mode requires buffering original chars
+            Box::new(WhitespacePreserveIter {
+                chars: text.chars(),
+                pending: SmallVec::new(),
+                pending_idx: 0,
+                config: *self,
+                started: false,
+            })
+        }
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FAST PATH: Collapse Mode Iterator (~40 bytes, zero SmallVec allocation)
+// ═══════════════════════════════════════════════════════════════════════════
+
 #[derive(Debug)]
-struct WhitespaceIterator<'a> {
+struct WhitespaceCollapseIter<'a> {
+    chars: std::str::Chars<'a>,
+    config: NormalizeWhitespace,
+
+    // Lightweight whitespace tracking (replaces SmallVec!)
+    ws_count: u8,   // Count of consecutive WS chars
+    first_ws: char, // First WS char (for single-WS case)
+
+    // One-char lookahead buffer (4 bytes vs 32+ for SmallVec)
+    next_char: Option<char>,
+
+    started: bool, // Have we emitted any non-WS yet?
+}
+
+impl<'a> Iterator for WhitespaceCollapseIter<'a> {
+    type Item = char;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Fast path: Emit buffered lookahead char
+        if let Some(c) = self.next_char.take() {
+            return Some(c);
+        }
+
+        loop {
+            match self.chars.next() {
+                Some(c) => {
+                    if self.config.is_whitespace_for_config(c) {
+                        // Accumulate whitespace run
+                        if self.ws_count == 0 {
+                            self.first_ws = c;
+                        }
+                        self.ws_count = self.ws_count.saturating_add(1);
+                        continue;
+                    }
+
+                    // Non-whitespace: process accumulated WS
+                    if self.ws_count > 0 {
+                        let should_emit = !self.config.trim || self.started;
+                        let count = std::mem::replace(&mut self.ws_count, 0);
+
+                        if should_emit {
+                            self.started = true;
+                            self.next_char = Some(c); // Buffer the non-WS char
+
+                            // Emit collapsed/normalized WS
+                            return Some(if count >= 2 {
+                                // Multi-char run: emit replacement
+                                self.config.replacement_char
+                            } else {
+                                // Single WS: normalize if Unicode
+                                if self.config.is_unicode_whitespace_only(self.first_ws) {
+                                    self.config.replacement_char
+                                } else {
+                                    self.first_ws
+                                }
+                            });
+                        }
+                        // else: trimming leading WS, discard it
+                    }
+
+                    self.started = true;
+                    return Some(c);
+                }
+                None => {
+                    // End of input: handle trailing whitespace
+                    if self.ws_count > 0 {
+                        let should_emit = !self.config.trim;
+                        let count = std::mem::replace(&mut self.ws_count, 0);
+
+                        if should_emit {
+                            return Some(
+                                if count >= 2
+                                    || self.config.is_unicode_whitespace_only(self.first_ws)
+                                {
+                                    self.config.replacement_char
+                                } else {
+                                    self.first_ws
+                                },
+                            );
+                        }
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+impl<'a> FusedIterator for WhitespaceCollapseIter<'a> {}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SLOW PATH: Preserve Mode Iterator (needs SmallVec for buffering)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug)]
+struct WhitespacePreserveIter<'a> {
     chars: std::str::Chars<'a>,
     pending: SmallVec<[char; 4]>,
     pending_idx: usize,
     config: NormalizeWhitespace,
     started: bool,
-    done: bool,
 }
 
-impl<'a> Iterator for WhitespaceIterator<'a> {
+impl<'a> Iterator for WhitespacePreserveIter<'a> {
     type Item = char;
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        // First, drain any pending characters from previous flush
+        // Drain pending buffer first
         if self.pending_idx < self.pending.len() {
             let c = self.pending[self.pending_idx];
             self.pending_idx += 1;
             return Some(c);
         }
 
-        // Reset pending buffer if fully drained
-        if self.pending_idx > 0 {
+        // Reset buffer if fully drained
+        if !self.pending.is_empty() {
             self.pending.clear();
             self.pending_idx = 0;
         }
 
-        // If we've already finished the input, we're done
-        if self.done {
-            return None;
-        }
-        let config = self.config;
-
-        // Scan for the next non-whitespace character
+        // Scan for next non-whitespace
         loop {
             match self.chars.next() {
                 Some(c) => {
-                    // let is_std_ws = config.is_whitespace_for_config(c);
-                    // let is_uni_ws = config.is_unicode_whitespace_only(c);
-                    // let is_ws = is_std_ws || is_uni_ws;
-
-                    // Inside the loop, when handling whitespace:
-                    if config.is_whitespace_for_config(c) {
+                    if self.config.is_whitespace_for_config(c) {
                         self.pending.push(c);
                         continue;
                     }
 
-                    // Non-whitespace: now decide whether to collapse
+                    // Non-whitespace: flush pending WS
                     if !self.pending.is_empty() {
                         let should_emit = !self.config.trim || self.started;
 
                         if should_emit {
-                            if self.config.collapse && self.pending.len() >= 2 {
-                                // Collapse multi-char run
-                                self.pending.clear();
-                                self.pending.push(self.config.replacement_char);
-                            } else if self.config.collapse {
-                                // Collapse single-char: normalize if Unicode
-                                let first = self.pending[0];
-                                if config.is_unicode_whitespace_only(first) {
-                                    self.pending[0] = self.config.replacement_char;
-                                }
-                            }
-                            // else: collapse=false, keep original chars in pending
-
-                            self.pending.push(c); // Add the non-WS char
-                            self.started = true;
-
+                            self.pending.push(c); // Append non-WS
                             let first = self.pending[0];
                             self.pending_idx = 1;
+                            self.started = true;
                             return Some(first);
                         } else {
                             // Leading trim: discard pending
@@ -515,34 +605,16 @@ impl<'a> Iterator for WhitespaceIterator<'a> {
                     return Some(c);
                 }
                 None => {
-                    // End of input - handle trailing whitespace
-                    self.done = true;
+                    // Handle trailing whitespace
                     if !self.pending.is_empty() {
                         let should_emit = !self.config.trim;
 
                         if should_emit {
-                            if self.config.collapse && self.pending.len() >= 2 {
-                                // Collapse multi-char run
-                                let rep = self.config.replacement_char;
-                                self.pending.clear();
-                                return Some(rep);
-                            } else if self.config.collapse {
-                                // Collapse single-char: normalize if Unicode
-                                let mut first = self.pending[0];
-                                if config.is_unicode_whitespace_only(first) {
-                                    first = self.config.replacement_char;
-                                }
-                                self.pending_idx = 1;
-                                return Some(first);
-                            } else {
-                                // NO collapse: emit original char (no normalization!)
-                                let first = self.pending[0];
-                                self.pending_idx = 1;
-                                return Some(first);
-                            }
+                            let first = self.pending[0];
+                            self.pending_idx = 1;
+                            return Some(first);
                         }
                     }
-
                     return None;
                 }
             }
@@ -550,7 +622,7 @@ impl<'a> Iterator for WhitespaceIterator<'a> {
     }
 }
 
-impl<'a> FusedIterator for WhitespaceIterator<'a> {}
+impl<'a> FusedIterator for WhitespacePreserveIter<'a> {}
 
 impl StageTestConfig for NormalizeWhitespace {
     fn one_to_one_languages() -> &'static [Lang] {
@@ -865,6 +937,63 @@ mod tests {
             input,
             stage
         );
+    }
+
+    #[test]
+    fn collapse_path_equivalence() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+        let inputs = [
+            "a   b",
+            "  trim  ",
+            "a\u{00A0}\u{00A0}b",
+            "single",
+            "",
+            "   ",
+            "mixed \t\u{00A0} ws",
+        ];
+
+        for input in inputs {
+            let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
+            let via_bind: String = stage.bind(input, &ctx()).collect();
+
+            assert_eq!(
+                via_apply.as_ref(),
+                via_bind,
+                "Mismatch for input: {:?}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn preserve_path_equivalence() {
+        let stage = TRIM_WHITESPACE; // collapse=false
+        let inputs = ["  a  b  ", "keep   spacing", "\u{00A0}unicode\u{00A0}"];
+
+        for input in inputs {
+            let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
+            let via_bind: String = stage.bind(input, &ctx()).collect();
+
+            assert_eq!(
+                via_apply.as_ref(),
+                via_bind,
+                "Mismatch for input: {:?}",
+                input
+            );
+        }
+    }
+
+    #[test]
+    fn stress_test_long_whitespace_runs() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+
+        // Test with very long WS runs (>4 chars, would overflow old SmallVec inline)
+        let input = format!("a{}b", " ".repeat(100));
+        let via_apply = stage.apply(Cow::Borrowed(&input), &ctx()).unwrap();
+        let via_bind: String = stage.bind(&input, &ctx()).collect();
+
+        assert_eq!(via_apply.as_ref(), "a b");
+        assert_eq!(via_bind, "a b");
     }
 }
 
