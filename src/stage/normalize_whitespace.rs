@@ -231,11 +231,6 @@ impl Stage for NormalizeWhitespace {
 
 impl NormalizeWhitespace {
     #[inline(always)]
-    fn replacement_char(&self) -> char {
-        self.replacement_char
-    }
-
-    #[inline(always)]
     pub fn with_normalize_unicode(&mut self) {
         self.normalize_unicode = true
     }
@@ -309,19 +304,18 @@ impl NormalizeWhitespace {
         self.normalize_unicode && !c.is_ascii_whitespace() && c.is_whitespace()
     }
     /// Optimized ASCII-only fast path (no Unicode normalization needed).
-    /// Single-pass, byte-level operations with at most one allocation.
+    /// Single-pass, byte-level operations with smart capacity estimation.
     #[inline(always)]
     fn apply_ascii_fast<'a>(&self, text: Cow<'a, str>) -> Cow<'a, str> {
         let s = text.as_ref();
         let bytes = s.as_bytes();
-        // ═══════════════════════════════════════════════════════════
-        // Single-pass transformation (trust needs_apply() contract)
-        // ═══════════════════════════════════════════════════════════
-        let mut result = String::with_capacity(bytes.len());
-        //let mut prev_ws = false;
+
+        // OPTIMIZATION: Smart capacity estimation
+        let mut result = String::with_capacity(self.estimate_output_capacity(bytes.len()));
+
         let mut started = false;
-        // let mut already_collapsed = false;
         let mut pending_ws: SmallVec<[u8; 4]> = SmallVec::new();
+
         for &b in bytes {
             let is_ws = is_ascii_whitespace_fast(b);
             if is_ws {
@@ -332,11 +326,9 @@ impl NormalizeWhitespace {
                     let should_emit = !self.trim || started;
                     if should_emit {
                         if self.collapse {
-                            // Only emit replacement if run length >= 2
                             if pending_ws.len() >= 2 {
-                                result.push(self.replacement_char());
+                                result.push(self.replacement_char);
                             } else {
-                                // Single WS: Preserve original character
                                 result.push(pending_ws[0] as char);
                             }
                         } else {
@@ -344,31 +336,29 @@ impl NormalizeWhitespace {
                         }
                     }
                 }
-                // Non-whitespace
                 result.push(b as char);
                 pending_ws.clear();
                 started = true;
             }
         }
+
         if !pending_ws.is_empty() {
             let should_emit = !self.trim;
             if should_emit {
                 if self.collapse {
-                    // Only emit replacement if run length >= 2
                     if pending_ws.len() >= 2 {
-                        result.push(self.replacement_char());
+                        result.push(self.replacement_char);
                     } else {
-                        // Single WS: Preserve original character
                         result.push(pending_ws[0] as char);
                     }
                 } else {
                     result.extend(pending_ws.drain(..).map(|b| b as char));
                 }
             }
-            // If trimming, we silently drop trailing WS — correct behavior
         }
         Cow::Owned(result)
     }
+
     /// Full Unicode-aware transformation with optimal single-pass processing.
     /// Handles all whitespace types, all configurations, with at most one allocation.
     ///
@@ -404,12 +394,12 @@ impl NormalizeWhitespace {
                     if self.collapse {
                         if pending_ws.len() >= 2 {
                             // Run of 2+ WS: Collapse and emit replacement
-                            result.push(self.replacement_char());
+                            result.push(self.replacement_char);
                         } else {
                             // Single WS: Preserve original character
                             let mut first = pending_ws[0];
                             if self.is_unicode_whitespace_only(first) {
-                                first = self.replacement_char();
+                                first = self.replacement_char;
                             }
                             result.push(first);
                         }
@@ -430,11 +420,11 @@ impl NormalizeWhitespace {
                 if self.collapse {
                     // FIX: Only emit replacement if run length >= 2
                     if pending_ws.len() >= 2 {
-                        result.push(self.replacement_char());
+                        result.push(self.replacement_char);
                     } else {
                         let mut first = pending_ws[0];
                         if self.is_unicode_whitespace_only(first) {
-                            first = self.replacement_char();
+                            first = self.replacement_char;
                         }
                         // Single WS: Preserve original character
                         result.push(first);
