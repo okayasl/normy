@@ -5,8 +5,12 @@
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use normy::{
     COLLAPSE_WHITESPACE_UNICODE, Normy, TRIM_WHITESPACE_UNICODE,
-    stage::normalize_whitespace::{
-        COLLAPSE_WHITESPACE, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace, TRIM_WHITESPACE,
+    context::Context,
+    stage::{
+        CharMapper, Stage,
+        normalize_whitespace::{
+            COLLAPSE_WHITESPACE, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace, TRIM_WHITESPACE,
+        },
     },
 };
 use std::{borrow::Cow, hint::black_box};
@@ -127,6 +131,64 @@ fn bench_whitespace_variants(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_bind_vs_apply(c: &mut Criterion) {
+    let mut group = c.benchmark_group("NormalizeWhitespace_Bind_vs_Apply");
+    let ctx = Context::default();
+
+    // Generate the long space string once
+    let long_spaces = format!("start{}end", " ".repeat(10_000));
+    let mut samples = SAMPLES.to_vec();
+    // Safety: The original code uses this Box::leak, we must do the same.
+    samples[12] = Box::leak(long_spaces.into_boxed_str());
+
+    // ── New reusable closure for BIND vs APPLY comparison ─────────────────────
+    let mut bench_bind_apply_variant = |name: &str, stage: NormalizeWhitespace| {
+        for &input in &samples {
+            let input_len = input.len() as u64;
+            group.throughput(Throughput::Bytes(input_len));
+
+            // 1. Benchmark: Via stage.apply()
+            // Measures the dedicated String allocation/write path (e.g., apply_full or apply_ascii_fast)
+            let id_apply = BenchmarkId::new(format!("{name}/APPLY"), format!("{input:.80}"));
+            group.bench_function(id_apply, |b| {
+                b.iter_batched(
+                    || input,
+                    |text| {
+                        let cow = Cow::Borrowed(black_box(text));
+                        let result = stage.apply(cow, &ctx).unwrap();
+                        black_box(result.len())
+                    },
+                    BatchSize::SmallInput,
+                );
+            });
+
+            // 2. Benchmark: Via stage.bind().collect()
+            // Measures the Iterator-based path (e.g., WhitespaceCollapseIter) followed by collection
+            let id_bind = BenchmarkId::new(format!("{name}/BIND_COLLECT"), format!("{input:.80}"));
+            group.bench_function(id_bind, |b| {
+                b.iter_batched(
+                    || input,
+                    |text| {
+                        // Call bind and collect into a String
+                        let result: String = stage.bind(black_box(text), &ctx).collect();
+                        black_box(result.len())
+                    },
+                    BatchSize::SmallInput,
+                );
+            });
+        }
+    };
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Run the comparisons for multiple configurations to ensure all paths are tested
+    bench_bind_apply_variant("FULL", NORMALIZE_WHITESPACE_FULL);
+    bench_bind_apply_variant("COLLAPSE_UNICODE", COLLAPSE_WHITESPACE_UNICODE);
+    bench_bind_apply_variant("TRIM_UNICODE", TRIM_WHITESPACE_UNICODE);
+    bench_bind_apply_variant("COLLAPSE_ASCII", COLLAPSE_WHITESPACE);
+
+    group.finish();
+}
+
 criterion_group! {
     name = benches;
     config = Criterion::default()
@@ -135,7 +197,7 @@ criterion_group! {
         .sample_size(500)
         .noise_threshold(0.02)
         .significance_level(0.05);
-    targets = bench_whitespace_variants
+    targets = bench_bind_vs_apply
 }
 
 criterion_main!(benches);
