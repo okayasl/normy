@@ -131,7 +131,7 @@ pub trait CharMapper: Send + Sync {
     -> Box<dyn FusedIterator<Item = char> + 'a>;
 }
 
-/// New: Generic extension — NOT object-safe, only used in static pipelines
+/// New: Generic extension — Only used in static pipelines
 pub trait StageIter {
     /// Concrete iterator type — fully monomorphized
     type Iter<'a>: Iterator<Item = char> + 'a;

@@ -59,7 +59,7 @@ impl Stage for StripMarkdown {
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let mut out = String::with_capacity(text.len());
 
-        // Enable Strikethrough, Tables, Tasklists, Footnotes
+        // Enable Strikethrough, Tables, Tasklists, Footnotes, Math
         let mut options = Options::empty();
         options.insert(Options::ENABLE_STRIKETHROUGH);
         options.insert(Options::ENABLE_TABLES);
@@ -67,11 +67,12 @@ impl Stage for StripMarkdown {
         options.insert(Options::ENABLE_FOOTNOTES);
         options.insert(Options::ENABLE_MATH);
 
-        let parser = Parser::new_ext(&text, options);
+        let parser = Parser::new_ext(text.as_ref(), options);
+        let mut iter = parser.peekable();
 
-        for event in parser {
+        while let Some(event) = iter.next() {
             match event {
-                // Content we want to keep
+                // TEXT CONTENT
                 Event::Text(t)
                 | Event::Code(t)
                 | Event::Html(t)
@@ -80,28 +81,30 @@ impl Stage for StripMarkdown {
                     out.push_str(&t);
                 }
 
-                // Mathematical formulas: Preserve syntax for NLP tokenizers
+                // MATH INLINE
                 Event::InlineMath(t) => {
                     out.push('$');
                     out.push_str(&t);
                     out.push('$');
                 }
+
+                // MATH BLOCK
                 Event::DisplayMath(t) => {
                     out.push_str("$$");
                     out.push_str(&t);
                     out.push_str("$$");
                 }
 
-                // Spacing handling
+                // LINE BREAKS
                 Event::SoftBreak => out.push('\n'),
                 Event::HardBreak | Event::Rule => out.push('\n'),
 
-                // Task Lists: convert [x] to text so NLP sees the status
+                // TASK LIST MARKERS
                 Event::TaskListMarker(checked) => {
                     out.push_str(if checked { "[x] " } else { "[ ] " });
                 }
 
-                // START: Handle start of blocks to ensure separation from preceding content
+                // BLOCK STARTS → ensure newline separation
                 Event::Start(
                     Tag::Paragraph
                     | Tag::Heading { .. }
@@ -117,7 +120,7 @@ impl Stage for StripMarkdown {
                     }
                 }
 
-                // END: Handle end of blocks to ensure separation from following content
+                // BLOCK ENDS → ensure newline separation
                 Event::End(
                     TagEnd::Paragraph
                     | TagEnd::Heading(_)
@@ -134,31 +137,53 @@ impl Stage for StripMarkdown {
                     }
                 }
 
-                // Table cells need a space separator (Column A | Column B)
+                // TABLE CELL HANDLING
                 Event::End(TagEnd::TableCell) => {
-                    if !out.ends_with(|c: char| c.is_whitespace()) {
+                    let next = iter.peek();
+
+                    let next_is_row_end = matches!(next, Some(Event::End(TagEnd::TableRow)));
+                    let next_is_newline = matches!(next, Some(Event::SoftBreak | Event::HardBreak));
+                    let next_is_block_end = matches!(
+                        next,
+                        Some(Event::End(
+                            TagEnd::Paragraph
+                                | TagEnd::Table
+                                | TagEnd::TableHead
+                                | TagEnd::List(_)
+                                | TagEnd::Item
+                        ))
+                    );
+
+                    // Canonical rule:
+                    // A space is added only when it will remain stable across re-parsing:
+                    //
+                    //  NOT end of row
+                    //  NOT before newline
+                    //  NOT before block end
+                    //
+                    if !next_is_row_end
+                        && !next_is_newline
+                        && !next_is_block_end
+                        && !out.ends_with(|c: char| c.is_whitespace())
+                    {
                         out.push(' ');
                     }
                 }
 
-                // Catch-all for other events
                 _ => {}
             }
         }
 
-        // Trim trailing whitespace created by the block logic
-        let final_output = if out.ends_with(char::is_whitespace) {
-            out.trim_end()
-        } else {
-            &out
-        };
+        // FINAL CANONICAL TRIM: remove trailing whitespace created by block logic
+        while out.ends_with(char::is_whitespace) {
+            out.pop();
+        }
 
-        // CRITICAL: Check if output is identical to input
-        // This ensures idempotency and zero-copy on second pass
-        if final_output == text.as_ref() {
-            Ok(text) // Return original Cow (zero-copy!)
+        // IDEMPOTENCY CHECK — keep zero-copy when possible
+        if out == text {
+            Ok(text)
         } else {
-            Ok(Cow::Owned(final_output.to_string()))
+            Ok(Cow::Owned(out))
         }
     }
 
@@ -308,7 +333,7 @@ More text.
         let result = stage.apply(Cow::Borrowed(input.trim()), &ctx).unwrap();
 
         // Ensures cells are space-separated and rows are newline-separated
-        let expected = "Header A Header B \nCell 1 Cell 2 \nCell 3 Cell 4";
+        let expected = "Header A Header B\nCell 1 Cell 2\nCell 3 Cell 4";
         assert_eq!(result.trim(), expected);
     }
 
