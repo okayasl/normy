@@ -2,15 +2,14 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError},
+    stage::{Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
 };
-use std::{borrow::Cow, sync::LazyLock};
-
 use icu_normalizer::{
     ComposingNormalizer, ComposingNormalizerBorrowed, DecomposingNormalizer,
     DecomposingNormalizerBorrowed,
 };
+use std::{borrow::Cow, iter::Empty, sync::LazyLock};
 // ── ICU4X ──
 static ICU4X_NFC: LazyLock<ComposingNormalizerBorrowed> =
     LazyLock::new(ComposingNormalizer::new_nfc);
@@ -72,6 +71,9 @@ macro_rules! impl_normalization_stage {
             ) -> Result<Cow<'a, str>, StageError> {
                 Ok($norm.normalize(text.as_ref()).into_owned().into())
             }
+        }
+        impl StageIter for $stage {
+            type Iter<'a> = Empty<char>;
         }
     };
 }

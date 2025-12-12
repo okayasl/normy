@@ -5,7 +5,7 @@ use normy::{
     ARA, COLLAPSE_WHITESPACE, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LIT, LowerCase,
     NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy, POL, RUS,
     RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA, TRIM_WHITESPACE, TUR,
-    Transliterate, UnifyWidth, VIE, ZHO, lang::Lang,
+    Transliterate, UnifyWidth, VIE, ZHO, lang::Lang, stage::StageIter,
 };
 
 // 16 languages — the exact set that will appear in the Normy white paper
@@ -50,7 +50,7 @@ const SAMPLES: &[(&str, Lang)] = &[
 // S is the concrete stage type (e.g. LowerCase, CaseFold, ...)
 fn stage_benches_auto<S, C>(c: &mut Criterion, stage_name: &str, constructor: C)
 where
-    S: normy::stage::Stage + 'static, // ← correct bound
+    S: normy::stage::Stage + StageIter + 'static, // ← correct bound
     C: Fn() -> S,
 {
     let mut group = c.benchmark_group(stage_name);

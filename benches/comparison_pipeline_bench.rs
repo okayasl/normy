@@ -3,6 +3,7 @@
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use normy::stage::StageIter;
 use normy::stage::normalization::NfdStage;
 use rand::random;
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -56,6 +57,10 @@ impl normy::stage::Stage for BertCompatChineseChars {
     fn as_char_mapper(&self, _: &normy::context::Context) -> Option<&dyn normy::stage::CharMapper> {
         Some(self)
     }
+}
+
+impl StageIter for BertCompatChineseChars {
+    type Iter<'a> = std::iter::Empty<char>;
 }
 
 impl normy::stage::CharMapper for BertCompatChineseChars {

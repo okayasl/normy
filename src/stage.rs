@@ -130,3 +130,15 @@ pub trait CharMapper: Send + Sync {
     fn bind<'a>(&self, text: &'a str, ctx: &'a Context)
     -> Box<dyn FusedIterator<Item = char> + 'a>;
 }
+
+/// New: Generic extension — NOT object-safe, only used in static pipelines
+pub trait StageIter {
+    /// Concrete iterator type — fully monomorphized
+    type Iter<'a>: Iterator<Item = char> + 'a;
+
+    /// Return a concrete iterator if this stage supports zero-dyn fusion
+    #[inline]
+    fn try_iter<'a>(&self, _text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        None
+    }
+}

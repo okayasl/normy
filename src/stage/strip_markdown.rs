@@ -1,24 +1,36 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError},
+    stage::{CharMapper, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use std::borrow::Cow;
+use std::{borrow::Cow, iter::Empty, sync::Arc};
 
 /// Fast pre-scan: checks for common Markdown indicators.
 /// If none appear, we skip the parser entirely.
 #[inline(always)]
 fn contains_markdown_bytes(text: &str) -> bool {
     let bytes = text.as_bytes();
-    // Check for common markdown markers.
-    // Note: We must check '-' and '+' because they are used for lists.
-    // While this might flag hyphenated text as "markdown", correct list stripping is prioritized.
+
+    // Fast SIMD checks for common markers
     memchr::memchr3(b'#', b'*', b'_', bytes).is_some()
         || memchr::memchr3(b'`', b'[', b'>', bytes).is_some()
         || memchr::memchr3(b'|', b'~', b'!', bytes).is_some()
         || memchr::memchr2(b'-', b'+', bytes).is_some()
+        || has_ordered_list_marker(bytes)
+}
+
+/// Detects "N. " pattern (ordered lists)
+/// Accepts false positives like "I ate 2. pizzas" - handled by idempotency check
+#[inline(always)]
+fn has_ordered_list_marker(bytes: &[u8]) -> bool {
+    for i in 1..bytes.len().saturating_sub(1) {
+        if bytes[i] == b'.' && bytes[i - 1].is_ascii_digit() && bytes[i + 1] == b' ' {
+            return true;
+        }
+    }
+    false
 }
 
 /// Strips Markdown formatting while preserving visible text and logical structure.
@@ -45,10 +57,6 @@ impl Stage for StripMarkdown {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if text.is_empty() || !contains_markdown_bytes(&text) {
-            return Ok(text);
-        }
-
         let mut out = String::with_capacity(text.len());
 
         // Enable Strikethrough, Tables, Tasklists, Footnotes
@@ -155,17 +163,18 @@ impl Stage for StripMarkdown {
     }
 
     #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn crate::stage::CharMapper> {
+    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
         None
     }
 
     #[inline]
-    fn into_dyn_char_mapper(
-        self: std::sync::Arc<Self>,
-        _ctx: &Context,
-    ) -> Option<std::sync::Arc<dyn crate::stage::CharMapper>> {
+    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
         None
     }
+}
+
+impl StageIter for StripMarkdown {
+    type Iter<'a> = Empty<char>;
 }
 
 impl StageTestConfig for StripMarkdown {
@@ -437,11 +446,13 @@ Final paragraph.
         let ctx = Context::new(ENG);
 
         let input = "1. First\n2. Second\n3. Third";
+
+        assert!(stage.needs_apply(input, &ctx).unwrap());
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
 
         // At document start without blank lines, pulldown-cmark may treat as plain text
         // This is fine - the important thing is idempotency
-        assert_eq!(result, "1. First\n2. Second\n3. Third");
+        assert_eq!(result, "First\nSecond\nThird");
 
         // Verify idempotency
         let twice = stage.apply(result.clone(), &ctx).unwrap();

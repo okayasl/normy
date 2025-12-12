@@ -4,7 +4,7 @@ use crate::{
     DEU, ENG, FRA, HIN, JPN, KOR, SPA, ZHO,
     context::Context,
     lang::{Lang, LangEntry, SegmentRule},
-    stage::{CharMapper, Stage, StageError},
+    stage::{CharMapper, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{
         CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
@@ -174,100 +174,46 @@ impl Stage for SegmentWords {
 
     #[inline(always)]
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
-        // Fast path: language doesn't require segmentation at all
-        if !ctx.lang_entry.needs_segmentation() {
+        let entry = ctx.lang_entry;
+
+        // 1. Language doesn't want any segmentation at all → skip forever
+        if !entry.needs_segmentation() {
             return Ok(false);
         }
 
-        // Check if language has any segment rules
-        if !ctx.lang_entry.has_segment_rules() {
+        // 2. No rules defined → nothing to do
+        if entry.segment_rules().is_empty() {
             return Ok(false);
         }
 
-        // Analyze text to see if segmentation is actually needed
-        Ok(needs_segmentation(text, ctx.lang_entry))
-    }
-
-    fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // Fast path: language doesn't need segmentation
-        if !ctx.lang_entry.needs_segmentation() {
-            return Ok(text);
-        }
-
-        // Fast path: no segment rules defined
-        if !ctx.lang_entry.has_segment_rules() {
-            return Ok(text);
-        }
-
-        // Fast path: ASCII-only text in languages that don't segment Western text
+        // 3. Pure ASCII and language doesn't break Western→Script → zero-cost skip
         if text.is_ascii() {
-            // Check if language segments Western→Script or Script→Western
-            let rules = ctx.lang_entry.segment_rules();
+            let rules = entry.segment_rules();
             if !rules.contains(&SegmentRule::WesternToScript)
                 && !rules.contains(&SegmentRule::ScriptToWestern)
             {
-                return Ok(text);
+                return Ok(false);
             }
         }
 
-        // Use CharMapper for efficient iteration
-        if let Some(mapper) = self.as_char_mapper(ctx) {
-            let mut out = String::with_capacity(text.len() + (text.len() / 4)); // Heuristic: +25% for spaces
-            let mut changed = false;
+        // 4. Actually scan — this is the only place that knows the truth
+        Ok(needs_segmentation(text, &entry))
+    }
 
-            let mut original_chars = text.chars();
-            for segmented_char in mapper.bind(&text, ctx) {
-                out.push(segmented_char);
-
-                // Check if this char matches the original sequence
-                if let Some(orig) = original_chars.next() {
-                    if orig != segmented_char {
-                        changed = true;
-                    }
-                } else {
-                    // Iterator produced more chars than original (inserted spaces/ZWSP)
-                    changed = true;
-                }
-            }
-
-            // Check if there are leftover chars in original
-            if original_chars.next().is_some() {
-                changed = true;
-            }
-
-            return if changed {
-                Ok(Cow::Owned(out))
-            } else {
-                Ok(text)
-            };
-        }
-
-        // Fallback path - always allocates but track changes
-        let segmented = segment_allocating(&text, ctx.lang_entry);
-        if segmented == text.as_ref() {
-            Ok(text)
-        } else {
-            Ok(Cow::Owned(segmented))
-        }
+    // TRUST NEEDS_APPLY. ALWAYS ALLOCATE WHEN CALLED.
+    fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        // We are here → work is needed → allocate once, do it perfectly
+        Ok(Cow::Owned(SegmentWordsIter::new(&text, ctx).collect()))
     }
 
     #[inline]
-    fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        // Use precomputed flags for instant decision
-        if ctx.lang_entry.needs_segmentation() && ctx.lang_entry.has_segment_rules() {
-            Some(self)
-        } else {
-            None
-        }
+    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+        Some(self) // always eligible if needs_apply passed us
     }
 
     #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        if ctx.lang_entry.needs_segmentation() && ctx.lang_entry.has_segment_rules() {
-            Some(self)
-        } else {
-            None
-        }
+    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+        Some(self)
     }
 }
 
@@ -277,13 +223,22 @@ impl CharMapper for SegmentWords {
         Some(c)
     }
 
-    fn bind<'a>(&self, text: &'a str, ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        // Fast path: no segmentation needed
-        if !ctx.lang_entry.needs_segmentation() || !ctx.lang_entry.has_segment_rules() {
-            return Box::new(text.chars());
-        }
+    #[inline(always)]
+    fn bind<'a>(
+        &self,
+        text: &'a str,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(SegmentWordsIter::new(text, ctx))
+    }
+}
 
-        Box::new(segment_chars(text.chars(), ctx.lang_entry).fuse())
+impl StageIter for SegmentWords {
+    type Iter<'a> = SegmentWordsIter<'a>;
+
+    #[inline(always)]
+    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        Some(SegmentWordsIter::new(text, ctx))
     }
 }
 
@@ -291,7 +246,7 @@ impl CharMapper for SegmentWords {
 fn check_boundary_with_classes(
     prev_class: CharClass,
     curr_class: CharClass,
-    lang: LangEntry,
+    lang: &LangEntry,
 ) -> bool {
     // CJK unigram mode: break between every CJK character
     if prev_class == Cjk && curr_class == Cjk && lang.needs_unigram_cjk() {
@@ -320,7 +275,7 @@ fn check_boundary_with_classes(
 }
 
 #[inline]
-pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
+pub fn needs_segmentation(text: &str, lang: &LangEntry) -> bool {
     let mut prev_class: Option<CharClass> = None;
     let mut prev_char: Option<char> = None;
 
@@ -358,145 +313,115 @@ pub fn needs_segmentation(text: &str, lang: LangEntry) -> bool {
     false
 }
 
-#[inline]
-pub fn segment_allocating(text: &str, lang: LangEntry) -> String {
-    segment_chars(text.chars(), lang).collect()
+pub struct SegmentWordsIter<'a> {
+    chars: std::str::Chars<'a>,
+    lang: &'a LangEntry,
+    prev_char: Option<char>,
+    prev_class: Option<CharClass>,
+    prev_is_virama: bool,
+    pending_space: Option<char>,
 }
 
-#[inline]
-pub fn segment_chars<I>(chars: I, lang: LangEntry) -> impl Iterator<Item = char>
-where
-    I: Iterator<Item = char>,
-{
-    struct Seg<I: Iterator> {
-        lang: LangEntry,
-        inner: I,
-        prev_char: Option<char>,
-        prev_class: Option<CharClass>,
-        prev_is_virama: bool,
-        pending_space: Option<char>,
+impl<'a> SegmentWordsIter<'a> {
+    #[inline(always)]
+    pub fn new(text: &'a str, ctx: &'a Context) -> Self {
+        Self {
+            chars: text.chars(),
+            lang: &ctx.lang_entry,
+            prev_char: None,
+            prev_class: None,
+            prev_is_virama: false,
+            pending_space: None,
+        }
     }
+}
 
-    impl<I: Iterator<Item = char>> Iterator for Seg<I> {
-        type Item = char;
+impl Iterator for SegmentWordsIter<'_> {
+    type Item = char;
 
-        #[inline(always)]
-        fn next(&mut self) -> Option<Self::Item> {
-            // Emit pending delimiter first (ZWSP or space)
-            if let Some(space) = self.pending_space.take() {
-                return Some(space);
-            }
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Emit pending delimiter first (ZWSP or space)
+        if let Some(space) = self.pending_space.take() {
+            return Some(space);
+        }
 
-            loop {
-                let curr = match self.inner.next() {
-                    Some(c) => c,
-                    None => {
-                        if let Some(space) = self.pending_space.take() {
-                            return Some(space);
-                        }
-                        return self.prev_char.take();
+        loop {
+            let curr = match self.chars.next() {
+                Some(c) => c,
+                None => {
+                    if let Some(space) = self.pending_space.take() {
+                        return Some(space);
                     }
-                };
-
-                // Whitespace/ZWSP resets state and is emitted as-is
-                if is_any_whitespace(curr) || curr == zwsp() {
-                    if let Some(prev) = self.prev_char.take() {
-                        self.prev_class = None;
-                        self.prev_is_virama = false;
-                        self.pending_space = Some(curr);
-                        return Some(prev);
-                    }
-                    return Some(curr);
+                    return self.prev_char.take();
                 }
+            };
 
-                // ZWJ/ZWNJ are transparent joiners - skip but don't reset state
-                if curr == '\u{200D}' || curr == '\u{200C}' {
-                    if self.prev_char.is_some() {
-                        continue;
-                    }
-                    return Some(curr);
-                }
-
-                let curr_class = classify(curr);
-                let curr_is_virama = is_virama(curr);
-
-                let (mut need_boundary, mut use_zwsp) = (false, false);
-
-                if let (Some(prev), Some(prev_class)) = (self.prev_char, self.prev_class) {
-                    // Indic Rule: Insert ZWSP after virama + consonant
-                    if prev_class == Indic
-                        && self.prev_is_virama
-                        && !curr_is_virama
-                        && curr_class == Indic
-                    {
-                        // Hindi exception: skip certain conjuncts
-                        if !(self.lang.code() == HIN.code && should_prevent_indic_break(curr)) {
-                            need_boundary = true;
-                            use_zwsp = true;
-                        }
-                    }
-                    // Script transition boundary (use space)
-                    else if check_boundary_with_classes(prev_class, curr_class, self.lang) {
-                        need_boundary = true;
-                        use_zwsp = false;
-                    }
-
-                    if need_boundary {
-                        let delim = if use_zwsp { zwsp() } else { ' ' };
-                        self.pending_space = Some(delim);
-                    }
-
-                    // Update buffer for next iteration
-                    self.prev_char = Some(curr);
-                    self.prev_class = Some(curr_class);
-                    self.prev_is_virama = curr_is_virama;
-
+            // Whitespace/ZWSP resets state and is emitted as-is
+            if is_any_whitespace(curr) || curr == zwsp() {
+                if let Some(prev) = self.prev_char.take() {
+                    self.prev_class = None;
+                    self.prev_is_virama = false;
+                    self.pending_space = Some(curr);
                     return Some(prev);
                 }
+                return Some(curr);
+            }
 
-                // First non-whitespace character — buffer it
+            // ZWJ/ZWNJ are transparent joiners - skip but don't reset state
+            if curr == '\u{200D}' || curr == '\u{200C}' {
+                if self.prev_char.is_some() {
+                    continue;
+                }
+                return Some(curr);
+            }
+
+            let curr_class = classify(curr);
+            let curr_is_virama = is_virama(curr);
+
+            let (mut need_boundary, mut use_zwsp) = (false, false);
+
+            if let (Some(prev), Some(prev_class)) = (self.prev_char, self.prev_class) {
+                // Indic Rule: Insert ZWSP after virama + consonant
+                if prev_class == Indic
+                    && self.prev_is_virama
+                    && !curr_is_virama
+                    && curr_class == Indic
+                {
+                    // Hindi exception: skip certain conjuncts
+                    if !(self.lang.code() == HIN.code && should_prevent_indic_break(curr)) {
+                        need_boundary = true;
+                        use_zwsp = true;
+                    }
+                }
+                // Script transition boundary (use space)
+                else if check_boundary_with_classes(prev_class, curr_class, self.lang) {
+                    need_boundary = true;
+                    use_zwsp = false;
+                }
+
+                if need_boundary {
+                    let delim = if use_zwsp { zwsp() } else { ' ' };
+                    self.pending_space = Some(delim);
+                }
+
+                // Update buffer for next iteration
                 self.prev_char = Some(curr);
                 self.prev_class = Some(curr_class);
                 self.prev_is_virama = curr_is_virama;
+
+                return Some(prev);
             }
-        }
-    }
 
-    Seg {
-        lang,
-        inner: chars,
-        prev_char: None,
-        prev_class: None,
-        prev_is_virama: false,
-        pending_space: None,
-    }
-}
-
-/// Iterator wrapper for explicit usage if needed
-pub struct SegmentWordIterator {
-    inner: Box<dyn FusedIterator<Item = char>>,
-}
-
-impl SegmentWordIterator {
-    pub fn new<I>(iter: I, lang: LangEntry) -> Self
-    where
-        I: Iterator<Item = char> + FusedIterator + 'static,
-    {
-        Self {
-            inner: Box::new(segment_chars(iter, lang).fuse()),
+            // First non-whitespace character — buffer it
+            self.prev_char = Some(curr);
+            self.prev_class = Some(curr_class);
+            self.prev_is_virama = curr_is_virama;
         }
     }
 }
 
-impl Iterator for SegmentWordIterator {
-    type Item = char;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next()
-    }
-}
-
-impl FusedIterator for SegmentWordIterator {}
+impl FusedIterator for SegmentWordsIter<'_> {}
 
 impl StageTestConfig for SegmentWords {
     fn one_to_one_languages() -> &'static [Lang] {
@@ -542,6 +467,10 @@ impl StageTestConfig for SegmentWords {
 
     fn skip_needs_apply_test() -> bool {
         true // Keep skipped - complex to predict with mixed scripts
+    }
+
+    fn skip_zero_copy_apply_test() -> bool {
+        true
     }
 }
 
@@ -593,7 +522,6 @@ mod tests {
 
         let result = stage.apply(Cow::Borrowed("Hello world"), &ctx).unwrap();
         assert_eq!(result, "Hello world");
-        assert!(matches!(result, Cow::Borrowed(_))); // Zero-copy
     }
 
     #[test]
@@ -778,7 +706,7 @@ mod tests {
         let input = "hello world 123";
         assert!(!stage.needs_apply(input, &ctx).unwrap());
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        assert!(matches!(result, Cow::Borrowed(_)));
+        assert_eq!(result.to_string(), "hello world 123");
 
         // Chinese with ASCII (should segment)
         let ctx = Context::new(ZHO);

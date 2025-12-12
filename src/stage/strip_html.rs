@@ -1,11 +1,11 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError},
+    stage::{CharMapper, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
 };
 use memchr::memchr;
-use std::borrow::Cow;
+use std::{borrow::Cow, iter::Empty};
 
 /// Fast pre-scan: if no '<' appears, text is guaranteed to have no tags
 #[inline(always)]
@@ -57,17 +57,8 @@ impl Stage for StripHtml {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        if text.is_empty() {
-            return Ok(text);
-        }
-
         let has_tags = contains_html_tag(&text);
         let has_entities = contains_entities(&text);
-
-        // Zero-copy fast path: no HTML or entities present
-        if !has_tags && !has_entities {
-            return Ok(text);
-        }
 
         // Step 1: Decode entities first
         let decoded = if has_entities {
@@ -239,7 +230,7 @@ impl Stage for StripHtml {
     }
 
     #[inline(always)]
-    fn as_char_mapper(&self, _: &Context) -> Option<&dyn crate::stage::CharMapper> {
+    fn as_char_mapper(&self, _: &Context) -> Option<&dyn CharMapper> {
         None
     }
 
@@ -247,7 +238,7 @@ impl Stage for StripHtml {
     fn into_dyn_char_mapper(
         self: std::sync::Arc<Self>,
         _: &Context,
-    ) -> Option<std::sync::Arc<dyn crate::stage::CharMapper>> {
+    ) -> Option<std::sync::Arc<dyn CharMapper>> {
         None
     }
 }
@@ -290,6 +281,10 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
         temp_chars.peek(),
         Some('>') | Some(' ') | Some('\t') | Some('\n') | Some('\r') | None
     )
+}
+
+impl StageIter for StripHtml {
+    type Iter<'a> = Empty<char>;
 }
 
 // UNIVERSAL CONTRACT COMPLIANCE

@@ -13,7 +13,7 @@ use normy::{
             search, social_media, web_scraping,
         },
     },
-    stage::{CharMapper, Stage, StageError},
+    stage::{CharMapper, Stage, StageError, StageIter},
 };
 
 // ————————————————————————————————
@@ -51,6 +51,10 @@ impl Stage for StripEmoji {
     fn into_dyn_char_mapper(self: Arc<Self>, _: &Context) -> Option<Arc<dyn CharMapper>> {
         Some(self)
     }
+}
+
+impl StageIter for StripEmoji {
+    type Iter<'a> = std::iter::Empty<char>;
 }
 
 impl CharMapper for StripEmoji {

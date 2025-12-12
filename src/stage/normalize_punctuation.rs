@@ -2,13 +2,13 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError},
+    stage::{CharMapper, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
     unicode::normalize_punctuation_char,
 };
-use std::borrow::Cow;
 use std::iter::FusedIterator;
 use std::sync::Arc;
+use std::{borrow::Cow, str::Chars};
 
 /// Normalize Unicode punctuation to ASCII equivalents based on a fixed mapping.
 ///
@@ -70,6 +70,15 @@ impl Stage for NormalizePunctuation {
     }
 }
 
+impl StageIter for NormalizePunctuation {
+    type Iter<'a> = NormalizePunctuationIter<'a>;
+
+    #[inline(always)]
+    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        Some(NormalizePunctuationIter::new(text))
+    }
+}
+
 impl CharMapper for NormalizePunctuation {
     #[inline(always)]
     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
@@ -78,12 +87,44 @@ impl CharMapper for NormalizePunctuation {
     }
 
     fn bind<'a>(&self, text: &'a str, _ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(text.chars().filter_map(|c| {
-            let n = normalize_punctuation_char(c);
-            if n == '\0' { None } else { Some(n) }
-        }))
+        Box::new(NormalizePunctuationIter::new(text))
     }
 }
+
+pub struct NormalizePunctuationIter<'a> {
+    chars: Chars<'a>,
+}
+
+impl<'a> NormalizePunctuationIter<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            chars: text.chars(),
+        }
+    }
+}
+
+impl<'a> Iterator for NormalizePunctuationIter<'a> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.chars.next().and_then(|c| {
+            // The core logic is performed here.
+            let n = normalize_punctuation_char(c);
+            if n == '\0' { None } else { Some(n) }
+        })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // Since this is a filtering iterator (c may be replaced by '\0' or removed),
+        // we can only provide the maximum size (upper bound).
+        self.chars.size_hint()
+    }
+}
+
+// 2. Implement FusedIterator for maximum compiler optimization.
+impl<'a> FusedIterator for NormalizePunctuationIter<'a> {}
 
 impl StageTestConfig for NormalizePunctuation {
     fn one_to_one_languages() -> &'static [Lang] {

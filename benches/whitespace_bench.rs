@@ -7,7 +7,7 @@ use normy::{
     COLLAPSE_WHITESPACE_UNICODE, Normy, TRIM_WHITESPACE_UNICODE,
     context::Context,
     stage::{
-        CharMapper, Stage,
+        CharMapper, Stage, StageIter,
         normalize_whitespace::{
             COLLAPSE_WHITESPACE, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace, TRIM_WHITESPACE,
         },
@@ -171,6 +171,23 @@ fn bench_bind_vs_apply(c: &mut Criterion) {
                     |text| {
                         // Call bind and collect into a String
                         let result: String = stage.bind(black_box(text), &ctx).collect();
+                        black_box(result.len())
+                    },
+                    BatchSize::SmallInput,
+                );
+            });
+
+            // 3. Benchmark: Via stage.try_iter().collect()
+            // Measures the Iterator-based path (e.g., WhitespaceCollapseIter) followed by collection
+            let id_bind =
+                BenchmarkId::new(format!("{name}/TRY_ITER_COLLECT"), format!("{input:.80}"));
+            group.bench_function(id_bind, |b| {
+                b.iter_batched(
+                    || input,
+                    |text| {
+                        // Call bind and collect into a String
+                        let result: String =
+                            stage.try_iter(black_box(text), &ctx).unwrap().collect();
                         black_box(result.len())
                     },
                     BatchSize::SmallInput,

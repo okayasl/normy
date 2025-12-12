@@ -7,7 +7,7 @@
 //! DynamicProcess  is the dynamic fallback.
 use crate::{
     context::Context,
-    stage::{Stage, StageError},
+    stage::{Stage, StageError, StageIter},
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, sync::Arc};
@@ -28,25 +28,33 @@ pub struct ChainedProcess<S: Stage, P: Process> {
     pub previous: P,
 }
 
-impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
+impl<S: Stage + StageIter, P: Process> Process for ChainedProcess<S, P> {
     #[inline(always)]
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let prev = self.previous.process(text, ctx)?;
+        let current: Cow<'_, str> = self.previous.process(text, ctx)?;
+        if !self.stage.needs_apply(&current, ctx)? {
+            return Ok(current);
+        }
 
-        if !self.stage.needs_apply(&prev, ctx)? {
-            return Ok(prev); // ← ZERO COST PATH
+        // BEST PATH: Fully static, zero dyn dispatch
+        if let Some(iter) = self.stage.try_iter(&current, ctx) {
+            let mut out = String::with_capacity(current.len());
+            out.extend(iter);
+            return Ok(Cow::Owned(out));
         }
 
         if let Some(mapper) = self.stage.as_char_mapper(ctx) {
-            let iter = mapper.bind(&prev, ctx);
-            let mut out = String::with_capacity(prev.len());
+            let iter = mapper.bind(&current, ctx);
+            let mut out = String::with_capacity(current.len());
             out.extend(iter);
-            Ok(Cow::Owned(out))
-        } else {
-            self.stage.apply(prev, ctx)
+            return Ok(Cow::Owned(out));
         }
+
+        // FALLBACK 2: apply()
+        self.stage.apply(current, ctx)
     }
 }
+
 #[derive(Default)]
 pub struct DynamicProcess {
     pub(crate) stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,

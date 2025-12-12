@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{CharMapper, FusedIterator, Stage, StageError},
+    stage::{CharMapper, FusedIterator, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::sync::Arc;
@@ -164,6 +164,22 @@ fn apply_with_peek_ahead<'a>(
     Ok(Cow::Owned(out))
 }
 
+impl StageIter for CaseFold {
+    type Iter<'a> = CaseFoldIter<'a>;
+
+    #[inline(always)]
+    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
+            // Only proceed if we are in the guaranteed 1:1 path.
+            Some(CaseFoldIter::new(text, ctx))
+        } else {
+            // If the language requires expansion (ß->ss) or peek-ahead (IJ->ij),
+            // we MUST fall back to the Stage::apply method.
+            None
+        }
+    }
+}
+
 impl CharMapper for CaseFold {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
@@ -176,16 +192,22 @@ impl CharMapper for CaseFold {
         text: &'a str,
         ctx: &'a Context,
     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(CaseFoldIter {
-            chars: text.chars(),
-            lang: &ctx.lang_entry,
-        })
+        Box::new(CaseFoldIter::new(text, ctx))
     }
 }
 
-struct CaseFoldIter<'a> {
+pub struct CaseFoldIter<'a> {
     chars: Chars<'a>,
     lang: &'a LangEntry,
+}
+
+impl<'a> CaseFoldIter<'a> {
+    pub fn new(text: &'a str, ctx: &'a Context) -> Self {
+        Self {
+            chars: text.chars(),
+            lang: &ctx.lang_entry,
+        }
+    }
 }
 
 impl<'a> Iterator for CaseFoldIter<'a> {

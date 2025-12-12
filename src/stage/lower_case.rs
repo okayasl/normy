@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{CharMapper, Stage, StageError},
+    stage::{CharMapper, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::iter::FusedIterator;
@@ -82,6 +82,15 @@ impl Stage for LowerCase {
     }
 }
 
+impl StageIter for LowerCase {
+    type Iter<'a> = LowercaseIter<'a>;
+
+    #[inline(always)]
+    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        Some(LowercaseIter::new(text, ctx))
+    }
+}
+
 impl CharMapper for LowerCase {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
@@ -99,9 +108,18 @@ impl CharMapper for LowerCase {
         })
     }
 }
-struct LowercaseIter<'a> {
+pub struct LowercaseIter<'a> {
     chars: Chars<'a>,
     lang: &'a LangEntry,
+}
+
+impl<'a> LowercaseIter<'a> {
+    pub fn new(text: &'a str, ctx: &'a Context) -> Self {
+        Self {
+            chars: text.chars(),
+            lang: &ctx.lang_entry,
+        }
+    }
 }
 
 impl<'a> Iterator for LowercaseIter<'a> {

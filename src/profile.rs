@@ -2,7 +2,7 @@ pub mod preset;
 use crate::{
     context::Context,
     process::{ChainedProcess, EmptyProcess, Process},
-    stage::Stage,
+    stage::{Stage, StageIter},
 };
 use std::borrow::Cow;
 use thiserror::Error;
@@ -46,7 +46,10 @@ impl ProfileBuilder<EmptyProcess> {
 }
 
 impl<P: Process> ProfileBuilder<P> {
-    pub fn add_stage<S: Stage + 'static>(self, stage: S) -> ProfileBuilder<ChainedProcess<S, P>> {
+    pub fn add_stage<S: Stage + StageIter + 'static>(
+        self,
+        stage: S,
+    ) -> ProfileBuilder<ChainedProcess<S, P>> {
         ProfileBuilder {
             name: self.name,
             current: ChainedProcess {

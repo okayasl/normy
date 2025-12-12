@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError},
+    stage::{CharMapper, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{could_be_unicode_ws_start, is_ascii_whitespace_fast, is_unicode_whitespace},
 };
@@ -451,9 +451,61 @@ impl NormalizeWhitespace {
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// OPTIMIZED CharMapper Implementation - Three-tier performance strategy
-// ═══════════════════════════════════════════════════════════════════════════
+impl StageIter for NormalizeWhitespace {
+    // The concrete iterator type — compiler sees this!
+    type Iter<'a> = NormalizeWhitespaceIter<'a>;
+
+    #[inline(always)]
+    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        Some(NormalizeWhitespaceIter {
+            inner: if self.collapse {
+                if text.is_ascii() {
+                    NormalizeWhitespaceInner::Ascii(WhitespaceAsciiIter::new(text, *self))
+                } else {
+                    NormalizeWhitespaceInner::Collapse(WhitespaceCollapseIter::new(text, *self))
+                }
+            } else {
+                NormalizeWhitespaceInner::Preserve(WhitespacePreserveIter::new(text, *self))
+            },
+        })
+    }
+}
+
+// One public iterator type — but with private enum inside
+pub struct NormalizeWhitespaceIter<'a> {
+    inner: NormalizeWhitespaceInner<'a>,
+}
+
+#[derive(Debug)]
+enum NormalizeWhitespaceInner<'a> {
+    Ascii(WhitespaceAsciiIter<'a>),
+    Collapse(WhitespaceCollapseIter<'a>),
+    Preserve(WhitespacePreserveIter<'a>),
+}
+
+impl<'a> Iterator for NormalizeWhitespaceIter<'a> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            NormalizeWhitespaceInner::Ascii(i) => i.next(),
+            NormalizeWhitespaceInner::Collapse(i) => i.next(),
+            NormalizeWhitespaceInner::Preserve(i) => i.next(),
+        }
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        match &self.inner {
+            NormalizeWhitespaceInner::Ascii(i) => i.size_hint(),
+            NormalizeWhitespaceInner::Collapse(i) => i.size_hint(),
+            NormalizeWhitespaceInner::Preserve(i) => i.size_hint(),
+        }
+    }
+}
+
+impl<'a> FusedIterator for NormalizeWhitespaceIter<'a> {}
 
 impl CharMapper for NormalizeWhitespace {
     #[inline(always)]
@@ -467,37 +519,12 @@ impl CharMapper for NormalizeWhitespace {
         _ctx: &'a Context,
     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
         if self.collapse {
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            // FASTEST PATH: Pure ASCII text (90%+ of English NLP workloads)
-            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             if text.is_ascii() {
-                return Box::new(WhitespaceAsciiIter {
-                    bytes: text.as_bytes(),
-                    pos: 0,
-                    config: *self,
-                    ws_count: 0,
-                    first_ws: 0,
-                    next_char: None,
-                    started: false,
-                });
+                return Box::new(WhitespaceAsciiIter::new(text, *self));
             } else {
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                // FAST PATH: collapse=true (counter-based, no SmallVec allocation)
-                // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-                return Box::new(WhitespaceCollapseIter {
-                    chars: text.chars(),
-                    config: *self,
-                    ws_count: 0,
-                    first_ws: '\0',
-                    first_ws_needs_replacement: false,
-                    next_char: None,
-                    started: false,
-                });
+                return Box::new(WhitespaceCollapseIter::new(text, *self));
             }
         }
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // SLOW PATH: collapse=false (must preserve exact WS chars)
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         Box::new(WhitespacePreserveIter::new(text, *self))
     }
 }
@@ -521,6 +548,20 @@ struct WhitespaceAsciiIter<'a> {
 
     next_char: Option<u8>, // Lookahead buffer (1 byte vs 4!)
     started: bool,
+}
+
+impl<'a> WhitespaceAsciiIter<'a> {
+    fn new(text: &'a str, config: NormalizeWhitespace) -> Self {
+        Self {
+            bytes: text.as_bytes(),
+            pos: 0,
+            config,
+            ws_count: 0,
+            first_ws: 0,
+            next_char: None,
+            started: false,
+        }
+    }
 }
 
 impl<'a> Iterator for WhitespaceAsciiIter<'a> {
@@ -623,6 +664,20 @@ struct WhitespaceCollapseIter<'a> {
 
     next_char: Option<char>, // 4 bytes vs 32+ for SmallVec
     started: bool,
+}
+
+impl<'a> WhitespaceCollapseIter<'a> {
+    fn new(text: &'a str, config: NormalizeWhitespace) -> Self {
+        Self {
+            chars: text.chars(),
+            config,
+            ws_count: 0,
+            first_ws: '\0',
+            first_ws_needs_replacement: false,
+            next_char: None,
+            started: false,
+        }
+    }
 }
 
 impl<'a> Iterator for WhitespaceCollapseIter<'a> {
