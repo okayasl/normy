@@ -113,6 +113,15 @@ pub trait Stage: Send + Sync {
     fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
         None
     }
+
+    #[inline]
+    fn try_dynamic_iter<'a>(
+        &self,
+        _text: &'a str,
+        _ctx: &'a Context,
+    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+        None
+    }
 }
 
 /// The heart of fused, zero-allocation pipelines.
@@ -139,6 +148,17 @@ pub trait StageIter {
     /// Return a concrete iterator if this stage supports zero-dyn fusion
     #[inline]
     fn try_iter<'a>(&self, _text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        None
+    }
+}
+
+pub trait StaticStageIter {
+    /// Concrete fused iterator type — fully monomorphized
+    type Iter<'a>: FusedIterator<Item = char> + 'a;
+
+    /// Return a concrete fused iterator if this stage supports zero-dyn fusion
+    #[inline]
+    fn try_static_iter<'a>(&self, _text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         None
     }
 }

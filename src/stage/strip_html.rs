@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
 };
 use memchr::memchr;
@@ -227,19 +227,6 @@ impl Stage for StripHtml {
         } else {
             Ok(Cow::Owned(result))
         }
-    }
-
-    #[inline(always)]
-    fn as_char_mapper(&self, _: &Context) -> Option<&dyn CharMapper> {
-        None
-    }
-
-    #[inline(always)]
-    fn into_dyn_char_mapper(
-        self: std::sync::Arc<Self>,
-        _: &Context,
-    ) -> Option<std::sync::Arc<dyn CharMapper>> {
-        None
     }
 }
 

@@ -69,6 +69,14 @@ impl Stage for Transliterate {
             None
         }
     }
+
+    fn try_dynamic_iter<'a>(
+        &self,
+        text: &'a str,
+        ctx: &'a Context,
+    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+        Some(Box::new(TransliterateIter::new(text, ctx)))
+    }
 }
 
 impl CharMapper for Transliterate {

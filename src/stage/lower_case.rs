@@ -80,6 +80,14 @@ impl Stage for LowerCase {
     fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
         Some(self)
     }
+
+    fn try_dynamic_iter<'a>(
+        &self,
+        text: &'a str,
+        ctx: &'a Context,
+    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+        Some(Box::new(LowercaseIter::new(text, ctx)))
+    }
 }
 
 impl StageIter for LowerCase {

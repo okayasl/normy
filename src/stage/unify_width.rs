@@ -35,9 +35,9 @@ impl Stage for UnifyWidth {
         Ok(text.chars().any(is_fullwidth))
     }
 
-    fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         // We are here → full-width chars exist → allocate once, convert perfectly
-        Ok(Cow::Owned(UnifyWidthIter::new(&text, ctx).collect()))
+        Ok(Cow::Owned(UnifyWidthIter::new(&text).collect()))
     }
 
     #[inline]
@@ -48,6 +48,14 @@ impl Stage for UnifyWidth {
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
         Some(self)
+    }
+
+    fn try_dynamic_iter<'a>(
+        &self,
+        text: &'a str,
+        _ctx: &'a Context,
+    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+        Some(Box::new(UnifyWidthIter::new(text)))
     }
 }
 
@@ -61,9 +69,9 @@ impl CharMapper for UnifyWidth {
     fn bind<'a>(
         &self,
         text: &'a str,
-        ctx: &'a Context,
+        _ctx: &'a Context,
     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(UnifyWidthIter::new(text, ctx))
+        Box::new(UnifyWidthIter::new(text))
     }
 }
 
@@ -71,8 +79,8 @@ impl StageIter for UnifyWidth {
     type Iter<'a> = UnifyWidthIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(UnifyWidthIter::new(text, ctx))
+    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        Some(UnifyWidthIter::new(text))
     }
 }
 
@@ -83,7 +91,7 @@ pub struct UnifyWidthIter<'a> {
 
 impl<'a> UnifyWidthIter<'a> {
     #[inline(always)]
-    pub fn new(text: &'a str, _ctx: &'a Context) -> Self {
+    pub fn new(text: &'a str) -> Self {
         Self {
             chars: text.chars(),
         }

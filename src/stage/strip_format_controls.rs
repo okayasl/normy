@@ -38,11 +38,9 @@ impl Stage for StripFormatControls {
         Ok(contains_format_controls(text))
     }
 
-    fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+    fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         // We are here → format controls exist → allocate once, filter perfectly
-        Ok(Cow::Owned(
-            StripFormatControlsIter::new(&text, ctx).collect(),
-        ))
+        Ok(Cow::Owned(StripFormatControlsIter::new(&text).collect()))
     }
 
     #[inline]
@@ -53,6 +51,14 @@ impl Stage for StripFormatControls {
     #[inline]
     fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
         Some(self)
+    }
+
+    fn try_dynamic_iter<'a>(
+        &self,
+        text: &'a str,
+        _ctx: &'a Context,
+    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+        Some(Box::new(StripFormatControlsIter::new(text)))
     }
 }
 
@@ -66,9 +72,9 @@ impl CharMapper for StripFormatControls {
     fn bind<'a>(
         &self,
         text: &'a str,
-        ctx: &'a Context,
+        _ctx: &'a Context,
     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(StripFormatControlsIter::new(text, ctx))
+        Box::new(StripFormatControlsIter::new(text))
     }
 }
 
@@ -76,8 +82,8 @@ impl StageIter for StripFormatControls {
     type Iter<'a> = StripFormatControlsIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(StripFormatControlsIter::new(text, ctx))
+    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        Some(StripFormatControlsIter::new(text))
     }
 }
 
@@ -87,7 +93,7 @@ pub struct StripFormatControlsIter<'a> {
 
 impl<'a> StripFormatControlsIter<'a> {
     #[inline(always)]
-    pub fn new(text: &'a str, _ctx: &'a Context) -> Self {
+    pub fn new(text: &'a str) -> Self {
         Self {
             chars: text.chars(),
         }

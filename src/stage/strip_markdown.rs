@@ -1,11 +1,11 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use std::{borrow::Cow, iter::Empty, sync::Arc};
+use std::{borrow::Cow, iter::Empty};
 
 /// Fast pre-scan: checks for common Markdown indicators.
 /// If none appear, we skip the parser entirely.
@@ -185,16 +185,6 @@ impl Stage for StripMarkdown {
         } else {
             Ok(Cow::Owned(out))
         }
-    }
-
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        None
-    }
-
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        None
     }
 }
 

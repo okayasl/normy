@@ -121,6 +121,21 @@ impl Stage for CaseFold {
             None
         }
     }
+
+    fn try_dynamic_iter<'a>(
+        &self,
+        text: &'a str,
+        ctx: &'a Context,
+    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
+            // Only proceed if we are in the guaranteed 1:1 path.
+            Some(Box::new(CaseFoldIter::new(text, ctx)))
+        } else {
+            // If the language requires expansion (ß->ss) or peek-ahead (IJ->ij),
+            // we MUST fall back to the Stage::apply method.
+            None
+        }
+    }
 }
 
 fn apply_with_peek_ahead<'a>(

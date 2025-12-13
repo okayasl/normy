@@ -80,16 +80,16 @@ impl Process for DynamicProcess {
         ctx: &Context,
     ) -> Result<Cow<'a, str>, StageError> {
         for stage in &self.stages {
-            let needs_apply = stage.needs_apply(&text, ctx)?;
-            if needs_apply {
-                text = match stage.clone().into_dyn_char_mapper(ctx) {
-                    Some(mapper) => {
-                        let mut out = String::with_capacity(text.len());
-                        out.extend(mapper.bind(&text, ctx));
-                        Cow::Owned(out)
-                    }
-                    None => stage.apply(text, ctx)?,
-                };
+            if !stage.needs_apply(&text, ctx)? {
+                continue;
+            }
+            if stage.try_dynamic_iter(&text, ctx).is_some() {
+                let iter = stage.try_dynamic_iter(&text, ctx).unwrap();
+                let mut out = String::with_capacity(text.len());
+                out.extend(iter);
+                text = Cow::Owned(out);
+            } else {
+                text = stage.apply(text, ctx)?;
             }
         }
         Ok(text)
