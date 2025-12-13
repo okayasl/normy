@@ -302,9 +302,7 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn find_transliterate_map(&self, c: char) -> Option<&'static FoldMap> {
-        self.transliterate_map // Transliterate uses the FoldMap struct
-            .iter()
-            .find(|m| m.from == c)
+        self.transliterate_map.iter().find(|m| m.from == c)
     }
 
     // ============================================================
@@ -339,8 +337,8 @@ impl LangEntry {
     pub fn apply_pre_composed_to_base_map(&self, c: char) -> Option<char> {
         self.pre_composed_to_base_map
             .iter()
-            .find(|&&PreComposedToBaseMap { from, .. }| from == c)
-            .map(|&PreComposedToBaseMap { to, .. }| to)
+            .find(|m| m.from == c)
+            .map(|m| m.to)
     }
 
     /// Check if a two-character sequence needs special handling.

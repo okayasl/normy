@@ -140,10 +140,10 @@ impl<'a> Iterator for RemoveDiacriticsIter<'a> {
             if let Some(base) = self.lang.apply_pre_composed_to_base_map(c) {
                 return Some(base);
             }
-            if !self.lang.is_spacing_diacritic(c) {
-                return Some(c);
+            if self.lang.is_spacing_diacritic(c) {
+                continue;
             }
-            // else skip diacritic and continue
+            return Some(c);
         }
     }
 }

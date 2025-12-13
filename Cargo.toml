@@ -57,7 +57,7 @@ harness = false
 [[bench]]
 name = "calb"
 path = "benches/comparison_accent_lowercase_bench.rs"
-harness = true
+harness = false
 
 [[bench]]
 name = "lb"

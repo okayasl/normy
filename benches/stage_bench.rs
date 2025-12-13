@@ -30,8 +30,8 @@ const SAMPLES: &[(&str, Lang)] = &[
     ("한글 ＫＯＲＥＡ", KOR),
     // 10. Greek    – final sigma + dialytika + tonos
     // ("ἈΡΧΙΜΉΔΗΣ ἙΛΛΆΣ", ELL),
-    // // 11. Russian  – Ё/ё + combining accents
-    // ("ЁЛКИ-ПАЛКИ А́ННА", RUS),
+    // 11. Russian  – Ё/ё + combining accents
+    ("ЁЛКИ-ПАЛКИ А́ННА", RUS),
     // // 12. Thai     – no spaces, tone marks, saraswati
     // ("ภาษาไทย ๓๔๕", THA),
     // // 13. Hebrew   – niqqud + final forms
@@ -126,9 +126,9 @@ where
 fn stage_matrix(c: &mut Criterion) {
     stage_benches_auto(c, "LowerCase", || LowerCase);
     stage_benches_auto(c, "CaseFold", || CaseFold);
-    // stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
-    // stage_benches_auto(c, "Transliterate", || Transliterate);
-    // stage_benches_auto(c, "SegmentWords", || SegmentWords);
+    stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
+    stage_benches_auto(c, "Transliterate", || Transliterate);
+    stage_benches_auto(c, "SegmentWords", || SegmentWords);
     // stage_benches_auto(c, "UnifyWidth", || UnifyWidth);
     // stage_benches_auto(c, "NFC", || NFC);
     // stage_benches_auto(c, "NFD", || NFD);

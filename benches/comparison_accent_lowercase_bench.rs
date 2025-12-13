@@ -1,8 +1,7 @@
 // benches/comparison_accent_lowercase_bench.rs
-// Benchmark comparing:
-// 1. Normy: RemoveDiacritics + LowerCase (locale-aware)
-// 2. tokenizers: Sequence(StripAccents + Lowercase)
-// 3. unidecode-rs: unidecode() + .to_lowercase()
+// Benchmark comparing SEMANTICALLY EQUIVALENT normalizers:
+// 1. German (DEU): Normy CaseFold vs unidecode+lowercase (both do ß→ss)
+// 2. French (FRA): Normy LowerCase+Transliterate vs tokenizers StripAccents+Lowercase
 #![deny(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
@@ -13,25 +12,16 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::borrow::Cow;
 use std::hint::black_box;
 use std::sync::LazyLock;
+use std::time::Duration;
 
-use normy::{CaseFold, DEU, ENG, FRA, LowerCase, Normy, RemoveDiacritics, Transliterate, VIE};
+use normy::{CaseFold, DEU, FRA, LowerCase, Normy, Transliterate};
 use tokenizers::normalizers::{Lowercase, Sequence, StripAccents};
 use tokenizers::{NormalizedString, Normalizer, NormalizerWrapper};
 use unidecode::unidecode;
 
-type CaseFoldPipeline = Normy<
-    normy::process::ChainedProcess<
-        CaseFold, normy::process::EmptyProcess>,
->;
-
-
-static NORMY_DEU_PIPELINE: LazyLock<CaseFoldPipeline> = LazyLock::new(|| {
-    Normy::builder()
-        .lang(DEU)
-        .add_stage(CaseFold)
-        .build()
-});
-
+// ── Normy pipelines ──
+type CaseFoldPipeline =
+    Normy<normy::process::ChainedProcess<CaseFold, normy::process::EmptyProcess>>;
 
 type LowercaseTransliteratePipeline = Normy<
     normy::process::ChainedProcess<
@@ -40,6 +30,8 @@ type LowercaseTransliteratePipeline = Normy<
     >,
 >;
 
+static NORMY_DEU_PIPELINE: LazyLock<CaseFoldPipeline> =
+    LazyLock::new(|| Normy::builder().lang(DEU).add_stage(CaseFold).build());
 
 static NORMY_FRA_PIPELINE: LazyLock<LowercaseTransliteratePipeline> = LazyLock::new(|| {
     Normy::builder()
@@ -47,45 +39,6 @@ static NORMY_FRA_PIPELINE: LazyLock<LowercaseTransliteratePipeline> = LazyLock::
         .add_stage(LowerCase)
         .add_stage(Transliterate)
         .build()
-});
-
-
-// ── Type aliases ──
-type AccentLowerPipeline = Normy<
-    normy::process::ChainedProcess<
-        LowerCase,
-        normy::process::ChainedProcess<RemoveDiacritics, normy::process::EmptyProcess>,
-    >,
->;
-
-// ── Normy pipelines (locale-aware) ──
-static NORMY_PIPELINES: LazyLock<[(&str, AccentLowerPipeline); 3]> = LazyLock::new(|| {
-    [
-        (
-            "ENG",
-            Normy::builder()
-                .lang(ENG)
-                .add_stage(RemoveDiacritics)
-                .add_stage(LowerCase)
-                .build(),
-        ),
-        (
-            "FRA",
-            Normy::builder()
-                .lang(FRA)
-                .add_stage(RemoveDiacritics)
-                .add_stage(LowerCase)
-                .build(),
-        ),
-        (
-            "VIE",
-            Normy::builder()
-                .lang(VIE)
-                .add_stage(RemoveDiacritics)
-                .add_stage(LowerCase)
-                .build(),
-        ),
-    ]
 });
 
 // ── Baseline normalizers ──
@@ -97,15 +50,48 @@ static HF_NORMALIZER: LazyLock<Sequence> = LazyLock::new(|| {
 });
 
 // ── Corpus generators ──
-fn corpus_accent_heavy(seed: u64, kb: usize) -> String {
+fn corpus_german(seed: u64, kb: usize) -> String {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut out = String::with_capacity(kb * 1024);
-    let pool = &[
-        " naïve café résumé déjà-vu éléphant François ",
-        " Việt Nam Phở Tiếng Việt đắt đỏ ",
-        " İstanbul ğüş öş İıŞş ",
-        " Größe Straße fußball Maßstab ßẞ ÄÖÜäöü ",
-    ];
+
+    // German words with ß but NO Ö/Ü/Ä (unidecode strips those)
+    let pool = german_pool();
+
+    while out.len() < kb * 1024 {
+        out.push_str(pool[rng.random_range(0..pool.len())]);
+        if rng.random_bool(0.1) {
+            out.push_str(" TEST ");
+        }
+    }
+    truncate_to_boundary(&mut out, kb * 1024);
+    out
+}
+
+fn german_pool() -> &'static [&'static str; 5] {
+    (&[
+        " Fußball Maßstab Straße ",
+        " ßẞ GROß ",
+        " Spaß Gruß muß ",
+        " heißen weißer ",
+        " HELLO WORLD TEST ",
+    ]) as _
+}
+
+fn french_pool() -> &'static [&'static str; 5] {
+    (&[
+        " NAïve CAFé Résumé ",
+        " Déjà-vu éléphant ",
+        " être protégé crème ",
+        " élève âme ",
+        " HELLO WORLD TEST ", // some ASCII
+    ]) as _
+}
+
+fn corpus_french(seed: u64, kb: usize) -> String {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut out = String::with_capacity(kb * 1024);
+
+    let pool = french_pool();
 
     while out.len() < kb * 1024 {
         out.push_str(pool[rng.random_range(0..pool.len())]);
@@ -141,15 +127,57 @@ fn truncate_to_boundary(s: &mut String, max: usize) {
     }
 }
 
-static CORPUS_ACCENT: LazyLock<String> = LazyLock::new(|| corpus_accent_heavy(0x517ee, 64));
-static CORPUS_NORM: LazyLock<String> = LazyLock::new(|| corpus_already_normalized(0x1a7fe, 64));
+static CORPUS_GERMAN: LazyLock<String> = LazyLock::new(|| corpus_german(0x517ee, 64));
+static CORPUS_FRENCH: LazyLock<String> = LazyLock::new(|| corpus_french(0x1a7fe, 64));
+static CORPUS_NORMALIZED: LazyLock<String> =
+    LazyLock::new(|| corpus_already_normalized(0x2beef, 64));
 
-// ── Unified benchmark function ──
+// ── Benchmark functions ──
 #[allow(clippy::cast_precision_loss)]
-fn bench_normy_locale(
+fn bench_normy_deu(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    locale: &str,
-    pipeline: &AccentLowerPipeline,
+    scenario: &str,
+    corpus: &str,
+) {
+    let mut zero_copy_hits = 0usize;
+    let mut total = 0usize;
+
+    group.bench_function(BenchmarkId::new("Normy (DEU CaseFold)", scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_DEU_PIPELINE.normalize(black_box(corpus)).unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        });
+    });
+
+    let pct = if total > 0 {
+        (zero_copy_hits as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    println!("  Normy DEU - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
+}
+
+fn bench_unidecode_deu(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    scenario: &str,
+    corpus: &str,
+) {
+    group.bench_function(BenchmarkId::new("unidecode+lowercase", scenario), |b| {
+        b.iter(|| {
+            let result = unidecode(black_box(corpus)).to_lowercase();
+            black_box(result);
+        });
+    });
+    println!("  unidecode   - {scenario:25}: always allocates (0% zero-copy)");
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn bench_normy_fra(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     scenario: &str,
     corpus: &str,
 ) {
@@ -157,11 +185,11 @@ fn bench_normy_locale(
     let mut total = 0usize;
 
     group.bench_function(
-        BenchmarkId::new(format!("Normy ({locale})"), scenario),
+        BenchmarkId::new("Normy (FRA LowerCase+Transliterate)", scenario),
         |b| {
             b.iter(|| {
                 total += 1;
-                let result = pipeline.normalize(black_box(corpus)).unwrap();
+                let result = NORMY_FRA_PIPELINE.normalize(black_box(corpus)).unwrap();
                 if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
                     zero_copy_hits += 1;
                 }
@@ -175,12 +203,10 @@ fn bench_normy_locale(
     } else {
         0.0
     };
-    println!(
-        "  Normy {locale:3} - {scenario:30}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
-    );
+    println!("  Normy FRA - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
 }
 
-fn bench_tokenizers(
+fn bench_tokenizers_fra(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     scenario: &str,
     corpus: &str,
@@ -195,254 +221,175 @@ fn bench_tokenizers(
             });
         },
     );
-    println!("  tokenizers  - {scenario:30}: always allocates (0% zero-copy)");
-}
-
-fn bench_unidecode(
-    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    scenario: &str,
-    corpus: &str,
-) {
-    group.bench_function(BenchmarkId::new("unidecode+lowercase", scenario), |b| {
-        b.iter(|| {
-            let result = unidecode(black_box(corpus)).to_lowercase();
-            black_box(result);
-        });
-    });
-    println!("  unidecode   - {scenario:30}: always allocates (0% zero-copy)");
+    println!("  tokenizers  - {scenario:25}: always allocates (0% zero-copy)");
 }
 
 // ── Main benchmark ──
-fn bench_accent_lowercase_normalizers(c: &mut Criterion) {
-    let mut group = c.benchmark_group("Accent+Lowercase");
+fn bench_german_normalizers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("German (DEU) - CaseFold");
     group.throughput(Throughput::Bytes(64 * 1024));
     group.sample_size(200);
-    group.measurement_time(std::time::Duration::from_secs(12));
+    group.measurement_time(std::time::Duration::from_secs(10));
 
     let scenarios = [
-        ("accent_heavy", &*CORPUS_ACCENT),
-        ("already_normalized", &*CORPUS_NORM),
+        ("german_with_eszett", &*CORPUS_GERMAN),
+        ("already_normalized", &*CORPUS_NORMALIZED),
     ];
 
     for (scenario, corpus) in scenarios {
-        println!("\n[{scenario}]");
-
-        for (locale, pipeline) in NORMY_PIPELINES.iter() {
-            bench_normy_locale(&mut group, locale, pipeline, scenario, corpus);
-        }
-
-        bench_tokenizers(&mut group, scenario, corpus);
-        bench_unidecode(&mut group, scenario, corpus);
+        println!("\n[German: {scenario}]");
+        bench_normy_deu(&mut group, scenario, corpus);
+        bench_unidecode_deu(&mut group, scenario, corpus);
     }
 
     group.finish();
 }
 
-criterion_group!(benches, bench_accent_lowercase_normalizers);
+fn bench_french_normalizers(c: &mut Criterion) {
+    let mut group = c.benchmark_group("French (FRA) - Transliterate+LowerCase");
+    group.throughput(Throughput::Bytes(64 * 1024));
+    group.sample_size(200);
+    group.measurement_time(Duration::from_secs(10));
+
+    let scenarios = [
+        ("french_with_accents", &*CORPUS_FRENCH),
+        ("already_normalized", &*CORPUS_NORMALIZED),
+    ];
+
+    for (scenario, corpus) in scenarios {
+        println!("\n[French: {scenario}]");
+        bench_normy_fra(&mut group, scenario, corpus);
+        bench_tokenizers_fra(&mut group, scenario, corpus);
+    }
+
+    group.finish();
+}
+
+criterion_group!(benches, bench_german_normalizers, bench_french_normalizers);
 criterion_main!(benches);
 
-// ── TESTS: Run these BEFORE benchmarks ──
+// ── TESTS: Verify semantic equivalence BEFORE benchmarking ──
 #[cfg(test)]
 mod tests {
+    use crate::{
+        CORPUS_FRENCH, CORPUS_GERMAN, CORPUS_NORMALIZED, HF_NORMALIZER, NORMY_DEU_PIPELINE,
+        NORMY_FRA_PIPELINE, french_pool, german_pool,
+    };
     use std::borrow::Cow;
-
     use tokenizers::{NormalizedString, Normalizer};
-
-    use crate::{HF_NORMALIZER, NORMY_DEU_PIPELINE, NORMY_FRA_PIPELINE, NORMY_PIPELINES};
     use unidecode::unidecode;
 
     #[test]
-    fn test_semantic_equivalence_with_tokenizers() {
-        let test_cases = &[
-            ("French", " naïve café résumé déjà-vu éléphant François "),
-            ("Vietnamese", " Việt Nam Phở Tiếng Việt đắt đỏ "),
-            ("German", " Größe Straße fußball Maßstab ßẞ ÄÖÜäöü "),
-            ("Already normalized", " hello world test "),
-            ("Empty", ""),
-        ];
-
-        for (name, input) in test_cases {
-            // Normy ENG (should match tokenizers for non-locale-specific cases)
-            let normy_result = NORMY_PIPELINES[0].1.normalize(input).unwrap().into_owned();
-
-            // tokenizers baseline
-            let mut ns = NormalizedString::from(*input);
-            HF_NORMALIZER.normalize(&mut ns).unwrap();
-            let hf_result = ns.get().to_string();
+    fn test_german_vs_unidecode_semantic_equivalence() {
+        for input in german_pool() {
+            let normy_result = NORMY_DEU_PIPELINE.normalize(input).unwrap();
+            let unidecode_result = unidecode(input).to_lowercase();
 
             assert_eq!(
-                normy_result, hf_result,
-                "Mismatch for {name}: {input:?}\nNormy: {normy_result:?}\ntokenizers: {hf_result:?}"
-            );
-        }
-    }
-
-
-    #[test]
-    fn test_zero_copy_on_normalized_input() {
-        let already_normalized = "hello world this is lowercase ascii";
-
-        for (locale, pipeline) in NORMY_PIPELINES.iter() {
-            let result = pipeline.normalize(already_normalized).unwrap();
-
-            assert!(
-                matches!(result, Cow::Borrowed(s) if s.as_ptr() == already_normalized.as_ptr()),
-                "Zero-copy failed for {locale} on already-normalized input"
+                normy_result.as_ref(),
+                unidecode_result,
+                "\n❌ SEMANTIC MISMATCH on German input: {input:?}\n\
+                 Normy (DEU):  {normy_result:?}\n\
+                 unidecode:    {unidecode_result:?}\n"
             );
         }
     }
 
     #[test]
-    fn test_unidecode_equalities() {
-        // unidecode is more aggressive (e.g., ß -> ss, not just accent removal)
-        let input = " FUßball Maßstab ßẞ";
+    fn test_french_vs_tokenizers_semantic_equivalence() {
+        for input in french_pool() {
+            let normy_result = NORMY_FRA_PIPELINE.normalize(input).unwrap();
 
-        let normy_result: Cow<'_, str> = NORMY_DEU_PIPELINE.normalize(input).unwrap();
-        let unidecode_result: String = unidecode(input).to_lowercase();
-
-        println!("Normy: {normy_result:?}");
-        println!("unidecode: {unidecode_result:?}");
-
-        assert_eq!(normy_result.as_ref(), unidecode_result);
-    }
-
-    #[test]
-    fn hf_equalities() {
-        // unidecode is more aggressive (e.g., ß -> ss, not just accent removal)
-        let input = " naïve café résumé déjà-vu éléphant ";
-
-        let normy_result: Cow<'_, str> = NORMY_FRA_PIPELINE.normalize(input).unwrap();
-        let mut ns = NormalizedString::from(input);
-        HF_NORMALIZER.normalize(&mut ns).unwrap();
-
-        println!("Normy: {normy_result:?}");
-        println!("HF normalizer: {}",ns.get());
-
-        assert_eq!(normy_result.as_ref(), ns.get());
-    }
-
-    /// Test that Normy produces IDENTICAL output to tokenizers for all locales
-    /// on non-locale-specific inputs
-    #[test]
-    fn test_all_locales_match_tokenizers_on_standard_input() {
-        // These inputs should produce identical results across all locales
-        // and must match tokenizers exactly
-        let test_cases = &[
-            " naïve café résumé déjà-vu éléphant François ",
-            " Việt Nam Phở Tiếng Việt đắt đỏ ",
-            " Größe Straße fußball Maßstab ßẞ ÄÖÜäöü ",
-            " hello world test ",
-            "",
-            "HELLO WORLD",
-            "123 abc ABC",
-        ];
-
-        for input in test_cases {
-            // Get tokenizers baseline
             let mut ns = NormalizedString::from(*input);
             HF_NORMALIZER.normalize(&mut ns).unwrap();
-            let expected = ns.get();
+            let hf_result = ns.get();
 
-            // ALL Normy locales MUST produce identical output to tokenizers
-            for (locale, pipeline) in NORMY_PIPELINES.iter() {
-                let normy_result = pipeline.normalize(input).unwrap();
-
-                assert_eq!(
-                    normy_result.as_ref(),
-                    expected,
-                    "\n❌ SEMANTIC MISMATCH for locale {locale} on input: {input:?}\n\
-                     Normy ({locale}): {normy_result:?}\n\
-                     tokenizers:     {expected:?}\n\
-                     \n⚠️  This means benchmark comparisons are INVALID!"
-                );
-            }
+            assert_eq!(
+                normy_result.as_ref(),
+                hf_result,
+                "\n❌ SEMANTIC MISMATCH on French input: {input:?}\n\
+                 Normy (FRA):  {normy_result:?}\n\
+                 tokenizers:   {hf_result:?}\n"
+            );
         }
     }
 
-    /// Verify Turkish locale handles İ/I correctly (even if different from tokenizers)
     #[test]
-    fn test_turkish_locale_handles_dotted_i() {
-        let input = "İSTANBUL";
+    fn test_german_corpus_semantic_correctness() {
+        let normy_result = NORMY_DEU_PIPELINE.normalize(&CORPUS_GERMAN).unwrap();
+        let unidecode_result = unidecode(&CORPUS_GERMAN).to_lowercase();
 
-        let tur_result = NORMY_PIPELINES[2].1.normalize(input).unwrap();
+        assert_eq!(
+            normy_result.len(),
+            unidecode_result.len(),
+            "❌ Length mismatch on German corpus"
+        );
 
-        // Turkish should lowercase İ → i (dotted)
-        // Check against tokenizers to see if behavior matches
-        let mut ns = NormalizedString::from(input);
-        HF_NORMALIZER.normalize(&mut ns).unwrap();
-        let hf_result = ns.get();
-
-        println!("Turkish input: {input:?}");
-        println!("  Normy (TUR): {tur_result:?}");
-        println!("  tokenizers:  {hf_result:?}");
-
-        // If they differ, document it but ensure Turkish at least processes correctly
-        if tur_result.as_ref() != hf_result {
-            eprintln!("\n⚠️  WARNING: Turkish locale produces different output than tokenizers");
-            eprintln!("   This is expected IF Normy implements Turkish-specific İ/i rules");
-            eprintln!(
-                "   If this is intentional, remove Turkish from benchmarks or document divergence\n"
-            );
-        }
-
-        // At minimum, verify it's not empty and contains lowercase
-        assert!(!tur_result.is_empty());
-        assert!(
-            tur_result
-                .chars()
-                .all(|c| !c.is_uppercase() || !c.is_alphabetic())
+        // Sample check first 500 chars
+        let sample_len = 500.min(normy_result.len());
+        assert_eq!(
+            &normy_result.as_ref()[..sample_len],
+            &unidecode_result[..sample_len],
+            "❌ Content mismatch on German corpus (first 500 chars)"
         );
     }
 
-    /// Verify zero-copy optimization works for already-normalized text
+    #[test]
+    fn test_french_corpus_semantic_correctness() {
+        let normy_result = NORMY_FRA_PIPELINE.normalize(&CORPUS_FRENCH).unwrap();
+
+        let mut ns = NormalizedString::from(CORPUS_FRENCH.as_str());
+        HF_NORMALIZER.normalize(&mut ns).unwrap();
+        let hf_result = ns.get();
+
+        assert_eq!(
+            normy_result.len(),
+            hf_result.len(),
+            "❌ Length mismatch on French corpus"
+        );
+
+        // Sample check first 500 chars
+        let sample_len = 500.min(normy_result.len());
+        assert_eq!(
+            &normy_result.as_ref()[..sample_len],
+            &hf_result[..sample_len],
+            "❌ Content mismatch on French corpus (first 500 chars)"
+        );
+    }
+
     #[test]
     fn test_zero_copy_on_already_normalized() {
         let already_normalized = "hello world this is lowercase ascii";
 
-        for (locale, pipeline) in NORMY_PIPELINES.iter() {
-            let result = pipeline.normalize(already_normalized).unwrap();
+        // German
+        let result = NORMY_DEU_PIPELINE.normalize(already_normalized).unwrap();
+        assert!(
+            matches!(result, Cow::Borrowed(s) if s.as_ptr() == already_normalized.as_ptr()),
+            "❌ Zero-copy FAILED for German on already-normalized input"
+        );
 
-            assert!(
-                matches!(result, Cow::Borrowed(s) if s.as_ptr() == already_normalized.as_ptr()),
-                "❌ Zero-copy FAILED for {locale} on already-normalized input\n\
-                 This should return Cow::Borrowed pointing to original string"
-            );
-        }
+        // French
+        let result = NORMY_FRA_PIPELINE.normalize(already_normalized).unwrap();
+        assert!(
+            matches!(result, Cow::Borrowed(s) if s.as_ptr() == already_normalized.as_ptr()),
+            "❌ Zero-copy FAILED for French on already-normalized input"
+        );
     }
 
-    /// Verify that all test cases in the benchmark corpus are handled correctly
     #[test]
-    fn test_benchmark_corpus_semantic_correctness() {
-        use crate::{CORPUS_ACCENT, CORPUS_NORM};
+    fn test_normalized_corpus_zero_copy() {
+        // German
+        let result = NORMY_DEU_PIPELINE.normalize(&CORPUS_NORMALIZED).unwrap();
+        assert!(
+            matches!(result, Cow::Borrowed(s) if s.as_ptr() == CORPUS_NORMALIZED.as_ptr()),
+            "❌ Zero-copy FAILED for German on normalized corpus"
+        );
 
-        for (name, corpus) in [
-            ("accent_heavy", &*CORPUS_ACCENT),
-            ("already_normalized", &*CORPUS_NORM),
-        ] {
-            // Get tokenizers baseline
-            let mut ns = NormalizedString::from(corpus.as_str());
-            HF_NORMALIZER.normalize(&mut ns).unwrap();
-            let expected = ns.get();
-
-            // Verify ALL locales match tokenizers on benchmark corpus
-            for (locale, pipeline) in NORMY_PIPELINES.iter() {
-                let normy_result = pipeline.normalize(corpus).unwrap();
-
-                // For large corpus, just check lengths and sample
-                assert_eq!(
-                    normy_result.len(),
-                    expected.len(),
-                    "❌ Length mismatch for {locale} on {name} corpus"
-                );
-
-                // Check first 200 chars
-                let sample_len = 200.min(expected.len());
-                assert_eq!(
-                    &normy_result.as_ref()[..sample_len],
-                    &expected[..sample_len],
-                    "❌ Content mismatch for {locale} on {name} corpus (first 200 chars)"
-                );
-            }
-        }
+        // French
+        let result = NORMY_FRA_PIPELINE.normalize(&CORPUS_NORMALIZED).unwrap();
+        assert!(
+            matches!(result, Cow::Borrowed(s) if s.as_ptr() == CORPUS_NORMALIZED.as_ptr()),
+            "❌ Zero-copy FAILED for French on normalized corpus"
+        );
     }
 }
