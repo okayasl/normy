@@ -50,8 +50,13 @@ path = "benches/comparison_normalization_bench.rs"
 harness = false
 
 [[bench]]
-name = "cpb"
-path = "benches/comparison_pipeline_bench.rs"
+name = "cbpb"
+path = "benches/comparison_bert_pipeline_bench.rs"
+harness = false
+
+[[bench]]
+name = "calb"
+path = "benches/comparison_accent_lowercase_bench.rs"
 harness = false
 
 [[bench]]

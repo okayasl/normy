@@ -108,7 +108,7 @@ fn is_chinese_char(c: char) -> bool {
 // ──────────────────────────────────────────────────────────────
 // Concrete pipeline type – no `impl Trait` in static!
 // ──────────────────────────────────────────────────────────────
-type BertPipeline = Normy<
+type NormyBertLikePipeline = Normy<
     normy::process::ChainedProcess<
         LowerCase,
         normy::process::ChainedProcess<
@@ -133,7 +133,7 @@ type BertPipeline = Normy<
     >,
 >;
 
-static NORMY_BERT: LazyLock<BertPipeline> = LazyLock::new(|| {
+static NORMY_BERT: LazyLock<NormyBertLikePipeline> = LazyLock::new(|| {
     Normy::builder()
         .lang(ZHO)
         .modify_lang(|entry| {
