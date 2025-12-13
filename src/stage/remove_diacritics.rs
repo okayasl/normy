@@ -76,7 +76,7 @@ impl Stage for RemoveDiacritics {
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let mut out = String::with_capacity(text.len());
         for c in text.chars() {
-            if let Some(base) = ctx.lang_entry.apply_pre_composed_to_base_map(c) {
+            if let Some(base) = ctx.lang_entry.find_pre_composed_to_base_map(c) {
                 out.push(base);
             } else if !ctx.lang_entry.is_spacing_diacritic(c) {
                 out.push(c);
@@ -99,7 +99,7 @@ impl Stage for RemoveDiacritics {
 impl CharMapper for RemoveDiacritics {
     #[inline(always)]
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        if let Some(base) = ctx.lang_entry.apply_pre_composed_to_base_map(c) {
+        if let Some(base) = ctx.lang_entry.find_pre_composed_to_base_map(c) {
             Some(base)
         } else if ctx.lang_entry.is_spacing_diacritic(c) {
             None
@@ -137,7 +137,7 @@ impl<'a> Iterator for RemoveDiacriticsIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let c = self.chars.next()?;
-            if let Some(base) = self.lang.apply_pre_composed_to_base_map(c) {
+            if let Some(base) = self.lang.find_pre_composed_to_base_map(c) {
                 return Some(base);
             }
             if self.lang.is_spacing_diacritic(c) {

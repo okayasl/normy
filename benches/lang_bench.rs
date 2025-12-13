@@ -46,17 +46,14 @@ mod current {
 
     #[inline(always)]
     pub fn apply_case_fold(entry: &LangEntry, c: char) -> Option<char> {
-        // if !self.has_case_map && !self.has_fold_map {
-        //     return c.to_lowercase().next();
-        // }
-        if let Some(m) = entry.fold_map().iter().find(|m| m.from == c) {
+        if let Some((_, to)) = entry.fold_map().iter().find(|(from, _)| *from == c) {
             if entry.has_one_to_one_folds() {
-                Some(m.to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
+                Some(to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
             } else {
                 None
             }
-        } else if let Some(m) = entry.case_map().iter().find(|m| m.from == c) {
-            Some(m.to)
+        } else if let Some((_, to)) = entry.case_map().iter().find(|(from, _)| *from == c) {
+            Some(*to)
         } else {
             c.to_lowercase().next()
         }
@@ -71,14 +68,15 @@ mod new {
         if !entry.has_case_map() && !entry.has_fold_map() {
             return c.to_lowercase().next();
         }
-        if let Some(m) = entry.fold_map().iter().find(|m| m.from == c) {
+
+        if let Some((_, to)) = entry.fold_map().iter().find(|(from, _)| *from == c) {
             if entry.has_one_to_one_folds() {
-                Some(m.to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
+                Some(to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
             } else {
                 None
             }
-        } else if let Some(m) = entry.case_map().iter().find(|m| m.from == c) {
-            Some(m.to)
+        } else if let Some((_, to)) = entry.case_map().iter().find(|(from, _)| *from == c) {
+            Some(*to)
         } else {
             c.to_lowercase().next()
         }

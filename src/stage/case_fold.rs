@@ -82,14 +82,14 @@ impl Stage for CaseFold {
 
         for c in text.chars() {
             // Check fold_map first (language-specific multi-char expansions, e.g., German ß→ss)
-            if let Some(m) = ctx.lang_entry.find_fold_map(c) {
-                out.push_str(m.to);
+            if let Some(to) = ctx.lang_entry.find_fold_map(c) {
+                out.push_str(to);
                 continue;
             }
 
             // Check case_map (language-specific 1:1 mappings, e.g., Turkish İ→i)
-            if let Some(m) = ctx.lang_entry.find_case_map(c) {
-                out.push(m.to);
+            if let Some(to) = ctx.lang_entry.find_case_map(c) {
+                out.push(to);
                 continue;
             }
 
@@ -145,14 +145,14 @@ fn apply_with_peek_ahead<'a>(
         }
 
         // 2. Check fold_map for multi-char expansions
-        if let Some(m) = ctx.lang_entry.find_fold_map(c) {
-            out.push_str(m.to);
+        if let Some(to) = ctx.lang_entry.find_fold_map(c) {
+            out.push_str(to);
             continue;
         }
 
         // Check case_map (language-specific 1:1 mappings, e.g., Turkish İ→i)
-        if let Some(m) = ctx.lang_entry.find_case_map(c) {
-            out.push(m.to);
+        if let Some(to) = ctx.lang_entry.find_case_map(c) {
+            out.push(to);
             continue;
         }
 

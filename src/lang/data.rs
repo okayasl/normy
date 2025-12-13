@@ -1,4 +1,4 @@
-use crate::lang::{CaseMap, FoldMap, Lang, LangEntry, PeekPair, PreComposedToBaseMap, SegmentRule};
+use crate::lang::{Lang, LangEntry, SegmentRule};
 
 use paste::paste;
 use phf::{Map, phf_map};
@@ -22,7 +22,7 @@ macro_rules! define_languages {
     ),* $(,)?) => {
         $(
             #[doc = concat!(
-                "Language **", stringify!($code), "** — ", $name, "\n\n",
+                "Language **", stringify!($code), "** – ", $name, "\n\n",
                 "- **Case map:** [", stringify!($($cfrom => $cto),*), "]\n",
                 "- **Fold map:** [", stringify!($($ffrom => $fto),*), "]\n",
                 "- **Transliterate:** [", stringify!($($tfrom => $tto),*), "]\n",
@@ -44,20 +44,20 @@ macro_rules! define_languages {
 
                     pub static CODE: &str = $code_str;
 
-                    pub static CASE: &[CaseMap] = &[
-                        $(CaseMap { from: $cfrom, to: $cto }),*
+                    pub static CASE: &[(char, char)] = &[
+                        $(($cfrom, $cto)),*
                     ];
 
-                    pub static FOLD: &[FoldMap] = &[
-                        $(FoldMap { from: $ffrom, to: $fto }),*
+                    pub static FOLD: &[(char, &'static str)] = &[
+                        $(($ffrom, $fto)),*
                     ];
 
-                    pub static TRANSLITERATE: &[FoldMap] = &[
-                        $(FoldMap { from: $tfrom, to: $tto }),*
+                    pub static TRANSLITERATE: &[(char, &'static str)] = &[
+                        $(($tfrom, $tto)),*
                     ];
 
-                    pub static PRECOMPOSED_TO_BASE: &[PreComposedToBaseMap] = &[
-                        $(PreComposedToBaseMap { from: $sfrom, to: $sto }),*
+                    pub static PRECOMPOSED_TO_BASE: &[(char, char)] = &[
+                        $(($sfrom, $sto)),*
                     ];
 
                     pub static SPACING_DIACRITICS: &[char] = &[$($d),*];
@@ -65,14 +65,12 @@ macro_rules! define_languages {
                     pub const NEEDS_WORD_SEGMENTATION: bool = $needs_word_segmentation;
                     pub const REQUIRES_PEEK_AHEAD: bool = $requires_peek_ahead;
 
-                    // pub static CASE_CHAR_SLICE: &[char] = &[$($cfrom),*];          // ← NEW
-                    // pub static FOLD_CHAR_SLICE: &[char] = &[$($ffrom),*];
                     pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[$($tfrom),*];
                     pub static PRECOMPOSED_TO_BASE_CHAR_SLICE: &[char] = &[$($sfrom),*];
                     pub static SPACING_DIACRITICS_SLICE: &[char] = &[$($d),*];
 
-                    pub static PEEK_PAIRS: &[PeekPair] = &[
-                        $( PeekPair { a: $pa, b: $pb, to: $pto } ),*
+                    pub static PEEK_PAIRS: &[(char, char, &'static str)] = &[
+                        $( ($pa, $pb, $pto) ),*
                     ];
 
                     pub static SEGMENT_RULES: &[SegmentRule] = &[$($sr),*];
@@ -80,22 +78,22 @@ macro_rules! define_languages {
 
                     // === Precomputed Boolean Flags ===
                     pub const HAS_CASE_MAP: bool = {
-                        let arr: &[CaseMap] = &[$(CaseMap { from: $cfrom, to: $cto }),*];
+                        let arr: &[(char, char)] = &[$(($cfrom, $cto)),*];
                         !arr.is_empty()
                     };
 
                     pub const HAS_FOLD_MAP: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $ffrom, to: $fto }),*];
+                        let arr: &[(char, &'static str)] = &[$(($ffrom, $fto)),*];
                         !arr.is_empty()
                     };
 
                     pub const HAS_TRANSLITERATE_MAP: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $tfrom, to: $tto }),*];
+                        let arr: &[(char, &'static str)] = &[$(($tfrom, $tto)),*];
                         !arr.is_empty()
                     };
 
                     pub const HAS_PRECOMPOSED_TO_BASE_MAP: bool = {
-                        let arr: &[PreComposedToBaseMap] = &[$(PreComposedToBaseMap { from: $sfrom, to: $sto }),*];
+                        let arr: &[(char, char)] = &[$(($sfrom, $sto)),*];
                         !arr.is_empty()
                     };
 
@@ -105,7 +103,7 @@ macro_rules! define_languages {
                     };
 
                     pub const HAS_PEEK_PAIRS: bool = {
-                        let arr: &[PeekPair] = &[$( PeekPair { a: $pa, b: $pb, to: $pto } ),*];
+                        let arr: &[(char, char, &'static str)] = &[$( ($pa, $pb, $pto) ),*];
                         !arr.is_empty()
                     };
 
@@ -118,14 +116,14 @@ macro_rules! define_languages {
 
                     /// Check if all fold mappings are one-to-one (single char output)
                     pub const HAS_ONE_TO_ONE_FOLDS: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $ffrom, to: $fto }),*];
+                        let arr: &[(char, &'static str)] = &[$(($ffrom, $fto)),*];
                         if arr.is_empty() {
                             true
                         } else {
                             let mut all_one_to_one = true;
                             let mut i = 0;
                             while i < arr.len() {
-                                let to_str = arr[i].to;
+                                let to_str = arr[i].1;
                                 // Count UTF-8 characters in to_str
                                 let mut char_count = 0;
                                 let bytes = to_str.as_bytes();
@@ -156,14 +154,14 @@ macro_rules! define_languages {
 
                     /// Check if all transliterate mappings are one-to-one
                     pub const HAS_ONE_TO_ONE_TRANSLITERATE: bool = {
-                        let arr: &[FoldMap] = &[$(FoldMap { from: $tfrom, to: $tto }),*];
+                        let arr: &[(char, &'static str)] = &[$(($tfrom, $tto)),*];
                         if arr.is_empty() {
                             true
                         } else {
                             let mut all_one_to_one = true;
                             let mut i = 0;
                             while i < arr.len() {
-                                let to_str = arr[i].to;
+                                let to_str = arr[i].1;
                                 let mut char_count = 0;
                                 let bytes = to_str.as_bytes();
                                 let mut byte_idx = 0;
@@ -222,8 +220,6 @@ macro_rules! define_languages {
                         } else {
                             Some([<$code:lower _data>]::SPACING_DIACRITICS)
                         },
-                        // case_char_slice: [<$code:lower _data>]::CASE_CHAR_SLICE,
-                        // fold_char_slice: [<$code:lower _data>]::FOLD_CHAR_SLICE,
                         transliterate_char_slice: [<$code:lower _data>]::TRANSLITERATE_CHAR_SLICE,
                         pre_composed_to_base_char_slice: [<$code:lower _data>]::PRECOMPOSED_TO_BASE_CHAR_SLICE,
                         spacing_diacritics_slice: if [<$code:lower _data>]::SPACING_DIACRITICS_SLICE.is_empty() {
@@ -248,7 +244,7 @@ macro_rules! define_languages {
             }
         }
 
-        /// All supported languages — for testing and introspection
+        /// All supported languages – for testing and introspection
         pub const fn all_langs() -> &'static [Lang] {
             &[
                 $(

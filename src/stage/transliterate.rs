@@ -76,7 +76,7 @@ impl CharMapper for Transliterate {
     fn map(&self, c: char, ctx: &Context) -> Option<char> {
         ctx.lang_entry
             .find_transliterate_map(c)
-            .and_then(|m| m.to.chars().next())
+            .and_then(|to| to.chars().next())
             .or(Some(c))
     }
 
@@ -137,8 +137,7 @@ impl Iterator for TransliterateIter<'_> {
 
         let c = self.chars.next()?;
 
-        if let Some(mapping) = self.lang.find_transliterate_map(c) {
-            let to = mapping.to;
+        if let Some(to) = self.lang.find_transliterate_map(c) {
             if to.len() == 1 {
                 // Fast path: 1→1 — emit directly
                 return Some(to.chars().next().unwrap());

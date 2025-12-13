@@ -21,33 +21,6 @@ impl Lang {
 
 pub const DEFAULT_LANG: Lang = ENG;
 
-#[derive(Clone, Copy, Debug)]
-pub struct CaseMap {
-    pub from: char,
-    pub to: char,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct FoldMap {
-    pub from: char,
-    pub to: &'static str,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct PreComposedToBaseMap {
-    pub from: char,
-    pub to: char,
-}
-
-pub type DiacriticSet = &'static [char];
-
-#[derive(Clone, Copy, Debug)]
-pub struct PeekPair {
-    pub a: char,
-    pub b: char,
-    pub to: &'static str,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentRule {
     WesternToScript,
@@ -77,17 +50,15 @@ pub struct LangEntry {
 
     // === Data Arrays (Second Cache Line+) ===
     code: &'static str,
-    case_map: &'static [CaseMap],
-    // case_char_slice: &'static [char],
-    fold_map: &'static [FoldMap],
-    // fold_char_slice: &'static [char],
-    pre_composed_to_base_map: &'static [PreComposedToBaseMap],
+    case_map: &'static [(char, char)],
+    fold_map: &'static [(char, &'static str)],
+    pre_composed_to_base_map: &'static [(char, char)],
     pre_composed_to_base_char_slice: &'static [char],
     spacing_diacritics: Option<&'static [char]>,
     spacing_diacritics_slice: Option<&'static [char]>,
-    transliterate_map: &'static [FoldMap],
+    transliterate_map: &'static [(char, &'static str)],
     transliterate_char_slice: &'static [char],
-    peek_pairs: &'static [PeekPair],
+    peek_pairs: &'static [(char, char, &'static str)],
     segment_rules: &'static [SegmentRule],
 }
 
@@ -173,11 +144,6 @@ impl LangEntry {
             .unwrap_or(false)
     }
 
-    // #[inline(always)]
-    // pub fn is_foldable(&self, c: char) -> bool {
-    //     self.fold_char_slice.contains(&c)
-    // }
-
     #[inline(always)]
     pub fn is_transliterable(&self, c: char) -> bool {
         self.transliterate_char_slice.contains(&c)
@@ -194,14 +160,14 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn needs_case_fold(&self, c: char) -> bool {
-        self.fold_map.iter().any(|m| m.from == c)
-            || self.case_map.iter().any(|m| m.from == c)
+        self.fold_map.iter().any(|(from, _)| *from == c)
+            || self.case_map.iter().any(|(from, _)| *from == c)
             || c.to_lowercase().next() != Some(c)
     }
 
     #[inline(always)]
     pub fn needs_lowercase(&self, c: char) -> bool {
-        if self.case_map.iter().any(|m| m.from == c) {
+        if self.case_map.iter().any(|(from, _)| *from == c) {
             return true;
         }
         c.to_lowercase().next() != Some(c)
@@ -229,32 +195,32 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn case_map(&self) -> &'static [CaseMap] {
+    pub fn case_map(&self) -> &'static [(char, char)] {
         self.case_map
     }
 
     #[inline(always)]
-    pub fn fold_map(&self) -> &'static [FoldMap] {
+    pub fn fold_map(&self) -> &'static [(char, &'static str)] {
         self.fold_map
     }
 
     #[inline(always)]
-    pub fn transliterate_map(&self) -> &'static [FoldMap] {
+    pub fn transliterate_map(&self) -> &'static [(char, &'static str)] {
         self.transliterate_map
     }
 
     #[inline(always)]
-    pub fn pre_composed_to_base_map(&self) -> &'static [PreComposedToBaseMap] {
+    pub fn pre_composed_to_base_map(&self) -> &'static [(char, char)] {
         self.pre_composed_to_base_map
     }
 
     #[inline(always)]
-    pub fn spacing_diacritics(&self) -> Option<DiacriticSet> {
+    pub fn spacing_diacritics(&self) -> Option<&'static [char]> {
         self.spacing_diacritics
     }
 
     #[inline(always)]
-    pub fn peek_pairs(&self) -> &'static [PeekPair] {
+    pub fn peek_pairs(&self) -> &'static [(char, char, &'static str)] {
         self.peek_pairs
     }
 
@@ -262,16 +228,6 @@ impl LangEntry {
     pub fn segment_rules(&self) -> &'static [SegmentRule] {
         self.segment_rules
     }
-
-    // #[inline(always)]
-    // pub fn case_char_slice(&self) -> &'static [char] {
-    //     self.case_char_slice
-    // }
-
-    // #[inline(always)]
-    // pub fn fold_char_slice(&self) -> &'static [char] {
-    //     self.fold_char_slice
-    // }
 
     #[inline(always)]
     pub fn transliterate_char_slice(&self) -> &'static [char] {
@@ -290,19 +246,36 @@ impl LangEntry {
 
     /// Finds a language-specific case map entry for a character.
     #[inline(always)]
-    pub fn find_case_map(&self, c: char) -> Option<&'static CaseMap> {
-        self.case_map.iter().find(|m| m.from == c)
+    pub fn find_case_map(&self, c: char) -> Option<char> {
+        self.case_map
+            .iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
     }
 
     /// Finds a language-specific fold map entry for a character.
     #[inline(always)]
-    pub fn find_fold_map(&self, c: char) -> Option<&'static FoldMap> {
-        self.fold_map.iter().find(|m| m.from == c)
+    pub fn find_fold_map(&self, c: char) -> Option<&'static str> {
+        self.fold_map
+            .iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
     }
 
     #[inline(always)]
-    pub fn find_transliterate_map(&self, c: char) -> Option<&'static FoldMap> {
-        self.transliterate_map.iter().find(|m| m.from == c)
+    pub fn find_transliterate_map(&self, c: char) -> Option<&'static str> {
+        self.transliterate_map
+            .iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
+    }
+
+    #[inline(always)]
+    pub fn find_pre_composed_to_base_map(&self, c: char) -> Option<char> {
+        self.pre_composed_to_base_map
+            .iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
     }
 
     // ============================================================
@@ -311,14 +284,24 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn apply_case_fold(&self, c: char) -> Option<char> {
-        if let Some(m) = self.fold_map.iter().find(|m| m.from == c) {
+        if let Some(to) = self
+            .fold_map
+            .iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
+        {
             if self.has_one_to_one_folds {
-                Some(m.to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
+                Some(to.chars().next().unwrap_or(c)) // Safe: we know it's 1 char
             } else {
                 None
             }
-        } else if let Some(m) = self.case_map.iter().find(|m| m.from == c) {
-            Some(m.to)
+        } else if let Some(to) = self
+            .case_map
+            .iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
+        {
+            Some(to)
         } else {
             c.to_lowercase().next()
         }
@@ -326,19 +309,16 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn apply_lowercase(&self, c: char) -> char {
-        if let Some(m) = self.case_map.iter().find(|m| m.from == c) {
-            m.to
+        if let Some(to) = self
+            .case_map
+            .iter()
+            .find(|(from, _)| *from == c)
+            .map(|(_, to)| *to)
+        {
+            to
         } else {
             c.to_lowercase().next().unwrap_or(c)
         }
-    }
-
-    #[inline(always)]
-    pub fn apply_pre_composed_to_base_map(&self, c: char) -> Option<char> {
-        self.pre_composed_to_base_map
-            .iter()
-            .find(|m| m.from == c)
-            .map(|m| m.to)
     }
 
     /// Check if a two-character sequence needs special handling.
@@ -353,18 +333,18 @@ impl LangEntry {
         let next_char = next?;
 
         // Explicit peek-pairs (language-defined)
-        for p in self.peek_pairs {
-            if p.a == current && p.b == next_char {
-                return Some(p.to);
+        for (a, b, to) in self.peek_pairs {
+            if *a == current && *b == next_char {
+                return Some(to);
             }
         }
 
         // Fallback heuristic – only for *single-char* expansions
-        let cur = self.fold_map.iter().find(|m| m.from == current)?;
-        let nxt = self.fold_map.iter().find(|m| m.from == next_char)?;
+        let cur = self.fold_map.iter().find(|(from, _)| *from == current)?.1;
+        let nxt = self.fold_map.iter().find(|(from, _)| *from == next_char)?.1;
 
-        if cur.to == nxt.to && cur.to.chars().count() > 1 {
-            Some(cur.to)
+        if cur == nxt && cur.chars().count() > 1 {
+            Some(cur)
         } else {
             None
         }
@@ -381,21 +361,22 @@ impl LangEntry {
             return (0, 0);
         }
 
-        let fold_map = self.fold_map; // Use the raw slice directly
+        let fold_map = self.fold_map;
 
         // --- Single-Pass, Unified Logic ---
         let mut num_folds = 0;
         let mut extra_bytes = 0;
 
         for c in text.chars() {
-            // Replaced the call to external find_fold_map with inline iteration
-            if let Some(m) = fold_map.iter().find(|m| m.from == c) {
+            if let Some(to) = fold_map
+                .iter()
+                .find(|(from, _)| *from == c)
+                .map(|(_, to)| *to)
+            {
                 num_folds += 1;
 
-                // This is the core logic for expansion calculation.
-                // It runs for ALL matched characters, regardless of whether they expand.
                 let from_len = c.len_utf8();
-                let to_len = m.to.len();
+                let to_len = to.len();
 
                 if to_len > from_len {
                     extra_bytes += to_len - from_len;
@@ -412,26 +393,19 @@ impl LangEntry {
             return (0, 0);
         }
 
-        // `map` is the slice of TransliterateMap structs
-        let map = self.transliterate_map; // Use the raw slice directly
+        let map = self.transliterate_map;
 
         // --- Single-Pass, Unified Logic ---
         let mut num_transformations = 0;
         let mut extra_bytes = 0;
 
         for c in text.chars() {
-            // Replaced the call to external find_fold_map with inline iteration
-            // Note: Since FoldMap and TransliterateMap are the same struct (FoldMap),
-            // the find logic is identical.
-            if let Some(m) = map.iter().find(|m| m.from == c) {
+            if let Some(to) = map.iter().find(|(from, _)| *from == c).map(|(_, to)| *to) {
                 num_transformations += 1;
 
-                // This calculates the expansion for ALL matches,
-                // but the cost is negligible compared to the map search.
                 let from_len = c.len_utf8();
-                let to_len = m.to.len();
+                let to_len = to.len();
 
-                // The branch is only taken if expansion occurs, which is rare.
                 if to_len > from_len {
                     extra_bytes += to_len - from_len;
                 }
@@ -448,53 +422,34 @@ impl LangEntry {
 
     /// Sets the case_map and updates has_case_map flag
     #[inline]
-    pub fn set_case_map(&mut self, case_map: &'static [CaseMap]) {
+    pub fn set_case_map(&mut self, case_map: &'static [(char, char)]) {
         self.case_map = case_map;
         self.has_case_map = !case_map.is_empty();
     }
 
-    /// Sets the fold_map and updates all related fields:
-    /// - fold_char_slice (extracted 'from' characters)
-    /// - has_fold_map flag
-    /// - has_one_to_one_folds flag (checks if all mappings are 1:1)
+    /// Sets the fold_map and updates all related fields
     #[inline]
-    pub fn set_fold_map(&mut self, fold_map: &'static [FoldMap]) {
+    pub fn set_fold_map(&mut self, fold_map: &'static [(char, &'static str)]) {
         self.fold_map = fold_map;
         self.has_fold_map = !fold_map.is_empty();
 
-        // Extract character slice for fast lookups
-        // Note: This requires fold_char_slice to be mutable static or reconstructed
-        // In practice, you'd need to store this in a separate static allocation
         if !fold_map.is_empty() {
-            // Determine if all folds are one-to-one (single char -> single char)
-            self.has_one_to_one_folds = fold_map.iter().all(|m| m.to.chars().count() == 1);
+            self.has_one_to_one_folds = fold_map.iter().all(|(_, to)| to.chars().count() == 1);
         } else {
             self.has_one_to_one_folds = false;
         }
-
-        // Note: fold_char_slice needs to be set separately via set_fold_char_slice
-        // or extracted during initialization, as we can't create new static slices at runtime
     }
 
-    // /// Helper to set the fold_char_slice directly
-    // /// Should be called after set_fold_map with the corresponding character slice
-    // #[inline]
-    // pub fn set_fold_char_slice(&mut self, slice: &'static [char]) {
-    //     self.fold_char_slice = slice;
-    // }
-
-    /// Sets the transliterate_map and updates all related fields:
-    /// - transliterate_char_slice
-    /// - has_transliterate_map flag
-    /// - has_one_to_one_transliterate flag
+    /// Sets the transliterate_map and updates all related fields
     #[inline]
-    pub fn set_transliterate_map(&mut self, transliterate_map: &'static [FoldMap]) {
+    pub fn set_transliterate_map(&mut self, transliterate_map: &'static [(char, &'static str)]) {
         self.transliterate_map = transliterate_map;
         self.has_transliterate_map = !transliterate_map.is_empty();
 
         if !transliterate_map.is_empty() {
-            self.has_one_to_one_transliterate =
-                transliterate_map.iter().all(|m| m.to.chars().count() == 1);
+            self.has_one_to_one_transliterate = transliterate_map
+                .iter()
+                .all(|(_, to)| to.chars().count() == 1);
         } else {
             self.has_one_to_one_transliterate = false;
         }
@@ -506,11 +461,9 @@ impl LangEntry {
         self.transliterate_char_slice = slice;
     }
 
-    /// Sets the pre_composed_to_base_map and updates all related fields:
-    /// - pre_composed_to_base_char_slice
-    /// - has_pre_composed_to_base_map flag
+    /// Sets the pre_composed_to_base_map and updates all related fields
     #[inline]
-    pub fn set_pre_composed_to_base_map(&mut self, map: &'static [PreComposedToBaseMap]) {
+    pub fn set_pre_composed_to_base_map(&mut self, map: &'static [(char, char)]) {
         self.pre_composed_to_base_map = map;
         self.has_pre_composed_to_base_map = !map.is_empty();
     }
@@ -521,9 +474,7 @@ impl LangEntry {
         self.pre_composed_to_base_char_slice = slice;
     }
 
-    /// Sets the spacing_diacritics and updates all related fields:
-    /// - spacing_diacritics_slice
-    /// - has_spacing_diacritics flag
+    /// Sets the spacing_diacritics and updates all related fields
     #[inline]
     pub fn set_spacing_diacritics(&mut self, diacritics: Option<&'static [char]>) {
         self.spacing_diacritics = diacritics;
@@ -543,11 +494,9 @@ impl LangEntry {
         self.requires_peek_ahead = requires;
     }
 
-    /// Sets the peek_pairs and updates related fields:
-    /// - has_peek_pairs flag
-    /// - requires_peek_ahead flag (auto-enabled if pairs exist)
+    /// Sets the peek_pairs and updates related fields
     #[inline]
-    pub fn set_peek_pairs(&mut self, pairs: &'static [PeekPair]) {
+    pub fn set_peek_pairs(&mut self, pairs: &'static [(char, char, &'static str)]) {
         self.peek_pairs = pairs;
         self.has_peek_pairs = !pairs.is_empty();
 
@@ -557,9 +506,7 @@ impl LangEntry {
         }
     }
 
-    /// Sets the segment_rules and updates related fields:
-    /// - has_segment_rules flag
-    /// - unigram_cjk flag (auto-enabled if CJKIdeographUnigram rule exists)
+    /// Sets the segment_rules and updates related fields
     #[inline]
     pub fn set_segment_rules(&mut self, rules: &'static [SegmentRule]) {
         self.segment_rules = rules;
@@ -574,74 +521,6 @@ impl LangEntry {
     pub fn set_unigram_cjk(&mut self, unigram: bool) {
         self.unigram_cjk = unigram;
     }
-
-    // // ============================================================
-    // // Builder-style convenience methods for chaining
-    // // ============================================================
-
-    // /// Builder-style: set case_map and return self
-    // #[inline]
-    // pub fn with_case_map(mut self, case_map: &'static [CaseMap]) -> Self {
-    //     self.set_case_map(case_map);
-    //     self
-    // }
-
-    // /// Builder-style: set fold_map and return self
-    // #[inline]
-    // pub fn with_fold_map(
-    //     mut self,
-    //     fold_map: &'static [FoldMap],
-    //     char_slice: &'static [char],
-    // ) -> Self {
-    //     self.set_fold_map(fold_map);
-    //     self.set_fold_char_slice(char_slice);
-    //     self
-    // }
-
-    // /// Builder-style: set transliterate_map and return self
-    // #[inline]
-    // pub fn with_transliterate_map(
-    //     mut self,
-    //     map: &'static [FoldMap],
-    //     char_slice: &'static [char],
-    // ) -> Self {
-    //     self.set_transliterate_map(map);
-    //     self.set_transliterate_char_slice(char_slice);
-    //     self
-    // }
-
-    // /// Builder-style: set pre_composed_to_base_map and return self
-    // #[inline]
-    // pub fn with_pre_composed_to_base_map(
-    //     mut self,
-    //     map: &'static [PreComposedToBaseMap],
-    //     char_slice: &'static [char],
-    // ) -> Self {
-    //     self.set_pre_composed_to_base_map(map);
-    //     self.set_pre_composed_to_base_char_slice(char_slice);
-    //     self
-    // }
-
-    // /// Builder-style: set spacing_diacritics and return self
-    // #[inline]
-    // pub fn with_spacing_diacritics(mut self, diacritics: Option<&'static [char]>) -> Self {
-    //     self.set_spacing_diacritics(diacritics);
-    //     self
-    // }
-
-    // /// Builder-style: set peek_pairs and return self
-    // #[inline]
-    // pub fn with_peek_pairs(mut self, pairs: &'static [PeekPair]) -> Self {
-    //     self.set_peek_pairs(pairs);
-    //     self
-    // }
-
-    // /// Builder-style: set segment_rules and return self
-    // #[inline]
-    // pub fn with_segment_rules(mut self, rules: &'static [SegmentRule]) -> Self {
-    //     self.set_segment_rules(rules);
-    //     self
-    // }
 }
 
 pub fn get_lang_entry_by_code(code: &str) -> Option<&'static LangEntry> {
@@ -802,14 +681,14 @@ mod tests {
 
             // has_one_to_one_folds correctness
             if entry.has_one_to_one_folds() {
-                for fold in entry.fold_map() {
+                for (from, to) in entry.fold_map() {
                     assert_eq!(
-                        fold.to.chars().count(),
+                        to.chars().count(),
                         1,
                         "{}: {} → {} violates one_to_one",
                         lang_info.code(),
-                        fold.from,
-                        fold.to
+                        from,
+                        to
                     );
                 }
             }
@@ -831,12 +710,12 @@ mod tests {
         let test_langs = ["TUR", "DEU", "NLD", "FRA", "POL", "CES"];
 
         for code in test_langs {
-            for fold in lang(code).fold_map() {
-                let target_lower: String = fold.to.chars().flat_map(|c| c.to_lowercase()).collect();
+            for (_, to) in lang(code).fold_map() {
+                let target_lower: String = to.chars().flat_map(|c| c.to_lowercase()).collect();
                 assert_eq!(
-                    fold.to, target_lower,
+                    *to, target_lower,
                     "{}: fold target '{}' not lowercase",
-                    code, fold.to
+                    code, to
                 );
             }
         }

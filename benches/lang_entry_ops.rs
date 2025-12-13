@@ -39,7 +39,7 @@ fn bench_char_lookups(c: &mut Criterion) {
             BenchmarkId::new("apply_strip", desc),
             &(entry, ch),
             |b, (entry, ch)| {
-                b.iter(|| black_box(entry.apply_pre_composed_to_base_map(black_box(*ch))));
+                b.iter(|| black_box(entry.find_pre_composed_to_base_map(black_box(*ch))));
             },
         );
     }
