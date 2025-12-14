@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use memchr::memchr;
@@ -270,7 +270,7 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
     )
 }
 
-impl StageIter for StripHtml {
+impl StaticStageIter for StripHtml {
     type Iter<'a> = Empty<char>;
 }
 

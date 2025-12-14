@@ -38,7 +38,6 @@ pub mod unify_width;
 use crate::context::Context;
 use std::borrow::Cow;
 use std::iter::FusedIterator;
-use std::sync::Arc;
 use thiserror::Error;
 
 /// Public error type for every stage.
@@ -82,37 +81,37 @@ pub trait Stage: Send + Sync {
     /// You must never try to "be clever" and return the input unchanged.
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
 
-    // ──────────────────────────────────────────────────────────────
-    //  Zero-allocation static path (used by `ChainedProcess`)
-    // ──────────────────────────────────────────────────────────────
-    /// Return a trait-object reference to `self` **iff** this stage can be
-    /// expressed as a pure character iterator.  The default implementation
-    /// returns `None` – stages that cannot fuse simply allocate.
-    ///
-    /// **Why a reference?**  
-    /// `ChainedProcess` is monomorphised, so the compiler knows the concrete
-    /// type of every stage.  Returning `&self` gives the compiler a *direct*
-    /// pointer to the concrete iterator implementation – no heap, no vtable,
-    /// full inlining + loop fusion.
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        None
-    }
+    // // ──────────────────────────────────────────────────────────────
+    // //  Zero-allocation static path (used by `ChainedProcess`)
+    // // ──────────────────────────────────────────────────────────────
+    // /// Return a trait-object reference to `self` **iff** this stage can be
+    // /// expressed as a pure character iterator.  The default implementation
+    // /// returns `None` – stages that cannot fuse simply allocate.
+    // ///
+    // /// **Why a reference?**
+    // /// `ChainedProcess` is monomorphised, so the compiler knows the concrete
+    // /// type of every stage.  Returning `&self` gives the compiler a *direct*
+    // /// pointer to the concrete iterator implementation – no heap, no vtable,
+    // /// full inlining + loop fusion.
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     None
+    // }
 
-    // ──────────────────────────────────────────────────────────────
-    //  Dynamic plugin path (used by `DynProcess`)
-    // ──────────────────────────────────────────────────────────────
-    /// Return an `Arc<dyn CharMapper>` **iff** this stage can be expressed as a
-    /// pure character iterator.  The `Arc<Self>` is already owned by `DynProcess`,
-    /// so the only cost is the trait-object indirection.
-    ///
-    /// **Why `Arc`?**  
-    /// `DynProcess` stores stages in a `Vec<Arc<dyn Stage>>`.  Converting to
-    /// `Arc<dyn CharMapper>` re-uses the same reference count – no extra allocation.
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        None
-    }
+    // // ──────────────────────────────────────────────────────────────
+    // //  Dynamic plugin path (used by `DynProcess`)
+    // // ──────────────────────────────────────────────────────────────
+    // /// Return an `Arc<dyn CharMapper>` **iff** this stage can be expressed as a
+    // /// pure character iterator.  The `Arc<Self>` is already owned by `DynProcess`,
+    // /// so the only cost is the trait-object indirection.
+    // ///
+    // /// **Why `Arc`?**
+    // /// `DynProcess` stores stages in a `Vec<Arc<dyn Stage>>`.  Converting to
+    // /// `Arc<dyn CharMapper>` re-uses the same reference count – no extra allocation.
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     None
+    // }
 
     #[inline]
     fn try_dynamic_iter<'a>(
@@ -124,39 +123,28 @@ pub trait Stage: Send + Sync {
     }
 }
 
-/// The heart of fused, zero-allocation pipelines.
-pub trait CharMapper: Send + Sync {
-    /// Map a single Unicode scalar value.
-    /// Return `None` if the character should be **removed**.
-    /// Note: `CharMapper::map` returning `Some(c)` (identity) is perfectly valid
-    /// even when the stage inserts characters (e.g. spaces, ZWSPs). The insertion
-    /// logic lives in `bind()`, not `map()`. `map()` is only a **hint** for simple
-    /// 1:1 stages — it is **not** required to describe all transformations.
-    fn map(&self, c: char, ctx: &Context) -> Option<char>;
+// The heart of fused, zero-allocation pipelines.
+// pub trait CharMapper: Send + Sync {
+//     // Map a single Unicode scalar value.
+//     // Return `None` if the character should be **removed**.
+//     // Note: `CharMapper::map` returning `Some(c)` (identity) is perfectly valid
+//     // even when the stage inserts characters (e.g. spaces, ZWSPs). The insertion
+//     // logic lives in `bind()`, not `map()`. `map()` is only a **hint** for simple
+//     // 1:1 stages — it is **not** required to describe all transformations.
+//     fn map(&self, c: char, ctx: &Context) -> Option<char>;
 
-    /// Bind the mapper to a concrete `&str`.  The returned iterator must be
-    /// `FusedIterator` so the compiler can eliminate bounds checks.
-    fn bind<'a>(&self, text: &'a str, ctx: &'a Context)
-    -> Box<dyn FusedIterator<Item = char> + 'a>;
-}
+//     // Bind the mapper to a concrete `&str`.  The returned iterator must be
+//     // `FusedIterator` so the compiler can eliminate bounds checks.
+//     fn bind<'a>(&self, text: &'a str, ctx: &'a Context)
+//     -> Box<dyn FusedIterator<Item = char> + 'a>;
+// }
 
 /// New: Generic extension — Only used in static pipelines
-pub trait StageIter {
-    /// Concrete iterator type — fully monomorphized
-    type Iter<'a>: Iterator<Item = char> + 'a;
-
-    /// Return a concrete iterator if this stage supports zero-dyn fusion
-    #[inline]
-    fn try_iter<'a>(&self, _text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        None
-    }
-}
-
 pub trait StaticStageIter {
-    /// Concrete fused iterator type — fully monomorphized
+    /// Concrete iterator type — fully monomorphized
     type Iter<'a>: FusedIterator<Item = char> + 'a;
 
-    /// Return a concrete fused iterator if this stage supports zero-dyn fusion
+    /// Return a concrete iterator if this stage supports zero-dyn fusion
     #[inline]
     fn try_static_iter<'a>(&self, _text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         None

@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -188,7 +188,7 @@ impl Stage for StripMarkdown {
     }
 }
 
-impl StageIter for StripMarkdown {
+impl StaticStageIter for StripMarkdown {
     type Iter<'a> = Empty<char>;
 }
 

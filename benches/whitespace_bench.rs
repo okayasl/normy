@@ -7,7 +7,7 @@ use normy::{
     COLLAPSE_WHITESPACE_UNICODE, Normy, TRIM_WHITESPACE_UNICODE,
     context::Context,
     stage::{
-        CharMapper, Stage, StageIter,
+        Stage, StaticStageIter,
         normalize_whitespace::{
             COLLAPSE_WHITESPACE, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace, TRIM_WHITESPACE,
         },
@@ -170,7 +170,10 @@ fn bench_bind_vs_apply(c: &mut Criterion) {
                     || input,
                     |text| {
                         // Call bind and collect into a String
-                        let result: String = stage.bind(black_box(text), &ctx).collect();
+                        let result: String = stage
+                            .try_static_iter(black_box(text), &ctx)
+                            .unwrap()
+                            .collect();
                         black_box(result.len())
                     },
                     BatchSize::SmallInput,
@@ -186,8 +189,10 @@ fn bench_bind_vs_apply(c: &mut Criterion) {
                     || input,
                     |text| {
                         // Call bind and collect into a String
-                        let result: String =
-                            stage.try_iter(black_box(text), &ctx).unwrap().collect();
+                        let result: String = stage
+                            .try_static_iter(black_box(text), &ctx)
+                            .unwrap()
+                            .collect();
                         black_box(result.len())
                     },
                     BatchSize::SmallInput,

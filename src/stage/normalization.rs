@@ -2,7 +2,7 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use icu_normalizer::{
@@ -72,7 +72,7 @@ macro_rules! impl_normalization_stage {
                 Ok($norm.normalize(text.as_ref()).into_owned().into())
             }
         }
-        impl StageIter for $stage {
+        impl StaticStageIter for $stage {
             type Iter<'a> = Empty<char>;
         }
     };

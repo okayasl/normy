@@ -1,17 +1,3 @@
-/// Unicode character classification utilities for Normy.
-///
-/// # Design Philosophy
-///
-/// Normy is a **zero-allocation**, **zero-copy** normalization layer for production NLP pipelines.
-/// It deliberately sacrifices full UCD compliance for extreme performance and predictability.
-///
-/// - Covers >95% of characters in real-world multilingual web text
-/// - Historical, constructed, and regional scripts (Deseret, Gothic, Ethiopic, Tifinagh, etc.)
-///   are classified as `Other` → no unnecessary word breaks → preserves zero-copy path
-/// - Extensibility: add missing scripts via `Context::with_modified` or custom stages
-///
-/// If you need 100% UCD fidelity, compose with `unicode-segmentation` as a dynamic stage.
-/// Normy is not a Unicode museum. It is a tokenizer accelerator.
 use phf::{phf_map, phf_set};
 
 // Format control characters (General Category = Cf) and selected
@@ -47,28 +33,6 @@ static FORMAT_CONTROLS: phf::Set<char> = phf_set! {
     '\u{206F}', // Nominal digit shapes (deprecated)
     '\u{FEFF}', // Zero-width no-break space / BOM
 };
-
-// Unicode whitespace characters excluding ASCII space, tab, LF, CR.
-//
-// These are normalized to plain ASCII space when `normalize_unicode = true`.
-// static UNICODE_WHITESPACE: phf::Set<char> = phf_set! {
-//     '\u{00A0}', // No-break space
-//     '\u{1680}', // Ogham space mark
-//     '\u{2000}', // En quad
-//     '\u{2001}', // Em quad
-//     '\u{2002}', // En space
-//     '\u{2003}', // Em space
-//     '\u{2004}', // Three-per-em space
-//     '\u{2005}', // Four-per-em space
-//     '\u{2006}', // Six-per-em space
-//     '\u{2007}', // Figure space
-//     '\u{2008}', // Punctuation space
-//     '\u{2009}', // Thin space
-//     '\u{200A}', // Hair space
-//     '\u{202F}', // Narrow no-break space
-//     '\u{205F}', // Medium mathematical space
-//     '\u{3000}', // Fullwidth / ideographic space
-// };
 
 // Fast scan to check for any format controls.
 #[inline]
@@ -126,24 +90,6 @@ pub fn is_any_whitespace(c: char) -> bool {
     // plus our explicit set to capture any whitespace not included
     // by the standard predicate that we want to normalize.
     c.is_whitespace() || is_unicode_whitespace(c)
-}
-
-/// Fast check if a byte could be the start of Unicode whitespace in UTF-8.
-///
-/// This is intentionally conservative: it returns true for lead bytes
-/// that commonly begin the target whitespace code points. It helps
-/// avoid a full UTF-8/char decode for mostly-ASCII text.
-///
-/// It's kept intentionally simple (single-byte check) because it is
-/// only used as a quick pre-screen in `needs_apply`.
-#[inline(always)]
-pub fn could_be_unicode_ws_start(b: u8) -> bool {
-    // The UTF-8 lead bytes for our target whitespace codepoints:
-    // 0xC2 -> U+00A0,
-    // 0xE1 -> U+1680,
-    // 0xE2 -> many U+2000.. range and 0x202F, 0x205F
-    // 0xE3 -> U+3000
-    matches!(b, 0xC2 | 0xE1 | 0xE2 | 0xE3)
 }
 
 #[inline(always)]

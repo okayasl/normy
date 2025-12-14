@@ -1,8 +1,7 @@
 use std::borrow::Cow;
-use std::sync::Arc;
 
 use normy::context::Context;
-use normy::stage::{CharMapper, Stage, StageError};
+use normy::stage::{Stage, StageError};
 use normy::{CaseFold, NORMALIZE_WHITESPACE_FULL, Normy, StripControlChars, TUR};
 
 fn is_emoji(c: char) -> bool {
@@ -32,27 +31,6 @@ impl Stage for StripEmoji {
 
     fn apply<'a>(&self, text: Cow<'a, str>, _: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(Cow::Owned(text.chars().filter(|&c| !is_emoji(c)).collect()))
-    }
-
-    fn as_char_mapper(&self, _: &Context) -> Option<&dyn CharMapper> {
-        Some(self)
-    }
-    fn into_dyn_char_mapper(self: Arc<Self>, _: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
-}
-
-impl CharMapper for StripEmoji {
-    fn map(&self, c: char, _: &Context) -> Option<char> {
-        if is_emoji(c) { None } else { Some(c) }
-    }
-
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        _: &Context,
-    ) -> Box<dyn std::iter::FusedIterator<Item = char> + 'a> {
-        Box::new(text.chars().filter(|&c| !is_emoji(c)))
     }
 }
 

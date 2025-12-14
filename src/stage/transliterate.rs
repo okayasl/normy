@@ -2,11 +2,10 @@ use crate::{
     CAT, DAN, DEU, FRA, ISL, NOR, SWE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{CharMapper, FusedIterator, Stage, StageError, StageIter},
+    stage::{FusedIterator, Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
-use std::sync::Arc;
 
 /// Locale-aware orthographic transliteration (lossy, opt-in).
 ///
@@ -52,23 +51,23 @@ impl Stage for Transliterate {
         Ok(Cow::Owned(TransliterateIter::new(&text, ctx).collect()))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        if ctx.lang_entry.has_one_to_one_transliterate() {
-            Some(self)
-        } else {
-            None
-        }
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
+    //     if ctx.lang_entry.has_one_to_one_transliterate() {
+    //         Some(self)
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        if ctx.lang_entry.has_one_to_one_transliterate() {
-            Some(self)
-        } else {
-            None
-        }
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     if ctx.lang_entry.has_one_to_one_transliterate() {
+    //         Some(self)
+    //     } else {
+    //         None
+    //     }
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -79,30 +78,30 @@ impl Stage for Transliterate {
     }
 }
 
-impl CharMapper for Transliterate {
-    #[inline(always)]
-    fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        ctx.lang_entry
-            .find_transliterate_map(c)
-            .and_then(|to| to.chars().next())
-            .or(Some(c))
-    }
+// impl CharMapper for Transliterate {
+//     #[inline(always)]
+//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
+//         ctx.lang_entry
+//             .find_transliterate_map(c)
+//             .and_then(|to| to.chars().next())
+//             .or(Some(c))
+//     }
 
-    #[inline(always)]
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(TransliterateIter::new(text, ctx))
-    }
-}
+//     #[inline(always)]
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(TransliterateIter::new(text, ctx))
+//     }
+// }
 
-impl StageIter for Transliterate {
+impl StaticStageIter for Transliterate {
     type Iter<'a> = TransliterateIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(TransliterateIter::new(text, ctx))
     }
 }

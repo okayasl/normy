@@ -2,11 +2,10 @@ use crate::{
     ARA, CES, FRA, POL, SLK, VIE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::iter::FusedIterator;
-use std::sync::Arc;
 use std::{borrow::Cow, str::Chars};
 
 /// Removes language-specific diacritical marks using optimized lookup tables.
@@ -85,15 +84,15 @@ impl Stage for RemoveDiacritics {
         Ok(Cow::Owned(out))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        Some(self)
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     Some(self)
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     Some(self)
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -104,26 +103,26 @@ impl Stage for RemoveDiacritics {
     }
 }
 
-impl CharMapper for RemoveDiacritics {
-    #[inline(always)]
-    fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        if let Some(base) = ctx.lang_entry.find_pre_composed_to_base_map(c) {
-            Some(base)
-        } else if ctx.lang_entry.is_spacing_diacritic(c) {
-            None
-        } else {
-            Some(c)
-        }
-    }
+// impl CharMapper for RemoveDiacritics {
+//     #[inline(always)]
+//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
+//         if let Some(base) = ctx.lang_entry.find_pre_composed_to_base_map(c) {
+//             Some(base)
+//         } else if ctx.lang_entry.is_spacing_diacritic(c) {
+//             None
+//         } else {
+//             Some(c)
+//         }
+//     }
 
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(RemoveDiacriticsIter::new(text, ctx))
-    }
-}
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(RemoveDiacriticsIter::new(text, ctx))
+//     }
+// }
 
 pub struct RemoveDiacriticsIter<'a> {
     chars: Chars<'a>,
@@ -158,11 +157,11 @@ impl<'a> Iterator for RemoveDiacriticsIter<'a> {
 
 impl<'a> FusedIterator for RemoveDiacriticsIter<'a> {}
 
-impl StageIter for RemoveDiacritics {
+impl StaticStageIter for RemoveDiacritics {
     type Iter<'a> = RemoveDiacriticsIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(RemoveDiacriticsIter::new(text, ctx))
     }
 }

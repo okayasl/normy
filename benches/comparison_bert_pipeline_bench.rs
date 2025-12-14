@@ -3,7 +3,7 @@
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use normy::stage::StageIter;
+use normy::stage::StaticStageIter;
 use normy::stage::normalization::NfdStage;
 use rand::random;
 use rand::{Rng, SeedableRng, rngs::StdRng};
@@ -53,40 +53,36 @@ impl normy::stage::Stage for BertCompatChineseChars {
         }
         Ok(Cow::Owned(out))
     }
-    #[inline(always)]
-    fn as_char_mapper(&self, _: &normy::context::Context) -> Option<&dyn normy::stage::CharMapper> {
-        Some(self)
-    }
 }
 
-impl StageIter for BertCompatChineseChars {
+impl StaticStageIter for BertCompatChineseChars {
     type Iter<'a> = std::iter::Empty<char>;
 }
 
-impl normy::stage::CharMapper for BertCompatChineseChars {
-    #[inline(always)]
-    fn map(&self, c: char, _: &normy::context::Context) -> Option<char> {
-        if is_chinese_char(c) { None } else { Some(c) }
-    }
-    #[inline(always)]
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        _: &normy::context::Context,
-    ) -> Box<dyn std::iter::FusedIterator<Item = char> + 'a> {
-        Box::new(text.chars().flat_map(|c| {
-            if is_chinese_char(c) {
-                Box::new(
-                    std::iter::once(' ')
-                        .chain(std::iter::once(c))
-                        .chain(std::iter::once(' ')),
-                ) as Box<dyn std::iter::Iterator<Item = char>>
-            } else {
-                Box::new(std::iter::once(c)) as Box<dyn std::iter::Iterator<Item = char>>
-            }
-        }))
-    }
-}
+// impl normy::stage::CharMapper for BertCompatChineseChars {
+//     #[inline(always)]
+//     fn map(&self, c: char, _: &normy::context::Context) -> Option<char> {
+//         if is_chinese_char(c) { None } else { Some(c) }
+//     }
+//     #[inline(always)]
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         _: &normy::context::Context,
+//     ) -> Box<dyn std::iter::FusedIterator<Item = char> + 'a> {
+//         Box::new(text.chars().flat_map(|c| {
+//             if is_chinese_char(c) {
+//                 Box::new(
+//                     std::iter::once(' ')
+//                         .chain(std::iter::once(c))
+//                         .chain(std::iter::once(' ')),
+//                 ) as Box<dyn std::iter::Iterator<Item = char>>
+//             } else {
+//                 Box::new(std::iter::once(c)) as Box<dyn std::iter::Iterator<Item = char>>
+//             }
+//         }))
+//     }
+// }
 
 fn is_chinese_char(c: char) -> bool {
     matches!(

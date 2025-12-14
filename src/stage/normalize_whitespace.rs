@@ -1,12 +1,12 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{is_ascii_whitespace_fast, is_unicode_whitespace},
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, iter::FusedIterator, mem::replace, str::Chars, sync::Arc};
+use std::{borrow::Cow, iter::FusedIterator, mem::replace, str::Chars};
 
 /// Normalize and standardize whitespace in text pipelines.
 ///
@@ -230,15 +230,15 @@ impl Stage for NormalizeWhitespace {
         Ok(self.apply_full(text))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        Some(self)
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     Some(self)
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     Some(self)
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -474,12 +474,12 @@ impl NormalizeWhitespace {
     }
 }
 
-impl StageIter for NormalizeWhitespace {
+impl StaticStageIter for NormalizeWhitespace {
     // The concrete iterator type — compiler sees this!
     type Iter<'a> = NormalizeWhitespaceIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(NormalizeWhitespaceIter {
             inner: if self.collapse {
                 if text.is_ascii() {
@@ -530,27 +530,27 @@ impl<'a> Iterator for NormalizeWhitespaceIter<'a> {
 
 impl<'a> FusedIterator for NormalizeWhitespaceIter<'a> {}
 
-impl CharMapper for NormalizeWhitespace {
-    #[inline(always)]
-    fn map(&self, _c: char, _ctx: &Context) -> Option<char> {
-        None // We use bind() exclusively - it's the hot path!
-    }
+// impl CharMapper for NormalizeWhitespace {
+//     #[inline(always)]
+//     fn map(&self, _c: char, _ctx: &Context) -> Option<char> {
+//         None // We use bind() exclusively - it's the hot path!
+//     }
 
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        if self.collapse {
-            if text.is_ascii() {
-                return Box::new(WhitespaceAsciiIter::new(text, *self));
-            } else {
-                return Box::new(WhitespaceCollapseIter::new(text, *self));
-            }
-        }
-        Box::new(WhitespacePreserveIter::new(text, *self))
-    }
-}
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         _ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         if self.collapse {
+//             if text.is_ascii() {
+//                 return Box::new(WhitespaceAsciiIter::new(text, *self));
+//             } else {
+//                 return Box::new(WhitespaceCollapseIter::new(text, *self));
+//             }
+//         }
+//         Box::new(WhitespacePreserveIter::new(text, *self))
+//     }
+// }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TIER 1: ASCII FAST PATH - Byte-level operations, no UTF-8 decoding
@@ -1227,11 +1227,11 @@ mod tests {
         let ctx = ctx();
 
         let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        let via_bind: String = stage.bind(input, &ctx).collect();
+        let via_static_iter: String = stage.try_static_iter(input, &ctx).unwrap().collect();
 
         assert_eq!(
             via_apply.as_ref(),
-            via_bind,
+            via_static_iter,
             "\nPath mismatch for input: {:?}\nConfig: {:?}",
             input,
             stage
@@ -1253,11 +1253,11 @@ mod tests {
 
         for input in inputs {
             let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
-            let via_bind: String = stage.bind(input, &ctx()).collect();
+            let via_static_iter: String = stage.try_static_iter(input, &ctx()).unwrap().collect();
 
             assert_eq!(
                 via_apply.as_ref(),
-                via_bind,
+                via_static_iter,
                 "Mismatch for input: {:?}",
                 input
             );
@@ -1271,11 +1271,11 @@ mod tests {
 
         for input in inputs {
             let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
-            let via_bind: String = stage.bind(input, &ctx()).collect();
+            let via_static_iter: String = stage.try_static_iter(input, &ctx()).unwrap().collect();
 
             assert_eq!(
                 via_apply.as_ref(),
-                via_bind,
+                via_static_iter,
                 "Mismatch for input: {:?}",
                 input
             );
@@ -1289,10 +1289,10 @@ mod tests {
         // Test with very long WS runs (>4 chars, would overflow old SmallVec inline)
         let input = format!("a{}b", " ".repeat(100));
         let via_apply = stage.apply(Cow::Borrowed(&input), &ctx()).unwrap();
-        let via_bind: String = stage.bind(&input, &ctx()).collect();
+        let via_static_iter: String = stage.try_static_iter(&input, &ctx()).unwrap().collect();
 
         assert_eq!(via_apply.as_ref(), "a b");
-        assert_eq!(via_bind, "a b");
+        assert_eq!(via_static_iter, "a b");
     }
 
     #[test]
@@ -1397,7 +1397,7 @@ mod property_tests {
 
             let ctx = ctx();
             let via_apply = config.apply(Cow::Borrowed(&input), &ctx).unwrap();
-            let via_bind: String = config.bind(&input, &ctx).collect();
+            let via_bind: String = config.try_static_iter(&input, &ctx).unwrap().collect();
 
             assert_eq!(
                 via_apply.as_ref(),

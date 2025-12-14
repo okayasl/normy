@@ -1,13 +1,12 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{contains_format_controls, is_format_control},
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
-use std::sync::Arc;
 
 /// Remove all Unicode format control characters (General Category `Cf`)
 ///
@@ -43,15 +42,15 @@ impl Stage for StripFormatControls {
         Ok(Cow::Owned(StripFormatControlsIter::new(&text).collect()))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        Some(self)
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     Some(self)
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     Some(self)
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -62,27 +61,27 @@ impl Stage for StripFormatControls {
     }
 }
 
-impl CharMapper for StripFormatControls {
-    #[inline(always)]
-    fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-        if is_format_control(c) { None } else { Some(c) }
-    }
+// impl CharMapper for StripFormatControls {
+//     #[inline(always)]
+//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
+//         if is_format_control(c) { None } else { Some(c) }
+//     }
 
-    #[inline(always)]
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(StripFormatControlsIter::new(text))
-    }
-}
+//     #[inline(always)]
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         _ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(StripFormatControlsIter::new(text))
+//     }
+// }
 
-impl StageIter for StripFormatControls {
+impl StaticStageIter for StripFormatControls {
     type Iter<'a> = StripFormatControlsIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(StripFormatControlsIter::new(text))
     }
 }
@@ -210,14 +209,6 @@ mod tests {
 
         let text = "hello world";
         assert!(!stage.needs_apply(text, &ctx).unwrap());
-    }
-
-    #[test]
-    fn test_char_mapper_eligible() {
-        let stage = StripFormatControls;
-        let ctx = Context::new(ENG);
-
-        assert!(stage.as_char_mapper(&ctx).is_some());
     }
 
     #[test]

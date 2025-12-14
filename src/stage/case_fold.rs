@@ -2,10 +2,9 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{CharMapper, FusedIterator, Stage, StageError, StageIter},
+    stage::{FusedIterator, Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
-use std::sync::Arc;
 use std::{borrow::Cow, str::Chars};
 
 /// Locale-sensitive case folding for search and comparison.
@@ -101,26 +100,26 @@ impl Stage for CaseFold {
         Ok(Cow::Owned(out))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-        // Only eligible if:
-        // 1. All folds are one-to-one (no ß→ss expansions)
-        // 2. No peek-ahead rules (no Dutch IJ or Greek final sigma)
-        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
-            Some(self)
-        } else {
-            None
-        }
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
+    //     // Only eligible if:
+    //     // 1. All folds are one-to-one (no ß→ss expansions)
+    //     // 2. No peek-ahead rules (no Dutch IJ or Greek final sigma)
+    //     if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
+    //         Some(self)
+    //     } else {
+    //         None
+    //     }
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
-            Some(self)
-        } else {
-            None
-        }
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
+    //         Some(self)
+    //     } else {
+    //         None
+    //     }
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -179,11 +178,11 @@ fn apply_with_peek_ahead<'a>(
     Ok(Cow::Owned(out))
 }
 
-impl StageIter for CaseFold {
+impl StaticStageIter for CaseFold {
     type Iter<'a> = CaseFoldIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
             // Only proceed if we are in the guaranteed 1:1 path.
             Some(CaseFoldIter::new(text, ctx))
@@ -195,21 +194,21 @@ impl StageIter for CaseFold {
     }
 }
 
-impl CharMapper for CaseFold {
-    #[inline(always)]
-    fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        // Delegate to LangEntry's unified method
-        ctx.lang_entry.apply_case_fold(c)
-    }
+// impl CharMapper for CaseFold {
+//     #[inline(always)]
+//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
+//         // Delegate to LangEntry's unified method
+//         ctx.lang_entry.apply_case_fold(c)
+//     }
 
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(CaseFoldIter::new(text, ctx))
-    }
-}
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(CaseFoldIter::new(text, ctx))
+//     }
+// }
 
 pub struct CaseFoldIter<'a> {
     chars: Chars<'a>,
@@ -395,19 +394,6 @@ mod tests {
         let ctx = Context::new(LIT);
         assert_eq!(CaseFold.apply(Cow::Borrowed("JIS"), &ctx).unwrap(), "jis");
         assert_eq!(CaseFold.apply(Cow::Borrowed("JĮ"), &ctx).unwrap(), "jį");
-    }
-
-    #[test]
-    fn case_fold_char_mapper_eligibility() {
-        // 1:1 languages → Some
-        assert!(CaseFold.as_char_mapper(&Context::new(ENG)).is_some());
-        assert!(CaseFold.as_char_mapper(&Context::new(FRA)).is_some());
-        assert!(CaseFold.as_char_mapper(&Context::new(TUR)).is_some());
-        assert!(CaseFold.as_char_mapper(&Context::new(LIT)).is_some());
-
-        // Multi-char or peek-ahead → None
-        assert!(CaseFold.as_char_mapper(&Context::new(DEU)).is_none()); // ß → ss
-        assert!(CaseFold.as_char_mapper(&Context::new(NLD)).is_none()); // IJ peek-ahead
     }
 
     #[test]

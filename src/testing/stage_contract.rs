@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::stage::StageIter;
+use crate::stage::StaticStageIter;
 use crate::{lang::Lang, stage::Stage};
 
 /// Trait that stages implement to opt into the universal test suite.
@@ -131,13 +131,13 @@ pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
 }
 
 #[cfg(test)]
-pub fn iter_paths_equivalent_to_apply<S: Stage + StageIter + StageTestConfig>(stage: S) {
+pub fn iter_paths_equivalent_to_apply<S: Stage + StaticStageIter + StageTestConfig>(stage: S) {
     for &lang in S::one_to_one_languages() {
         let ctx = Context::new(lang);
         let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
         let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
         // Test static iter path
-        if let Some(iter) = stage.try_iter(input, &ctx) {
+        if let Some(iter) = stage.try_static_iter(input, &ctx) {
             let via_static: String = iter.collect();
             assert_eq!(
                 via_apply.as_ref(),
@@ -158,7 +158,7 @@ pub fn iter_paths_equivalent_to_apply<S: Stage + StageIter + StageTestConfig>(st
 }
 
 #[cfg(test)]
-pub fn stage_is_idempotent<S: Stage + StageIter + StageTestConfig>(stage: S) {
+pub fn stage_is_idempotent<S: Stage + StaticStageIter + StageTestConfig>(stage: S) {
     for &lang in all_langs() {
         let ctx = Context::new(lang);
         for &input in S::samples(lang) {
@@ -170,10 +170,10 @@ pub fn stage_is_idempotent<S: Stage + StageIter + StageTestConfig>(stage: S) {
                 "apply() not idempotent in {lang:?} on `{input}`"
             );
 
-            if stage.try_iter(input, &ctx).is_some() {
-                let iter = stage.try_iter(input, &ctx).unwrap();
+            if stage.try_static_iter(input, &ctx).is_some() {
+                let iter = stage.try_static_iter(input, &ctx).unwrap();
                 let via_static_once: String = iter.collect();
-                let iter2 = stage.try_iter(input, &ctx).unwrap();
+                let iter2 = stage.try_static_iter(input, &ctx).unwrap();
                 let via_static_twice: String = iter2.collect();
                 assert_eq!(
                     via_static_once, via_static_twice,

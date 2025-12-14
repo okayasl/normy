@@ -1,10 +1,10 @@
-use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
+use std::{borrow::Cow, iter::FusedIterator};
 
 use crate::{
     DEU, ENG, FRA, HIN, JPN, KOR, SPA, ZHO,
     context::Context,
     lang::{Lang, LangEntry, SegmentRule},
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{
         CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
@@ -206,15 +206,15 @@ impl Stage for SegmentWords {
         Ok(Cow::Owned(SegmentWordsIter::new(&text, ctx).collect()))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        Some(self) // always eligible if needs_apply passed us
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     Some(self) // always eligible if needs_apply passed us
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     Some(self)
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -225,27 +225,27 @@ impl Stage for SegmentWords {
     }
 }
 
-impl CharMapper for SegmentWords {
-    #[inline(always)]
-    fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-        Some(c)
-    }
+// impl CharMapper for SegmentWords {
+//     #[inline(always)]
+//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
+//         Some(c)
+//     }
 
-    #[inline(always)]
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(SegmentWordsIter::new(text, ctx))
-    }
-}
+//     #[inline(always)]
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(SegmentWordsIter::new(text, ctx))
+//     }
+// }
 
-impl StageIter for SegmentWords {
+impl StaticStageIter for SegmentWords {
     type Iter<'a> = SegmentWordsIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(SegmentWordsIter::new(text, ctx))
     }
 }

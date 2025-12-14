@@ -2,13 +2,12 @@ use crate::{
     JPN, KOR, ZHO,
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{fullwidth_to_halfwidth, is_fullwidth},
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
-use std::sync::Arc;
 
 /// Convert full-width (wide) ASCII forms → half-width (narrow) equivalents
 ///
@@ -40,15 +39,15 @@ impl Stage for UnifyWidth {
         Ok(Cow::Owned(UnifyWidthIter::new(&text).collect()))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        Some(self) // Always 1→1, always safe
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     Some(self) // Always 1→1, always safe
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     Some(self)
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -59,27 +58,27 @@ impl Stage for UnifyWidth {
     }
 }
 
-impl CharMapper for UnifyWidth {
-    #[inline(always)]
-    fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-        Some(fullwidth_to_halfwidth(c))
-    }
+// impl CharMapper for UnifyWidth {
+//     #[inline(always)]
+//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
+//         Some(fullwidth_to_halfwidth(c))
+//     }
 
-    #[inline(always)]
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(UnifyWidthIter::new(text))
-    }
-}
+//     #[inline(always)]
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         _ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(UnifyWidthIter::new(text))
+//     }
+// }
 
-impl StageIter for UnifyWidth {
+impl StaticStageIter for UnifyWidth {
     type Iter<'a> = UnifyWidthIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(UnifyWidthIter::new(text))
     }
 }
@@ -186,30 +185,30 @@ mod tests {
         assert_eq!(result, "12345!@#");
     }
 
-    #[test]
-    fn test_char_mapper_map_fullwidth() {
-        let stage = UnifyWidth;
-        let mapper: &dyn CharMapper = &stage;
+    // #[test]
+    // fn test_char_mapper_map_fullwidth() {
+    //     let stage = UnifyWidth;
+    //     let mapper: &dyn CharMapper = &stage;
 
-        assert_eq!(mapper.map('Ａ', &Context::new(ENG)), Some('A'));
-        assert_eq!(mapper.map('９', &Context::new(ENG)), Some('9'));
-        assert_eq!(mapper.map('！', &Context::new(ENG)), Some('!'));
+    //     assert_eq!(mapper.map('Ａ', &Context::new(ENG)), Some('A'));
+    //     assert_eq!(mapper.map('９', &Context::new(ENG)), Some('9'));
+    //     assert_eq!(mapper.map('！', &Context::new(ENG)), Some('!'));
 
-        // unchanged ASCII remains ASCII
-        assert_eq!(mapper.map('x', &Context::new(ENG)), Some('x'));
-    }
+    //     // unchanged ASCII remains ASCII
+    //     assert_eq!(mapper.map('x', &Context::new(ENG)), Some('x'));
+    // }
 
-    #[test]
-    fn test_char_mapper_bind_iterates_normalized() {
-        let stage = UnifyWidth;
-        let mapper: &dyn CharMapper = &stage;
+    // #[test]
+    // fn test_char_mapper_bind_iterates_normalized() {
+    //     let stage = UnifyWidth;
+    //     let mapper: &dyn CharMapper = &stage;
 
-        let binding = Context::new(ENG);
-        let iter = mapper.bind("ＡＢＣ １２３！", &binding);
-        let collected: String = iter.collect();
+    //     let binding = Context::new(ENG);
+    //     let iter = mapper.bind("ＡＢＣ １２３！", &binding);
+    //     let collected: String = iter.collect();
 
-        assert_eq!(collected, "ABC 123!");
-    }
+    //     assert_eq!(collected, "ABC 123!");
+    // }
 
     #[test]
     fn test_fullwidth_replace_sanity() {

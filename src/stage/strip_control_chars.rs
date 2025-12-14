@@ -1,13 +1,12 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::is_control,
 };
 use std::borrow::Cow;
 use std::iter::FusedIterator;
-use std::sync::Arc;
 
 /// Remove all Unicode control characters (General Category `Cc`)
 ///
@@ -46,15 +45,15 @@ impl Stage for StripControlChars {
         Ok(Cow::Owned(StripControlCharsIter::new(&text).collect()))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        Some(self)
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     Some(self)
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     Some(self)
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -65,27 +64,27 @@ impl Stage for StripControlChars {
     }
 }
 
-impl CharMapper for StripControlChars {
-    #[inline(always)]
-    fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-        if is_control(c) { None } else { Some(c) }
-    }
+// impl CharMapper for StripControlChars {
+//     #[inline(always)]
+//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
+//         if is_control(c) { None } else { Some(c) }
+//     }
 
-    #[inline(always)]
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(StripControlCharsIter::new(text))
-    }
-}
+//     #[inline(always)]
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         _ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(StripControlCharsIter::new(text))
+//     }
+// }
 
-impl StageIter for StripControlChars {
+impl StaticStageIter for StripControlChars {
     type Iter<'a> = StripControlCharsIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(StripControlCharsIter::new(text))
     }
 }
@@ -193,27 +192,27 @@ mod tests {
         assert_eq!(result, "helloworld");
     }
 
-    #[test]
-    fn test_char_mapper_map() {
-        let stage = StripControlChars;
-        let mapper: &dyn CharMapper = &stage;
-        let ctx = Context::default();
+    // #[test]
+    // fn test_char_mapper_map() {
+    //     let stage = StripControlChars;
+    //     let mapper: &dyn CharMapper = &stage;
+    //     let ctx = Context::default();
 
-        assert_eq!(mapper.map('A', &ctx), Some('A'));
-        assert_eq!(mapper.map('\u{0001}', &ctx), None);
-        assert_eq!(mapper.map('\u{007F}', &ctx), None);
-    }
+    //     assert_eq!(mapper.map('A', &ctx), Some('A'));
+    //     assert_eq!(mapper.map('\u{0001}', &ctx), None);
+    //     assert_eq!(mapper.map('\u{007F}', &ctx), None);
+    // }
 
-    #[test]
-    fn test_char_mapper_bind_iterates_filtered() {
-        let stage = StripControlChars;
-        let mapper: &dyn CharMapper = &stage;
-        let ctx = Context::default();
+    // #[test]
+    // fn test_char_mapper_bind_iterates_filtered() {
+    //     let stage = StripControlChars;
+    //     let mapper: &dyn CharMapper = &stage;
+    //     let ctx = Context::default();
 
-        let input = "A\u{0001}B\u{007F}C";
-        let collected: String = mapper.bind(input, &ctx).collect();
-        assert_eq!(collected, "ABC");
-    }
+    //     let input = "A\u{0001}B\u{007F}C";
+    //     let collected: String = mapper.bind(input, &ctx).collect();
+    //     assert_eq!(collected, "ABC");
+    // }
 
     #[test]
     fn test_idempotency() {

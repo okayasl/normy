@@ -1,4 +1,4 @@
-use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
+use std::borrow::Cow;
 
 use normy::{
     CaseFold, ENG, JPN, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation,
@@ -13,7 +13,7 @@ use normy::{
             search, social_media, web_scraping,
         },
     },
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
 };
 
 // ————————————————————————————————
@@ -45,25 +45,10 @@ impl Stage for StripEmoji {
     fn apply<'a>(&self, text: Cow<'a, str>, _: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(Cow::Owned(text.chars().filter(|&c| !is_emoji(c)).collect()))
     }
-    fn as_char_mapper(&self, _: &Context) -> Option<&dyn CharMapper> {
-        Some(self)
-    }
-    fn into_dyn_char_mapper(self: Arc<Self>, _: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
 }
 
-impl StageIter for StripEmoji {
+impl StaticStageIter for StripEmoji {
     type Iter<'a> = std::iter::Empty<char>;
-}
-
-impl CharMapper for StripEmoji {
-    fn map(&self, c: char, _: &Context) -> Option<char> {
-        (!is_emoji(c)).then_some(c)
-    }
-    fn bind<'a>(&self, text: &'a str, _: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(text.chars().filter(|&c| !is_emoji(c)))
-    }
 }
 
 pub fn custom_social_media() -> Profile<impl Process> {

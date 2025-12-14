@@ -2,11 +2,10 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{CharMapper, Stage, StageError, StageIter},
+    stage::{Stage, StageError, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::iter::FusedIterator;
-use std::sync::Arc;
 use std::{borrow::Cow, str::Chars};
 
 /// Simple, locale-aware lowercase transformation.
@@ -63,23 +62,18 @@ impl Stage for LowerCase {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let mapper = self
-            .as_char_mapper(ctx)
-            .expect("LowerCase always provides CharMapper");
-        let mut out = String::with_capacity(text.len());
-        out.extend(mapper.bind(&text, ctx));
-        Ok(Cow::Owned(out))
+        Ok(Cow::Owned(LowercaseIter::new(&text, ctx).collect()))
     }
 
-    #[inline]
-    fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-        Some(self)
-    }
+    // #[inline]
+    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
+    //     Some(self)
+    // }
 
-    #[inline]
-    fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-        Some(self)
-    }
+    // #[inline]
+    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
+    //     Some(self)
+    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -90,32 +84,32 @@ impl Stage for LowerCase {
     }
 }
 
-impl StageIter for LowerCase {
+impl StaticStageIter for LowerCase {
     type Iter<'a> = LowercaseIter<'a>;
 
     #[inline(always)]
-    fn try_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(LowercaseIter::new(text, ctx))
     }
 }
 
-impl CharMapper for LowerCase {
-    #[inline(always)]
-    fn map(&self, c: char, ctx: &Context) -> Option<char> {
-        Some(ctx.lang_entry.apply_lowercase(c))
-    }
+// impl CharMapper for LowerCase {
+//     #[inline(always)]
+//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
+//         Some(ctx.lang_entry.apply_lowercase(c))
+//     }
 
-    fn bind<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(LowercaseIter {
-            chars: text.chars(),
-            lang: &ctx.lang_entry,
-        })
-    }
-}
+//     fn bind<'a>(
+//         &self,
+//         text: &'a str,
+//         ctx: &'a Context,
+//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//         Box::new(LowercaseIter {
+//             chars: text.chars(),
+//             lang: &ctx.lang_entry,
+//         })
+//     }
+// }
 pub struct LowercaseIter<'a> {
     chars: Chars<'a>,
     lang: &'a LangEntry,
@@ -283,15 +277,6 @@ mod tests {
     fn lowercase_lithuanian_contextual_i() {
         let ctx = Context::new(LIT);
         assert_eq!(LowerCase.apply(Cow::Borrowed("JIS"), &ctx).unwrap(), "jis");
-    }
-
-    #[test]
-    fn lowercase_char_mapper_always_available() {
-        assert!(LowerCase.as_char_mapper(&Context::new(ENG)).is_some());
-        assert!(LowerCase.as_char_mapper(&Context::new(TUR)).is_some());
-        assert!(LowerCase.as_char_mapper(&Context::new(DEU)).is_some());
-        assert!(LowerCase.as_char_mapper(&Context::new(NLD)).is_some());
-        assert!(LowerCase.as_char_mapper(&Context::new(ELL)).is_some());
     }
 
     #[test]
