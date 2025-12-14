@@ -1,46 +1,60 @@
-use phf::{phf_map, phf_set};
-
 // Format control characters (General Category = Cf) and selected
 // zero-width characters relevant to text normalization.
 //
 // These are removed by `RemoveFormatControls` and commonly appear
 // in user-generated content, especially in mixed-script environments.
-static FORMAT_CONTROLS: phf::Set<char> = phf_set! {
-    '\u{200B}', // Zero-width space
-    '\u{200C}', // Zero-width non-joiner
-    '\u{200D}', // Zero-width joiner
-    '\u{200E}', // LTR mark
-    '\u{200F}', // RTL mark
-    '\u{202A}', // LTR embedding
-    '\u{202B}', // RTL embedding
-    '\u{202C}', // Pop directional formatting
-    '\u{202D}', // LTR override
-    '\u{202E}', // RTL override
-    '\u{2060}', // Word joiner
-    '\u{2061}', // Invisible function application
-    '\u{2062}', // Invisible times
-    '\u{2063}', // Invisible separator
-    '\u{2064}', // Invisible plus
-    '\u{2066}', // LTR isolate
-    '\u{2067}', // RTL isolate
-    '\u{2068}', // First-strong isolate
-    '\u{2069}', // Pop isolate
-    '\u{206A}', // Inhibit symmetric swapping (deprecated)
-    '\u{206B}', // Activate symmetric swapping (deprecated)
-    '\u{206C}', // Inhibit Arabic shaping (deprecated)
-    '\u{206D}', // Activate Arabic shaping (deprecated)
-    '\u{206E}', // National digit shapes (deprecated)
-    '\u{206F}', // Nominal digit shapes (deprecated)
-    '\u{FEFF}', // Zero-width no-break space / BOM
-};
+/// Returns true if the character is a format control character or
+/// one of the selected zero-width characters to be removed.
+#[inline(always)] // Use inline(always) for maximum performance boost
+pub const fn is_format_control(c: char) -> bool {
+    match c {
+        // Zero-width spaces and joiners
+        '\u{200B}' | // Zero-width space
+        '\u{200C}' | // Zero-width non-joiner
+        '\u{200D}' => true, // Zero-width joiner
 
-// Fast scan to check for any format controls.
+        // Directional Marks/Embeddings/Overrides/Isolates
+        '\u{200E}' | // LTR mark
+        '\u{200F}' | // RTL mark
+        '\u{202A}' | // LTR embedding
+        '\u{202B}' | // RTL embedding
+        '\u{202C}' | // Pop directional formatting
+        '\u{202D}' | // LTR override
+        '\u{202E}' | // RTL override
+        '\u{2066}' | // LTR isolate
+        '\u{2067}' | // RTL isolate
+        '\u{2068}' | // First-strong isolate
+        '\u{2069}' => true, // Pop isolate
+
+        // Invisible Operators / Word Joiner
+        '\u{2060}' | // Word joiner
+        '\u{2061}' | // Invisible function application
+        '\u{2062}' | // Invisible times
+        '\u{2063}' | // Invisible separator
+        '\u{2064}' => true, // Invisible plus
+
+        // Deprecated Format Controls
+        '\u{206A}' | // Inhibit symmetric swapping (deprecated)
+        '\u{206B}' | // Activate symmetric swapping (deprecated)
+        '\u{206C}' | // Inhibit Arabic shaping (deprecated)
+        '\u{206D}' | // Activate Arabic shaping (deprecated)
+        '\u{206E}' | // National digit shapes (deprecated)
+        '\u{206F}' => true, // Nominal digit shapes (deprecated)
+
+        // Zero-width no-break space / BOM
+        '\u{FEFF}' => true,
+
+        // Otherwise, it is not a format control character
+        _ => false,
+    }
+}
+
+// The calling function now uses the new standalone function
 #[inline]
 pub fn contains_format_controls(text: &str) -> bool {
     text.chars().any(is_format_control)
 }
 
-// Replace phf set lookup with an inlined, pattern/range-based check.
 // This is very fast and avoids hash/table indirections.
 #[inline(always)]
 pub fn is_unicode_whitespace(c: char) -> bool {
@@ -92,11 +106,6 @@ pub fn is_any_whitespace(c: char) -> bool {
     c.is_whitespace() || is_unicode_whitespace(c)
 }
 
-#[inline(always)]
-pub fn is_format_control(c: char) -> bool {
-    FORMAT_CONTROLS.contains(&c)
-}
-
 // Control characters (Category Cc). Format controls (Cf) are handled separately.
 #[inline(always)]
 pub fn is_control(c: char) -> bool {
@@ -123,20 +132,18 @@ pub fn fullwidth_to_halfwidth(c: char) -> char {
     }
 }
 
-// Punctuation normalization table.
-static PUNCT_NORM: phf::Map<char, char> = phf_map! {
-    '“' => '"', '”' => '"', '„' => '"', '«' => '"', '»' => '"',
-    '‘' => '\'', '’' => '\'', '‚' => '\'',
-    '–' => '-', '—' => '-', '─' => '-', '―' => '-',
-    '…' => '.', '⋯' => '.', '․' => '.', '‧' => '.',
-    '•' => '*', '·' => '*', '∙' => '*',
-    '‹' => '<', '›' => '>',
-    '′' => '"', '″' => '"',
-};
-
 #[inline(always)]
 pub fn normalize_punctuation_char(c: char) -> char {
-    PUNCT_NORM.get(&c).copied().unwrap_or(c)
+    match c {
+        '“' | '”' | '„' | '«' | '»' | '′' | '″' => '"',
+        '‘' | '’' | '‚' => '\'',
+        '–' | '—' | '─' | '―' => '-',
+        '…' | '⋯' | '․' | '‧' => '.',
+        '•' | '·' | '∙' => '*',
+        '‹' => '<',
+        '›' => '>',
+        _ => c, // Return the character unchanged if not found
+    }
 }
 
 // Hangul syllables + jamo + compatibility + extended ranges.

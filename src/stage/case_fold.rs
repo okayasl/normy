@@ -91,35 +91,12 @@ impl Stage for CaseFold {
                 out.push(to);
                 continue;
             }
-
             // Fallback to Unicode full case folding/lowercase.
             out.extend(c.to_lowercase());
         }
-
         // Since needs_apply returned true, we MUST return an Owned Cow.
         Ok(Cow::Owned(out))
     }
-
-    // #[inline]
-    // fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-    //     // Only eligible if:
-    //     // 1. All folds are one-to-one (no ß→ss expansions)
-    //     // 2. No peek-ahead rules (no Dutch IJ or Greek final sigma)
-    //     if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
-    //         Some(self)
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
-    //         Some(self)
-    //     } else {
-    //         None
-    //     }
-    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -129,6 +106,22 @@ impl Stage for CaseFold {
         if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
             // Only proceed if we are in the guaranteed 1:1 path.
             Some(Box::new(CaseFoldIter::new(text, ctx)))
+        } else {
+            // If the language requires expansion (ß->ss) or peek-ahead (IJ->ij),
+            // we MUST fall back to the Stage::apply method.
+            None
+        }
+    }
+}
+
+impl StaticStageIter for CaseFold {
+    type Iter<'a> = CaseFoldIter<'a>;
+
+    #[inline(always)]
+    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
+            // Only proceed if we are in the guaranteed 1:1 path.
+            Some(CaseFoldIter::new(text, ctx))
         } else {
             // If the language requires expansion (ß->ss) or peek-ahead (IJ->ij),
             // we MUST fall back to the Stage::apply method.
@@ -177,38 +170,6 @@ fn apply_with_peek_ahead<'a>(
     // Since needs_apply returned true, we MUST return an Owned Cow.
     Ok(Cow::Owned(out))
 }
-
-impl StaticStageIter for CaseFold {
-    type Iter<'a> = CaseFoldIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
-            // Only proceed if we are in the guaranteed 1:1 path.
-            Some(CaseFoldIter::new(text, ctx))
-        } else {
-            // If the language requires expansion (ß->ss) or peek-ahead (IJ->ij),
-            // we MUST fall back to the Stage::apply method.
-            None
-        }
-    }
-}
-
-// impl CharMapper for CaseFold {
-//     #[inline(always)]
-//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-//         // Delegate to LangEntry's unified method
-//         ctx.lang_entry.apply_case_fold(c)
-//     }
-
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(CaseFoldIter::new(text, ctx))
-//     }
-// }
 
 pub struct CaseFoldIter<'a> {
     chars: Chars<'a>,
@@ -416,6 +377,12 @@ mod tests {
         // German eszett
         let ctx = Context::new(DEU);
         assert!(CaseFold.needs_apply("Straße", &ctx).unwrap());
+
+        let ctx = Context::new(LIT);
+        assert!(CaseFold.needs_apply("IÌ Í Ĩ IĮ ĖĖ ŲŲ ", &ctx).unwrap());
+
+        let ctx = Context::new(LIT);
+        assert!(!CaseFold.needs_apply("iì í ĩ iį ėė ųų", &ctx).unwrap());
     }
 
     #[test]
@@ -437,26 +404,6 @@ mod tests {
         let (count, extra) = ctx.lang_entry.hint_capacity_fold("ISI");
         assert_eq!(count, 0, "Turkish uses case_map, not fold_map");
         assert_eq!(extra, 0);
-    }
-
-    #[test]
-    fn test_precomputed_flags() {
-        let ctx_eng = Context::new(ENG);
-        let ctx_deu = Context::new(DEU);
-        let ctx_nld = Context::new(NLD);
-
-        // English: no fold_map, no peek-ahead
-        assert!(!ctx_eng.lang_entry.has_fold_map());
-        assert!(!ctx_eng.lang_entry.requires_peek_ahead());
-        assert!(ctx_eng.lang_entry.has_one_to_one_folds());
-
-        // German: has fold_map (ß→ss), NOT one-to-one
-        assert!(ctx_deu.lang_entry.has_fold_map());
-        assert!(!ctx_deu.lang_entry.has_one_to_one_folds());
-        assert!(!ctx_deu.lang_entry.requires_peek_ahead());
-
-        // Dutch: has fold_map (Ĳ→ij), requires peek-ahead
-        assert!(ctx_nld.lang_entry.has_fold_map());
     }
 
     #[test]

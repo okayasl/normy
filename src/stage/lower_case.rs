@@ -65,16 +65,6 @@ impl Stage for LowerCase {
         Ok(Cow::Owned(LowercaseIter::new(&text, ctx).collect()))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self)
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
-
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -93,23 +83,6 @@ impl StaticStageIter for LowerCase {
     }
 }
 
-// impl CharMapper for LowerCase {
-//     #[inline(always)]
-//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-//         Some(ctx.lang_entry.apply_lowercase(c))
-//     }
-
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(LowercaseIter {
-//             chars: text.chars(),
-//             lang: &ctx.lang_entry,
-//         })
-//     }
-// }
 pub struct LowercaseIter<'a> {
     chars: Chars<'a>,
     lang: &'a LangEntry,

@@ -51,24 +51,6 @@ impl Stage for Transliterate {
         Ok(Cow::Owned(TransliterateIter::new(&text, ctx).collect()))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, ctx: &Context) -> Option<&dyn CharMapper> {
-    //     if ctx.lang_entry.has_one_to_one_transliterate() {
-    //         Some(self)
-    //     } else {
-    //         None
-    //     }
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     if ctx.lang_entry.has_one_to_one_transliterate() {
-    //         Some(self)
-    //     } else {
-    //         None
-    //     }
-    // }
-
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -77,25 +59,6 @@ impl Stage for Transliterate {
         Some(Box::new(TransliterateIter::new(text, ctx)))
     }
 }
-
-// impl CharMapper for Transliterate {
-//     #[inline(always)]
-//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-//         ctx.lang_entry
-//             .find_transliterate_map(c)
-//             .and_then(|to| to.chars().next())
-//             .or(Some(c))
-//     }
-
-//     #[inline(always)]
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(TransliterateIter::new(text, ctx))
-//     }
-// }
 
 impl StaticStageIter for Transliterate {
     type Iter<'a> = TransliterateIter<'a>;
@@ -379,23 +342,5 @@ mod tests {
         let (count, extra) = ctx.lang_entry.hint_capacity_transliterate("Façade");
         assert_eq!(count, 1, "Should detect 1 transliteration");
         assert_eq!(extra, 0, "One-to-one should have 0 extra bytes");
-    }
-
-    #[test]
-    fn test_precomputed_flags() {
-        let ctx_eng = Context::new(ENG);
-        let ctx_fra = Context::new(FRA);
-        let ctx_cat = Context::new(CAT);
-
-        // English: no transliterate map
-        assert!(!ctx_eng.lang_entry.has_transliterate_map());
-
-        // French: has transliterate map, not one-to-one
-        assert!(ctx_fra.lang_entry.has_transliterate_map());
-        assert!(!ctx_fra.lang_entry.has_one_to_one_transliterate());
-
-        // Catalan: has transliterate map, IS one-to-one (Ç→c, ç→c)
-        assert!(ctx_cat.lang_entry.has_transliterate_map());
-        assert!(ctx_cat.lang_entry.has_one_to_one_transliterate());
     }
 }

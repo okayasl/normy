@@ -30,13 +30,6 @@ use std::{borrow::Cow, str::Chars};
 /// | `′`, `″`                  | `"` |
 ///
 /// All other characters, including ASCII, are left unchanged.
-///
-/// # Features
-/// - Implements `Stage` and `CharMapper`, supporting full-text normalization
-///   or character-wise mapping.
-/// - Returns `Cow::Borrowed` if no changes are needed, avoiding unnecessary allocations.
-/// - Suitable for pipelines that require consistent ASCII punctuation, e.g.,
-///   search indexing, simplified display, or NLP preprocessing.
 pub struct NormalizePunctuation;
 
 impl Stage for NormalizePunctuation {
@@ -55,15 +48,6 @@ impl Stage for NormalizePunctuation {
         ))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self)
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -81,18 +65,6 @@ impl StaticStageIter for NormalizePunctuation {
         Some(NormalizePunctuationIter::new(text))
     }
 }
-
-// impl CharMapper for NormalizePunctuation {
-//     #[inline(always)]
-//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-//         let n = normalize_punctuation_char(c);
-//         if n == '\0' { None } else { Some(n) }
-//     }
-
-//     fn bind<'a>(&self, text: &'a str, _ctx: &Context) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(NormalizePunctuationIter::new(text))
-//     }
-// }
 
 pub struct NormalizePunctuationIter<'a> {
     chars: Chars<'a>,
@@ -174,15 +146,6 @@ mod contract_tests {
             .unwrap();
         assert_eq!(result, "\"Hello\"-'world'.*<>");
     }
-
-    // #[test]
-    // fn test_char_mapper_handles_unchanged() {
-    //     let stage = NormalizePunctuation;
-    //     let mapper: &dyn CharMapper = &stage;
-    //     assert_eq!(mapper.map('A', &Context::new(ENG)), Some('A'));
-    //     assert_eq!(mapper.map(' ', &Context::new(ENG)), Some(' '));
-    //     assert_eq!(mapper.map('1', &Context::new(ENG)), Some('1'));
-    // }
 }
 
 #[cfg(test)]
@@ -236,29 +199,6 @@ mod tests {
             .unwrap();
         assert_eq!(result, "Wait. really?");
     }
-
-    // #[test]
-    // fn test_char_mapper_map() {
-    //     let stage = NormalizePunctuation;
-    //     let mapper: &dyn CharMapper = &stage;
-
-    //     assert_eq!(mapper.map('“', &Context::new(ENG)), Some('"'));
-    //     assert_eq!(mapper.map('’', &Context::new(ENG)), Some('\''));
-    //     assert_eq!(mapper.map('—', &Context::new(ENG)), Some('-'));
-    //     assert_eq!(mapper.map('x', &Context::new(ENG)), Some('x')); // unchanged ASCII
-    // }
-
-    // #[test]
-    // fn test_char_mapper_bind_iterates_normalized() {
-    //     let stage = NormalizePunctuation;
-    //     let mapper: &dyn CharMapper = &stage;
-
-    //     let binding = Context::new(ENG);
-    //     let iter = mapper.bind("A “quote” and… dash—", &binding);
-    //     let collected: String = iter.collect();
-
-    //     assert_eq!(collected, "A \"quote\" and. dash-");
-    // }
 
     #[test]
     fn test_normalize_punctuation() {

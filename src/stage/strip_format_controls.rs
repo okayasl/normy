@@ -42,16 +42,6 @@ impl Stage for StripFormatControls {
         Ok(Cow::Owned(StripFormatControlsIter::new(&text).collect()))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self)
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
-
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -60,22 +50,6 @@ impl Stage for StripFormatControls {
         Some(Box::new(StripFormatControlsIter::new(text)))
     }
 }
-
-// impl CharMapper for StripFormatControls {
-//     #[inline(always)]
-//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-//         if is_format_control(c) { None } else { Some(c) }
-//     }
-
-//     #[inline(always)]
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         _ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(StripFormatControlsIter::new(text))
-//     }
-// }
 
 impl StaticStageIter for StripFormatControls {
     type Iter<'a> = StripFormatControlsIter<'a>;

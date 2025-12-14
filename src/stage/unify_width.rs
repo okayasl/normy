@@ -39,16 +39,6 @@ impl Stage for UnifyWidth {
         Ok(Cow::Owned(UnifyWidthIter::new(&text).collect()))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self) // Always 1→1, always safe
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
-
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -57,22 +47,6 @@ impl Stage for UnifyWidth {
         Some(Box::new(UnifyWidthIter::new(text)))
     }
 }
-
-// impl CharMapper for UnifyWidth {
-//     #[inline(always)]
-//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-//         Some(fullwidth_to_halfwidth(c))
-//     }
-
-//     #[inline(always)]
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         _ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(UnifyWidthIter::new(text))
-//     }
-// }
 
 impl StaticStageIter for UnifyWidth {
     type Iter<'a> = UnifyWidthIter<'a>;
@@ -184,32 +158,6 @@ mod tests {
             .unwrap();
         assert_eq!(result, "12345!@#");
     }
-
-    // #[test]
-    // fn test_char_mapper_map_fullwidth() {
-    //     let stage = UnifyWidth;
-    //     let mapper: &dyn CharMapper = &stage;
-
-    //     assert_eq!(mapper.map('Ａ', &Context::new(ENG)), Some('A'));
-    //     assert_eq!(mapper.map('９', &Context::new(ENG)), Some('9'));
-    //     assert_eq!(mapper.map('！', &Context::new(ENG)), Some('!'));
-
-    //     // unchanged ASCII remains ASCII
-    //     assert_eq!(mapper.map('x', &Context::new(ENG)), Some('x'));
-    // }
-
-    // #[test]
-    // fn test_char_mapper_bind_iterates_normalized() {
-    //     let stage = UnifyWidth;
-    //     let mapper: &dyn CharMapper = &stage;
-
-    //     let binding = Context::new(ENG);
-    //     let iter = mapper.bind("ＡＢＣ １２３！", &binding);
-    //     let collected: String = iter.collect();
-
-    //     assert_eq!(collected, "ABC 123!");
-    // }
-
     #[test]
     fn test_fullwidth_replace_sanity() {
         let stage = UnifyWidth;

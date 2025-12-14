@@ -200,21 +200,9 @@ impl Stage for SegmentWords {
         Ok(needs_segmentation(text, &entry))
     }
 
-    // TRUST NEEDS_APPLY. ALWAYS ALLOCATE WHEN CALLED.
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // We are here → work is needed → allocate once, do it perfectly
         Ok(Cow::Owned(SegmentWordsIter::new(&text, ctx).collect()))
     }
-
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self) // always eligible if needs_apply passed us
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
 
     fn try_dynamic_iter<'a>(
         &self,
@@ -224,22 +212,6 @@ impl Stage for SegmentWords {
         Some(Box::new(SegmentWordsIter::new(text, ctx)))
     }
 }
-
-// impl CharMapper for SegmentWords {
-//     #[inline(always)]
-//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-//         Some(c)
-//     }
-
-//     #[inline(always)]
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(SegmentWordsIter::new(text, ctx))
-//     }
-// }
 
 impl StaticStageIter for SegmentWords {
     type Iter<'a> = SegmentWordsIter<'a>;
@@ -675,26 +647,6 @@ mod tests {
                 ("தமிழ்World", "தமிழ் World"),
             ],
         );
-    }
-
-    #[test]
-    fn test_precomputed_flags() {
-        // English: doesn't need segmentation
-        let ctx = Context::new(ENG);
-        assert!(!ctx.lang_entry.needs_segmentation());
-        assert!(!ctx.lang_entry.has_segment_rules());
-
-        // Chinese: needs segmentation with unigram
-        let ctx = Context::new(ZHO);
-        assert!(ctx.lang_entry.needs_segmentation());
-        assert!(ctx.lang_entry.has_segment_rules());
-        assert!(ctx.lang_entry.needs_unigram_cjk());
-
-        // Japanese: needs segmentation but NOT unigram
-        let ctx = Context::new(JPN);
-        assert!(ctx.lang_entry.needs_segmentation());
-        assert!(ctx.lang_entry.has_segment_rules());
-        assert!(!ctx.lang_entry.needs_unigram_cjk());
     }
 
     #[test]

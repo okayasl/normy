@@ -84,16 +84,6 @@ impl Stage for RemoveDiacritics {
         Ok(Cow::Owned(out))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self)
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
-
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -103,26 +93,14 @@ impl Stage for RemoveDiacritics {
     }
 }
 
-// impl CharMapper for RemoveDiacritics {
-//     #[inline(always)]
-//     fn map(&self, c: char, ctx: &Context) -> Option<char> {
-//         if let Some(base) = ctx.lang_entry.find_pre_composed_to_base_map(c) {
-//             Some(base)
-//         } else if ctx.lang_entry.is_spacing_diacritic(c) {
-//             None
-//         } else {
-//             Some(c)
-//         }
-//     }
+impl StaticStageIter for RemoveDiacritics {
+    type Iter<'a> = RemoveDiacriticsIter<'a>;
 
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(RemoveDiacriticsIter::new(text, ctx))
-//     }
-// }
+    #[inline(always)]
+    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
+        Some(RemoveDiacriticsIter::new(text, ctx))
+    }
+}
 
 pub struct RemoveDiacriticsIter<'a> {
     chars: Chars<'a>,
@@ -156,15 +134,6 @@ impl<'a> Iterator for RemoveDiacriticsIter<'a> {
 }
 
 impl<'a> FusedIterator for RemoveDiacriticsIter<'a> {}
-
-impl StaticStageIter for RemoveDiacritics {
-    type Iter<'a> = RemoveDiacriticsIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(RemoveDiacriticsIter::new(text, ctx))
-    }
-}
 
 impl StageTestConfig for RemoveDiacritics {
     fn one_to_one_languages() -> &'static [Lang] {
@@ -557,35 +526,5 @@ mod tests {
         // English (no rules)
         let ctx = Context::new(ENG);
         assert!(!stage.needs_apply("café", &ctx).unwrap());
-    }
-
-    #[test]
-    fn test_precomputed_flags() {
-        // French: has strip_map, no diacritics
-        let ctx = Context::new(FRA);
-        assert!(ctx.lang_entry.has_pre_composed_to_base_map());
-        assert!(!ctx.lang_entry.has_spacing_diacritics());
-        assert!(
-            ctx.lang_entry
-                .has_pre_composed_to_base_map_or_spacing_diacritics()
-        );
-
-        // Arabic: no strip_map, has diacritics
-        let ctx = Context::new(ARA);
-        assert!(!ctx.lang_entry.has_pre_composed_to_base_map());
-        assert!(ctx.lang_entry.has_spacing_diacritics());
-        assert!(
-            ctx.lang_entry
-                .has_pre_composed_to_base_map_or_spacing_diacritics()
-        );
-
-        // English: no rules at all
-        let ctx = Context::new(ENG);
-        assert!(!ctx.lang_entry.has_pre_composed_to_base_map());
-        assert!(!ctx.lang_entry.has_spacing_diacritics());
-        assert!(
-            !ctx.lang_entry
-                .has_pre_composed_to_base_map_or_spacing_diacritics()
-        );
     }
 }

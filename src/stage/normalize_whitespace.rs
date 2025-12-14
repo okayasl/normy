@@ -230,16 +230,6 @@ impl Stage for NormalizeWhitespace {
         Ok(self.apply_full(text))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self)
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
-
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -529,28 +519,6 @@ impl<'a> Iterator for NormalizeWhitespaceIter<'a> {
 }
 
 impl<'a> FusedIterator for NormalizeWhitespaceIter<'a> {}
-
-// impl CharMapper for NormalizeWhitespace {
-//     #[inline(always)]
-//     fn map(&self, _c: char, _ctx: &Context) -> Option<char> {
-//         None // We use bind() exclusively - it's the hot path!
-//     }
-
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         _ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         if self.collapse {
-//             if text.is_ascii() {
-//                 return Box::new(WhitespaceAsciiIter::new(text, *self));
-//             } else {
-//                 return Box::new(WhitespaceCollapseIter::new(text, *self));
-//             }
-//         }
-//         Box::new(WhitespacePreserveIter::new(text, *self))
-//     }
-// }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TIER 1: ASCII FAST PATH - Byte-level operations, no UTF-8 decoding

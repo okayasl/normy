@@ -1,11 +1,15 @@
-use std::{borrow::Cow, time::Duration};
+use std::{borrow::Cow, hint::black_box, time::Duration};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
-    ARA, COLLAPSE_WHITESPACE, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN, JPN, KOR, LIT, LowerCase,
-    NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy, POL, RUS,
-    RemoveDiacritics, SPA, SegmentWords, StripControlChars, StripHtml, THA, TRIM_WHITESPACE, TUR,
-    Transliterate, UnifyWidth, VIE, ZHO, lang::Lang, stage::StaticStageIter,
+    ARA, COLLAPSE_WHITESPACE, COLLAPSE_WHITESPACE_UNICODE, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN,
+    JPN, KOR, LIT, LowerCase, NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL,
+    NormalizePunctuation, Normy, POL, RUS, RemoveDiacritics, SPA, SegmentWords, StripControlChars,
+    StripHtml, THA, TRIM_WHITESPACE, TRIM_WHITESPACE_UNICODE, TUR, Transliterate, UnifyWidth, VIE,
+    ZHO,
+    context::Context,
+    lang::Lang,
+    stage::{Stage, StaticStageIter},
 };
 
 // 16 languages — the exact set that will appear in the Normy white paper
@@ -46,6 +50,154 @@ const SAMPLES: &[(&str, Lang)] = &[
     ("<b>Hello naïve World!</b>\t\r\n  résumé 🇫🇷", ENG),
     ("IÌ Í Ĩ IĮ ĖĖ ŲŲ – Lithuanian edge cases", LIT),
 ];
+
+fn stage_paths_benches_auto<S, C>(c: &mut Criterion, stage_name: &str, constructor: C)
+where
+    S: Stage + StaticStageIter + 'static,
+    C: Fn() -> S + Copy,
+{
+    let sample_stage = constructor();
+    let sample_ctx = Context::default();
+    let supports_static = sample_stage.try_static_iter("test", &sample_ctx).is_some();
+    let supports_dynamic = sample_stage.try_dynamic_iter("test", &sample_ctx).is_some();
+
+    let mut group = c.benchmark_group(format!("{stage_name}_paths"));
+
+    let mut auto_unchanged = Vec::new();
+
+    for &(text, lang) in SAMPLES {
+        let stage = constructor();
+        let ctx = Context::new(lang);
+        let normalized_cow = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
+        let normalized = normalized_cow.as_ref().to_string();
+        auto_unchanged.push((normalized, lang));
+
+        // Bench changed - apply
+        group.bench_function(
+            BenchmarkId::new("apply_changed", format!("{}-{}", lang.code(), text)),
+            |b| {
+                b.iter_batched(
+                    constructor,
+                    |stage| {
+                        let ctx = normy::context::Context::new(lang);
+                        let cow = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
+                        let s = cow.into_owned();
+                        black_box(s)
+                    },
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+
+        // static_iter changed
+        if supports_static {
+            group.bench_function(
+                BenchmarkId::new("static_iter_changed", format!("{}-{}", lang.code(), text)),
+                |b| {
+                    b.iter_batched(
+                        constructor,
+                        |stage| {
+                            let ctx = normy::context::Context::new(lang);
+                            if let Some(iter) = stage.try_static_iter(text, &ctx) {
+                                let s = iter.collect::<String>();
+                                black_box(s);
+                            }
+                        },
+                        BatchSize::SmallInput,
+                    )
+                },
+            );
+        }
+
+        // dynamic_iter changed
+        if supports_dynamic {
+            group.bench_function(
+                BenchmarkId::new("dynamic_iter_changed", format!("{}-{}", lang.code(), text)),
+                |b| {
+                    b.iter_batched(
+                        constructor,
+                        |stage| {
+                            let ctx = normy::context::Context::new(lang);
+                            if let Some(iter) = stage.try_dynamic_iter(text, &ctx) {
+                                let s = iter.collect::<String>();
+                                black_box(s);
+                            }
+                        },
+                        BatchSize::SmallInput,
+                    )
+                },
+            );
+        }
+    }
+
+    // Unchanged benches
+    for (normalized, lang) in auto_unchanged {
+        // apply unchanged
+        group.bench_function(
+            BenchmarkId::new("apply_unchanged", format!("{}-{}", lang.code(), normalized)),
+            |b| {
+                b.iter_batched(
+                    constructor,
+                    |stage| {
+                        let ctx = normy::context::Context::new(lang);
+                        let cow = stage.apply(Cow::Borrowed(&normalized), &ctx).unwrap();
+                        let s = cow.into_owned();
+                        black_box(s)
+                    },
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+
+        // static_iter unchanged
+        if supports_static {
+            group.bench_function(
+                BenchmarkId::new(
+                    "static_iter_unchanged",
+                    format!("{}-{}", lang.code(), normalized),
+                ),
+                |b| {
+                    b.iter_batched(
+                        constructor,
+                        |stage| {
+                            let ctx = normy::context::Context::new(lang);
+                            if let Some(iter) = stage.try_static_iter(&normalized, &ctx) {
+                                let s = iter.collect::<String>();
+                                black_box(s);
+                            }
+                        },
+                        BatchSize::SmallInput,
+                    )
+                },
+            );
+        }
+
+        // dynamic_iter unchanged
+        if supports_dynamic {
+            group.bench_function(
+                BenchmarkId::new(
+                    "dynamic_iter_unchanged",
+                    format!("{}-{}", lang.code(), normalized),
+                ),
+                |b| {
+                    b.iter_batched(
+                        constructor,
+                        |stage| {
+                            let ctx = normy::context::Context::new(lang);
+                            if let Some(iter) = stage.try_dynamic_iter(&normalized, &ctx) {
+                                let s = iter.collect::<String>();
+                                black_box(s);
+                            }
+                        },
+                        BatchSize::SmallInput,
+                    )
+                },
+            );
+        }
+    }
+
+    group.finish();
+}
 
 // S is the concrete stage type (e.g. LowerCase, CaseFold, ...)
 fn stage_benches_auto<S, C>(c: &mut Criterion, stage_name: &str, constructor: C)
@@ -123,30 +275,51 @@ where
     group.finish();
 }
 
+macro_rules! bench_stages {
+    // This defines the macro syntax: takes a list of identifiers (the stages)
+    ($c:expr, [ $( $stage:ident ),* ]) => {
+        // The macro repeats the following code block for every identifier ($stage)
+        $(
+            // Convert the identifier to a string literal for the name
+            let name = stringify!($stage);
+
+            // Call the bench functions, passing a closure that constructs the stage
+            stage_benches_auto($c, name, || $stage);
+            stage_paths_benches_auto($c, name, || $stage);
+        )*
+    };
+}
+
 fn stage_matrix(c: &mut Criterion) {
-    stage_benches_auto(c, "LowerCase", || LowerCase);
-    stage_benches_auto(c, "CaseFold", || CaseFold);
-    stage_benches_auto(c, "RemoveDiacritics", || RemoveDiacritics);
-    stage_benches_auto(c, "Transliterate", || Transliterate);
-    stage_benches_auto(c, "SegmentWords", || SegmentWords);
-    // stage_benches_auto(c, "UnifyWidth", || UnifyWidth);
-    // stage_benches_auto(c, "NFC", || NFC);
-    // stage_benches_auto(c, "NFD", || NFD);
-    // stage_benches_auto(c, "NFKC", || NFKC);
-    // stage_benches_auto(c, "NFKD", || NFKD);
-    // stage_benches_auto(c, "NormalizePunctuation", || NormalizePunctuation);
-    // stage_benches_auto(c, "StripControlChars", || StripControlChars);
-    // stage_benches_auto(c, "StripHtml", || StripHtml);
-    // stage_benches_auto(c, "NormalizeWhitespaceFull", || NORMALIZE_WHITESPACE_FULL);
-    // stage_benches_auto(c, "CollapseWhitespaceOnly", || COLLAPSE_WHITESPACE_ONLY);
-    // stage_benches_auto(c, "TrimWhitespaceOnly", || TRIM_WHITESPACE_ONLY);
+    bench_stages!(
+        c,
+        [
+            // LowerCase,
+            // CaseFold,
+            // RemoveDiacritics,
+            // Transliterate,
+            // SegmentWords,
+            // UnifyWidth,
+            // NFC,
+            // NFD,
+            // NFKC,
+            // NFKD,
+            NormalizePunctuation,
+            StripControlChars // StripHtml,
+                              // NORMALIZE_WHITESPACE_FULL,
+                              // COLLAPSE_WHITESPACE,
+                              // COLLAPSE_WHITESPACE_UNICODE,
+                              // TRIM_WHITESPACE,
+                              // TRIM_WHITESPACE_UNICODE
+        ]
+    );
 }
 
 criterion_group!(
     name = benches;
     config = Criterion::default()
-        .measurement_time(Duration::from_secs(1))
-        .warm_up_time(Duration::from_secs(1))
+        .measurement_time(Duration::from_secs(2))
+        .warm_up_time(Duration::from_secs(2))
         .sample_size(500)
         .noise_threshold(0.015)
         .significance_level(0.05);

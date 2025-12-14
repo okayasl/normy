@@ -45,16 +45,6 @@ impl Stage for StripControlChars {
         Ok(Cow::Owned(StripControlCharsIter::new(&text).collect()))
     }
 
-    // #[inline]
-    // fn as_char_mapper(&self, _ctx: &Context) -> Option<&dyn CharMapper> {
-    //     Some(self)
-    // }
-
-    // #[inline]
-    // fn into_dyn_char_mapper(self: Arc<Self>, _ctx: &Context) -> Option<Arc<dyn CharMapper>> {
-    //     Some(self)
-    // }
-
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -63,22 +53,6 @@ impl Stage for StripControlChars {
         Some(Box::new(StripControlCharsIter::new(text)))
     }
 }
-
-// impl CharMapper for StripControlChars {
-//     #[inline(always)]
-//     fn map(&self, c: char, _ctx: &Context) -> Option<char> {
-//         if is_control(c) { None } else { Some(c) }
-//     }
-
-//     #[inline(always)]
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         _ctx: &'a Context,
-//     ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//         Box::new(StripControlCharsIter::new(text))
-//     }
-// }
 
 impl StaticStageIter for StripControlChars {
     type Iter<'a> = StripControlCharsIter<'a>;
@@ -191,28 +165,6 @@ mod tests {
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
         assert_eq!(result, "helloworld");
     }
-
-    // #[test]
-    // fn test_char_mapper_map() {
-    //     let stage = StripControlChars;
-    //     let mapper: &dyn CharMapper = &stage;
-    //     let ctx = Context::default();
-
-    //     assert_eq!(mapper.map('A', &ctx), Some('A'));
-    //     assert_eq!(mapper.map('\u{0001}', &ctx), None);
-    //     assert_eq!(mapper.map('\u{007F}', &ctx), None);
-    // }
-
-    // #[test]
-    // fn test_char_mapper_bind_iterates_filtered() {
-    //     let stage = StripControlChars;
-    //     let mapper: &dyn CharMapper = &stage;
-    //     let ctx = Context::default();
-
-    //     let input = "A\u{0001}B\u{007F}C";
-    //     let collected: String = mapper.bind(input, &ctx).collect();
-    //     assert_eq!(collected, "ABC");
-    // }
 
     #[test]
     fn test_idempotency() {
