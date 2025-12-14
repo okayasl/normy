@@ -138,10 +138,6 @@ impl StageTestConfig for UnifyWidth {
             ("　", " "),       // Ideographic space
         ]
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 #[cfg(test)]

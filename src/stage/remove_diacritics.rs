@@ -212,10 +212,6 @@ impl StageTestConfig for RemoveDiacritics {
             _ => &[],
         }
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true // Can now test accurately with new methods!
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

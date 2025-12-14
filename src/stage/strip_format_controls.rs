@@ -143,10 +143,6 @@ impl StageTestConfig for StripFormatControls {
             ("a\u{200E}b", "ab"),                 // Remove LRM
         ]
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 #[cfg(test)]

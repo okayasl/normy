@@ -159,10 +159,6 @@ impl StageTestConfig for NormalizePunctuation {
             ("…", "."),                 // Ellipsis
         ]
     }
-
-    fn skip_needs_apply_test() -> bool {
-        true
-    }
 }
 
 #[cfg(test)]

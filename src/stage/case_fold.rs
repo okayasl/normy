@@ -307,10 +307,6 @@ impl StageTestConfig for CaseFold {
             ],
         }
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

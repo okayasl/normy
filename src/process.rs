@@ -1,8 +1,6 @@
 //! Process abstraction
 //! ChainedProcess is monomorphised – the compiler knows the concrete
-//! type of every stage.  When a stage returns `Some(&dyn CharMapper)` we
-//! call bind once and hand the resulting `FusedIterator` to the next
-//! stage.  The Rust compiler inlines every `Iterator::next` and fuses the
+//! type of every stage. The Rust compiler inlines every `Iterator::next` and fuses the
 //! whole chain into one machine-code loop – zero heap, zero bounds checks.
 //! DynamicProcess  is the dynamic fallback.
 use crate::{
@@ -35,22 +33,11 @@ impl<S: Stage + StageIter, P: Process> Process for ChainedProcess<S, P> {
         if !self.stage.needs_apply(&current, ctx)? {
             return Ok(current);
         }
-
-        // BEST PATH: Fully static, zero dyn dispatch
         if let Some(iter) = self.stage.try_iter(&current, ctx) {
             let mut out = String::with_capacity(current.len());
             out.extend(iter);
             return Ok(Cow::Owned(out));
         }
-
-        if let Some(mapper) = self.stage.as_char_mapper(ctx) {
-            let iter = mapper.bind(&current, ctx);
-            let mut out = String::with_capacity(current.len());
-            out.extend(iter);
-            return Ok(Cow::Owned(out));
-        }
-
-        // FALLBACK 2: apply()
         self.stage.apply(current, ctx)
     }
 }

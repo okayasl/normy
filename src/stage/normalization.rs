@@ -101,13 +101,6 @@ macro_rules! impl_stage_test_config {
             fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
                 &["hello", "world123", "test", ""]
             }
-
-            fn skip_needs_apply_test() -> bool {
-                true
-            }
-            fn skip_zero_copy_apply_test() -> bool {
-                true
-            }
         }
     };
 }

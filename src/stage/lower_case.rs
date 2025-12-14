@@ -196,10 +196,6 @@ impl StageTestConfig for LowerCase {
             _ => &[("HELLO", "hello")],
         }
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

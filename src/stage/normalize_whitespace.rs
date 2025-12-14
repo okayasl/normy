@@ -3,7 +3,7 @@ use crate::{
     lang::Lang,
     stage::{CharMapper, Stage, StageError, StageIter},
     testing::stage_contract::StageTestConfig,
-    unicode::{could_be_unicode_ws_start, is_ascii_whitespace_fast, is_unicode_whitespace},
+    unicode::{is_ascii_whitespace_fast, is_unicode_whitespace},
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, iter::FusedIterator, mem::replace, str::Chars, sync::Arc};
@@ -194,9 +194,16 @@ impl Stage for NormalizeWhitespace {
             // Fast path: Mixed Unicode text
             // If Unicode normalization is enabled and we see any byte that could start a Unicode WS char,
             // we conservatively return true — it's cheaper than decoding chars here.
-            if self.normalize_unicode && bytes.iter().any(|&b| could_be_unicode_ws_start(b)) {
-                // Quick pre-scan: detect potential Unicode whitespace
-                return Ok(true);
+            if self.normalize_unicode {
+                let bytes = text.as_bytes();
+                // Fast conservative scan for unambiguous starters (E1, E2, E3)
+                if bytes.iter().any(|&b| matches!(b, 0xE1..=0xE3)) {
+                    return Ok(true);
+                }
+                // Special handling for 0xC2: only trigger if followed by 0xA0 (NBSP)
+                if bytes.windows(2).any(|w| w[0] == 0xC2 && w[1] == 0xA0) {
+                    return Ok(true);
+                }
             }
 
             // Slow path: Full char iteration (only for mixed non-ASCII content)
@@ -944,10 +951,6 @@ impl StageTestConfig for NormalizeWhitespace {
             "",
         ]
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -972,7 +975,7 @@ mod contract_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ENG;
+    use crate::{ENG, TUR};
     use std::borrow::Cow;
 
     fn ctx() -> Context {
@@ -1290,6 +1293,62 @@ mod tests {
 
         assert_eq!(via_apply.as_ref(), "a b");
         assert_eq!(via_bind, "a b");
+    }
+
+    #[test]
+    fn repro_zero_copy_idempotent_allocation() {
+        // The exact input that triggers the failure
+        let input = "¡\u{a0}¡\u{205f}"; // ¡\u{a0}¡\u{205f}  (NBSP and MEDIUM MATHEMATICAL SPACE)
+
+        let stage = NORMALIZE_WHITESPACE_FULL; // collapse=true, trim=true, normalize_unicode=true
+        let ctx = Context::new(TUR);
+
+        // ---------- Pipeline simulation (exactly what the contract test does) ----------
+
+        let mut text: Cow<'_, str> = Cow::Borrowed(input);
+
+        // First pass
+        if stage.needs_apply(&text, &ctx).unwrap() {
+            text = stage.apply(text, &ctx).unwrap();
+        }
+
+        eprintln!("After first pass: {:?}", text);
+        // Record pointer after first pass
+        let ptr_after_first = text.as_ref() as *const str;
+
+        // Second pass (idempotent – should never allocate again)
+        let ptr_before_second = text.as_ref() as *const str;
+        if stage.needs_apply(&text, &ctx).unwrap() {
+            text = stage.apply(text, &ctx).unwrap();
+        }
+        eprintln!("After second pass: {:?}", text);
+
+        let ptr_after_second = text.as_ref() as *const str;
+
+        // This assertion reproduces the panic you saw
+        assert_eq!(
+            ptr_before_second,
+            ptr_after_second,
+            "Zero-copy violation on second idempotent pass!\n\
+             Input: {input:?}\n\
+             Lang: {lang:?}\n\
+             Pointer changed from {ptr_before_second:?} to {ptr_after_second:?}",
+            lang = ctx.lang
+        );
+
+        // Additional diagnostic prints (helpful when running manually)
+        println!(
+            "needs_apply first : {}",
+            stage.needs_apply(input, &ctx).unwrap()
+        );
+        println!(
+            "needs_apply second: {}",
+            stage.needs_apply(&text, &ctx).unwrap()
+        );
+        println!("ptr after first   : {:p}", ptr_after_first);
+        println!("ptr before second : {:p}", ptr_before_second);
+        println!("ptr after second  : {:p}", ptr_after_second);
+        println!("final text        : {:?}", text);
     }
 }
 

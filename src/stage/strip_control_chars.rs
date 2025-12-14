@@ -146,10 +146,6 @@ impl StageTestConfig for StripControlChars {
             ("end\u{009F}", "end"),
         ]
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 #[cfg(test)]

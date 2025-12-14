@@ -472,14 +472,6 @@ impl StageTestConfig for SegmentWords {
             _ => &[],
         }
     }
-
-    fn skip_needs_apply_test() -> bool {
-        true // Keep skipped - complex to predict with mixed scripts
-    }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

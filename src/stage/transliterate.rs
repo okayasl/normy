@@ -243,10 +243,6 @@ impl StageTestConfig for Transliterate {
             _ => &[],
         }
     }
-
-    fn skip_zero_copy_apply_test() -> bool {
-        true
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
