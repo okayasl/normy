@@ -247,7 +247,7 @@ macro_rules! define_languages {
 
 define_languages! {
     TUR, "TUR", "Turkish",
-        case: [ 'I' => 'ı', 'İ' => 'i' ],
+        case: [ 'İ' => 'i','I' => 'ı' ],
         fold: [],
         transliterate: [],
         precomposed_to_base: [],

@@ -157,11 +157,10 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 
 | Language | Rule | Include? | Reason |
 |----------|------|----------|--------|
-| Dutch   | Ĳ (U+0132) → "ij", ĳ (U+0133) → "ij" only | Yes | Only the precomposed ligature codepoints, never the sequence I+J |
-| Greek | Word-boundary detection for σ/ς | Yes | Must peek ahead to determine if at word-end for correct sigma form (σ in word, ς at end) |
-| All others | — | No | Dictionary-based logic not supported |
+| All | — | No | Dictionary-based logic not supported |
 
 > Normy treats all other digraph letters (Czech "ch", Slovak "dz/dž", Croatian "lj/nj", etc.) as **ordinary sequences** — they are **not** treated as atomic units because Unicode does not encode them as single codepoints.
+> Greek, Word-boundary detection for σ/ς, must peek ahead to determine if at word-end for correct sigma form (σ in word, ς at end) but it is not supported yet.
 
 ---
 
@@ -217,13 +216,6 @@ Normy **intentionally does not** perform:
 6. **Locale-aware sorting** — Use ICU Collator or similar
 7. **Smart quotes/dashes** — Typography concerns, not normalization
 8. **Number formatting** — Use locale-aware formatters
-
-**Compatibility Module** (`normy-compat-ascii`):
-
-- Full ASCII fallback (ğ→g, č→c, ø→o)
-- Emoji removal
-- Aggressive punctuation stripping
-- Not enabled by any default profile
 
 ---
 

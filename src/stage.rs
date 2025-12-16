@@ -1,26 +1,3 @@
-//! Core normalization stage abstraction.
-//!
-//! # Zero-Allocation Loop Fusion (White-Paper §3.3)
-//!
-//! Normy guarantees *zero-allocation* pipelines **when every stage is known at
-//! compile time**.  The Rust compiler can inline `Iterator::next` of every
-//! adapter and fuse the whole chain into a single machine-code loop.
-//!
-//! To make this possible **without heap allocation** we need two entry points:
-//!
-//! * `as_char_mapper(&self) -> Option<&dyn CharMapper>` – **static path**.
-//!   Returns a *trait-object reference* (`&dyn`) that points to `self`.  No
-//!   `Box`, no `Arc`, no heap.  Used by `ChainedProcess` (monomorphised pipelines).
-//!
-//! * `into_dyn_char_mapper(self: Arc<Self>) -> Option<Arc<dyn CharMapper>>` – **dynamic path**.
-//!   Consumes an `Arc<Self>` and returns an `Arc<dyn CharMapper>`.  Only used
-//!   inside `DynProcess` (plugin pipelines).  The `Arc` is the only allocation
-//!   required for dynamic extensibility.
-//!
-//! Stages that cannot be expressed as a 1-to-1 character mapping (e.g. NFKC)
-//! simply return `None` for both methods – they fall back to the `Cow<str>`
-//! allocation path, which is the correct, safe behaviour.
-
 pub mod case_fold;
 pub mod lower_case;
 pub mod normalization;
@@ -40,7 +17,6 @@ use std::borrow::Cow;
 use std::iter::FusedIterator;
 use thiserror::Error;
 
-/// Public error type for every stage.
 #[derive(Debug, Error)]
 pub enum StageError {
     #[error("Normalization failed at stage `{0}`: {1}")]
@@ -81,6 +57,10 @@ pub trait Stage: Send + Sync {
     /// You must never try to "be clever" and return the input unchanged.
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
 
+    /// Return a dynamic iterator
+    /// Only called when needs_apply returned true.
+    /// Always allocate. May mutate and may be slow.
+    /// You must never try to "be clever" and return the input unchanged.
     #[inline]
     fn try_dynamic_iter<'a>(
         &self,
@@ -97,6 +77,9 @@ pub trait StaticStageIter {
     type Iter<'a>: FusedIterator<Item = char> + 'a;
 
     /// Return a concrete iterator if this stage supports zero-dyn fusion
+    /// Only called when needs_apply returned true.
+    /// Always allocate. May mutate and may be slow.
+    /// You must never try to "be clever" and return the input unchanged.
     #[inline]
     fn try_static_iter<'a>(&self, _text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         None

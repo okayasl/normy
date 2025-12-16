@@ -133,6 +133,9 @@ mod tests {
         //print_set!(needs_segmentation, "needs_segmentation");
         print_set!(unigram_cjk, "unigram_cjk");
         print_stat!(peek_pairs, "peek_pairs");
+
+        let langs = all_langs();
+        println!("all langs supported ({:?}): {:?}", langs.len(), langs);
     }
 
     #[test]
