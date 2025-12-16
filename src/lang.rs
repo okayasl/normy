@@ -54,8 +54,7 @@ pub struct LangEntry {
     fold_map: &'static [(char, &'static str)],
     pre_composed_to_base_map: &'static [(char, char)],
     pre_composed_to_base_char_slice: &'static [char],
-    spacing_diacritics: Option<&'static [char]>,
-    spacing_diacritics_slice: Option<&'static [char]>,
+    spacing_diacritics: &'static [char],
     transliterate_map: &'static [(char, &'static str)],
     transliterate_char_slice: &'static [char],
     peek_pairs: &'static [(char, char, &'static str)],
@@ -139,9 +138,7 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn is_spacing_diacritic(&self, c: char) -> bool {
-        self.spacing_diacritics_slice
-            .map(|slice| slice.contains(&c))
-            .unwrap_or(false)
+        self.spacing_diacritics.contains(&c)
     }
 
     #[inline(always)]
@@ -179,9 +176,7 @@ impl LangEntry {
             text.chars()
                 .any(|c| self.pre_composed_to_base_char_slice.contains(&c))
         } else {
-            self.spacing_diacritics
-                .map(|diacs| text.chars().any(|c| diacs.contains(&c)))
-                .unwrap_or(false)
+            text.chars().any(|c| self.spacing_diacritics.contains(&c))
         }
     }
 
@@ -215,7 +210,7 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn spacing_diacritics(&self) -> Option<&'static [char]> {
+    pub fn spacing_diacritics(&self) -> &'static [char] {
         self.spacing_diacritics
     }
 
@@ -237,11 +232,6 @@ impl LangEntry {
     #[inline(always)]
     pub fn pre_composed_to_base_char_slice(&self) -> &'static [char] {
         self.pre_composed_to_base_char_slice
-    }
-
-    #[inline(always)]
-    pub fn spacing_diacritics_slice(&self) -> Option<&'static [char]> {
-        self.spacing_diacritics_slice
     }
 
     /// Finds a language-specific case map entry for a character.
@@ -476,10 +466,9 @@ impl LangEntry {
 
     /// Sets the spacing_diacritics and updates all related fields
     #[inline]
-    pub fn set_spacing_diacritics(&mut self, diacritics: Option<&'static [char]>) {
+    pub fn set_spacing_diacritics(&mut self, diacritics: &'static [char]) {
         self.spacing_diacritics = diacritics;
-        self.spacing_diacritics_slice = diacritics;
-        self.has_spacing_diacritics = diacritics.is_some() && !diacritics.unwrap().is_empty();
+        self.has_spacing_diacritics = !diacritics.is_empty();
     }
 
     /// Sets the needs_segmentation flag
@@ -696,7 +685,7 @@ mod tests {
             // Spacing diacritics consistency
             if entry.has_spacing_diacritics() {
                 assert!(
-                    entry.spacing_diacritics().is_some(),
+                    !entry.spacing_diacritics().is_empty(),
                     "{}: has_spacing_diacritics but field is None",
                     lang_info.code()
                 );

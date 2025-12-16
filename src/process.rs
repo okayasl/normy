@@ -35,7 +35,9 @@ impl<S: Stage + StaticStageIter, P: Process> Process for ChainedProcess<S, P> {
         }
         if let Some(iter) = self.stage.try_static_iter(&current, ctx) {
             let mut out = String::with_capacity(current.len());
-            out.extend(iter);
+            for c in iter {
+                out.push(c);
+            }
             return Ok(Cow::Owned(out));
         }
         self.stage.apply(current, ctx)
@@ -73,7 +75,9 @@ impl Process for DynamicProcess {
             if stage.try_dynamic_iter(&text, ctx).is_some() {
                 let iter = stage.try_dynamic_iter(&text, ctx).unwrap();
                 let mut out = String::with_capacity(text.len());
-                out.extend(iter);
+                for c in iter {
+                    out.push(c);
+                }
                 text = Cow::Owned(out);
             } else {
                 text = stage.apply(text, ctx)?;

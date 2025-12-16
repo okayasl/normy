@@ -60,13 +60,28 @@ path = "benches/comparison_accent_lowercase_bench.rs"
 harness = false
 
 [[bench]]
+name = "cds"
+path = "benches/comparison_data_structs.rs"
+harness = false
+
+[[bench]]
 name = "lb"
 path = "benches/lang_bench.rs"
 harness = false
 
 [[bench]]
+name = "leob"
+path = "benches/lang_entry_ops_bench.rs"
+harness = false
+
+[[bench]]
 name = "wb"
 path = "benches/whitespace_bench.rs"
+harness = false
+
+[[bench]]
+name = "pb"
+path = "benches/process_bench.rs"
 harness = false
 
 [features]

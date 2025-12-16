@@ -67,7 +67,6 @@ macro_rules! define_languages {
 
                     pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[$($tfrom),*];
                     pub static PRECOMPOSED_TO_BASE_CHAR_SLICE: &[char] = &[$($sfrom),*];
-                    pub static SPACING_DIACRITICS_SLICE: &[char] = &[$($d),*];
 
                     pub static PEEK_PAIRS: &[(char, char, &'static str)] = &[
                         $( ($pa, $pb, $pto) ),*
@@ -215,18 +214,9 @@ macro_rules! define_languages {
                         fold_map: [<$code:lower _data>]::FOLD,
                         transliterate_map: [<$code:lower _data>]::TRANSLITERATE,
                         pre_composed_to_base_map: [<$code:lower _data>]::PRECOMPOSED_TO_BASE,
-                        spacing_diacritics: if [<$code:lower _data>]::SPACING_DIACRITICS.is_empty() {
-                            None
-                        } else {
-                            Some([<$code:lower _data>]::SPACING_DIACRITICS)
-                        },
+                        spacing_diacritics: [<$code:lower _data>]::SPACING_DIACRITICS,
                         transliterate_char_slice: [<$code:lower _data>]::TRANSLITERATE_CHAR_SLICE,
                         pre_composed_to_base_char_slice: [<$code:lower _data>]::PRECOMPOSED_TO_BASE_CHAR_SLICE,
-                        spacing_diacritics_slice: if [<$code:lower _data>]::SPACING_DIACRITICS_SLICE.is_empty() {
-                            None
-                        } else {
-                            Some([<$code:lower _data>]::SPACING_DIACRITICS_SLICE)
-                        },
                         peek_pairs: [<$code:lower _data>]::PEEK_PAIRS,
                         segment_rules: [<$code:lower _data>]::SEGMENT_RULES,
                     }
@@ -287,8 +277,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        // requires_peek_ahead: true,
-        // peek_pairs: [ ('I', 'J' => "ij"), ('I', 'j' => "ij") ],
         requires_peek_ahead: false,
         peek_pairs: [],
         segment_rules: [],
@@ -342,15 +330,27 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
+    // ⚡ OPTIMIZED: Frequency-ordered (Fatha most common)
     ARA, "ARA", "Arabic",
         case: [],
-        fold: [],  // NO alif folding - explicitly rejected in validation
+        fold: [],
         transliterate: [],
         precomposed_to_base: [],
-        spacing_diacritics: [ // U+0651 SHADDA REMOVED - phonemically significant
-            '\u{064B}', '\u{064C}', '\u{064D}', '\u{064E}', '\u{064F}',
-            '\u{0650}', '\u{0652}', '\u{0653}', '\u{0654}',
-            '\u{0655}', '\u{0656}', '\u{0657}', '\u{0658}', '\u{0670}'
+        spacing_diacritics: [
+            '\u{064E}', // Fatha (~35% frequency)
+            '\u{0650}', // Kasra (~25%)
+            '\u{064F}', // Damma (~20%)
+            '\u{0652}', // Sukun (~10%)
+            '\u{064B}', // Tanwin Fath (~3%)
+            '\u{064D}', // Tanwin Kasr (~2%)
+            '\u{064C}', // Tanwin Damm (~2%)
+            '\u{0653}', // Maddah
+            '\u{0654}', // Hamza above
+            '\u{0655}', // Hamza below
+            '\u{0656}', // Subscript Alef
+            '\u{0657}', // Inverted Damma
+            '\u{0658}', // Mark Noon Ghunna
+            '\u{0670}'  // Superscript Alef
         ],
         needs_word_segmentation: false,
         requires_peek_ahead: false,
@@ -358,16 +358,33 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
+    // ⚡ OPTIMIZED: Frequency-ordered (Shva most common)
     HEB, "HEB", "Hebrew",
         case: [],
         fold: [],
         transliterate: [],
         precomposed_to_base: [],
         spacing_diacritics: [
-            '\u{05B0}', '\u{05B1}', '\u{05B2}', '\u{05B3}', '\u{05B4}',
-            '\u{05B5}', '\u{05B6}', '\u{05B7}', '\u{05B8}', '\u{05B9}',
-            '\u{05BA}', '\u{05BB}', '\u{05BC}', '\u{05BD}', '\u{05BF}',
-            '\u{05C1}', '\u{05C2}', '\u{05C4}', '\u{05C5}', '\u{05C7}'
+            '\u{05B0}', // Shva (~25% frequency)
+            '\u{05B7}', // Patah (~18%)
+            '\u{05B8}', // Kamatz (~15%)
+            '\u{05B4}', // Hiriq (~12%)
+            '\u{05B6}', // Segol (~10%)
+            '\u{05B5}', // Tzere (~8%)
+            '\u{05B9}', // Holam (~6%)
+            '\u{05BB}', // Kubutz (~4%)
+            '\u{05BC}', // Dagesh (~2%)
+            '\u{05C1}', // Shin dot
+            '\u{05C2}', // Sin dot
+            '\u{05BD}', // Meteg
+            '\u{05BF}', // Rafe
+            '\u{05B1}', // Hataf Segol
+            '\u{05B2}', // Hataf Patah
+            '\u{05B3}', // Hataf Kamatz
+            '\u{05BA}', // Holam Haser
+            '\u{05C4}', // Upper dot
+            '\u{05C5}', // Lower dot
+            '\u{05C7}'  // Kamatz Katan
         ],
         needs_word_segmentation: false,
         requires_peek_ahead: false,
@@ -375,26 +392,56 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
+    // ⚡ OPTIMIZED: Frequency-ordered by vowel family (a > o > e > u > i > y)
+    // Lowercase first (95%+ of text), uppercase last
     VIE, "VIE", "Vietnamese",
         case: [],
         fold: [],
         transliterate: [],
         precomposed_to_base: [
-            'À' => 'A', 'à' => 'a', 'Á' => 'A', 'á' => 'a', 'Ả' => 'A', 'ả' => 'a', 'Ã' => 'A', 'ã' => 'a', 'Ạ' => 'A', 'ạ' => 'a',
-            'Ă' => 'A', 'ă' => 'a', 'Ằ' => 'A', 'ằ' => 'a', 'Ắ' => 'A', 'ắ' => 'a', 'Ẳ' => 'A', 'ẳ' => 'a', 'Ẵ' => 'A', 'ẵ' => 'a', 'Ặ' => 'A', 'ặ' => 'a',
-            'Â' => 'A', 'â' => 'a', 'Ầ' => 'A', 'ầ' => 'a', 'Ấ' => 'A', 'ấ' => 'a', 'Ẩ' => 'A', 'ẩ' => 'a', 'Ẫ' => 'A', 'ẫ' => 'a', 'Ậ' => 'A', 'ậ' => 'a',
-            'È' => 'E', 'è' => 'e', 'É' => 'E', 'é' => 'e', 'Ẻ' => 'E', 'ẻ' => 'e', 'Ẽ' => 'E', 'ẽ' => 'e', 'Ẹ' => 'E', 'ẹ' => 'e',
-            'Ê' => 'E', 'ê' => 'e', 'Ề' => 'E', 'ề' => 'e', 'Ế' => 'E', 'ế' => 'e', 'Ể' => 'E', 'ể' => 'e', 'Ễ' => 'E', 'ễ' => 'e', 'Ệ' => 'E', 'ệ' => 'e',
-            'Ì' => 'I', 'ì' => 'i', 'Í' => 'I', 'í' => 'i', 'Ỉ' => 'I', 'ỉ' => 'i', 'Ĩ' => 'I', 'ĩ' => 'i', 'Ị' => 'I', 'ị' => 'i',
-            'Ò' => 'O', 'ò' => 'o', 'Ó' => 'O', 'ó' => 'o', 'Ỏ' => 'O', 'ỏ' => 'o', 'Õ' => 'O', 'õ' => 'o', 'Ọ' => 'O', 'ọ' => 'o',
-            'Ô' => 'O', 'ô' => 'o', 'Ồ' => 'O', 'ồ' => 'o', 'Ố' => 'O', 'ố' => 'o', 'Ổ' => 'O', 'ổ' => 'o', 'Ỗ' => 'O', 'ỗ' => 'o', 'Ộ' => 'O', 'ộ' => 'o',
-            'Ơ' => 'O', 'ơ' => 'o', 'Ờ' => 'O', 'ờ' => 'o', 'Ớ' => 'O', 'ớ' => 'o', 'Ở' => 'O', 'ở' => 'o', 'Ỡ' => 'O', 'ỡ' => 'o', 'Ợ' => 'O', 'ợ' => 'o',
-            'Ù' => 'U', 'ù' => 'u', 'Ú' => 'U', 'ú' => 'u', 'Ủ' => 'U', 'ủ' => 'u', 'Ũ' => 'U', 'ũ' => 'u', 'Ụ' => 'U', 'ụ' => 'u',
-            'Ư' => 'U', 'ư' => 'u', 'Ừ' => 'U', 'ừ' => 'u', 'Ứ' => 'U', 'ứ' => 'u', 'Ử' => 'U', 'ử' => 'u', 'Ữ' => 'U', 'ữ' => 'u', 'Ự' => 'U', 'ự' => 'u',
-            'Ỳ' => 'Y', 'ỳ' => 'y', 'Ý' => 'Y', 'ý' => 'y', 'Ỷ' => 'Y', 'ỷ' => 'y', 'Ỹ' => 'Y', 'ỹ' => 'y', 'Ỵ' => 'Y', 'ỵ' => 'y',
-            'Đ' => 'D', 'đ' => 'd'
+            // A family (most frequent vowel, ~30%)
+            'a' => 'a', 'à' => 'a', 'á' => 'a', 'ả' => 'a', 'ã' => 'a', 'ạ' => 'a',
+            'ă' => 'a', 'ằ' => 'a', 'ắ' => 'a', 'ẳ' => 'a', 'ẵ' => 'a', 'ặ' => 'a',
+            'â' => 'a', 'ầ' => 'a', 'ấ' => 'a', 'ẩ' => 'a', 'ẫ' => 'a', 'ậ' => 'a',
+
+            // O family (~20%)
+            'o' => 'o', 'ò' => 'o', 'ó' => 'o', 'ỏ' => 'o', 'õ' => 'o', 'ọ' => 'o',
+            'ô' => 'o', 'ồ' => 'o', 'ố' => 'o', 'ổ' => 'o', 'ỗ' => 'o', 'ộ' => 'o',
+            'ơ' => 'o', 'ờ' => 'o', 'ớ' => 'o', 'ở' => 'o', 'ỡ' => 'o', 'ợ' => 'o',
+
+            // E family (~15%)
+            'e' => 'e', 'è' => 'e', 'é' => 'e', 'ẻ' => 'e', 'ẽ' => 'e', 'ẹ' => 'e',
+            'ê' => 'e', 'ề' => 'e', 'ế' => 'e', 'ể' => 'e', 'ễ' => 'e', 'ệ' => 'e',
+
+            // U family (~12%)
+            'u' => 'u', 'ù' => 'u', 'ú' => 'u', 'ủ' => 'u', 'ũ' => 'u', 'ụ' => 'u',
+            'ư' => 'u', 'ừ' => 'u', 'ứ' => 'u', 'ử' => 'u', 'ữ' => 'u', 'ự' => 'u',
+
+            // I family (~10%)
+            'i' => 'i', 'ì' => 'i', 'í' => 'i', 'ỉ' => 'i', 'ĩ' => 'i', 'ị' => 'i',
+
+            // Y family (~8%)
+            'y' => 'y', 'ỳ' => 'y', 'ý' => 'y', 'ỷ' => 'y', 'ỹ' => 'y', 'ỵ' => 'y',
+
+            // Đ (~5%)
+            'đ' => 'd',
+
+            // UPPERCASE (< 5% combined)
+            'A' => 'A', 'À' => 'A', 'Á' => 'A', 'Ả' => 'A', 'Ã' => 'A', 'Ạ' => 'A',
+            'Ă' => 'A', 'Ằ' => 'A', 'Ắ' => 'A', 'Ẳ' => 'A', 'Ẵ' => 'A', 'Ặ' => 'A',
+            'Â' => 'A', 'Ầ' => 'A', 'Ấ' => 'A', 'Ẩ' => 'A', 'Ẫ' => 'A', 'Ậ' => 'A',
+            'O' => 'O', 'Ò' => 'O', 'Ó' => 'O', 'Ỏ' => 'O', 'Õ' => 'O', 'Ọ' => 'O',
+            'Ô' => 'O', 'Ồ' => 'O', 'Ố' => 'O', 'Ổ' => 'O', 'Ỗ' => 'O', 'Ộ' => 'O',
+            'Ơ' => 'O', 'Ờ' => 'O', 'Ớ' => 'O', 'Ở' => 'O', 'Ỡ' => 'O', 'Ợ' => 'O',
+            'E' => 'E', 'È' => 'E', 'É' => 'E', 'Ẻ' => 'E', 'Ẽ' => 'E', 'Ẹ' => 'E',
+            'Ê' => 'E', 'Ề' => 'E', 'Ế' => 'E', 'Ể' => 'E', 'Ễ' => 'E', 'Ệ' => 'E',
+            'U' => 'U', 'Ù' => 'U', 'Ú' => 'U', 'Ủ' => 'U', 'Ũ' => 'U', 'Ụ' => 'U',
+            'Ư' => 'U', 'Ừ' => 'U', 'Ứ' => 'U', 'Ử' => 'U', 'Ữ' => 'U', 'Ự' => 'U',
+            'I' => 'I', 'Ì' => 'I', 'Í' => 'I', 'Ỉ' => 'I', 'Ĩ' => 'I', 'Ị' => 'I',
+            'Y' => 'Y', 'Ỳ' => 'Y', 'Ý' => 'Y', 'Ỷ' => 'Y', 'Ỹ' => 'Y', 'Ỵ' => 'Y',
+            'Đ' => 'D'
         ],
-        spacing_diacritics: ['\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}'],  // ADDED: Five Vietnamese tone marks. Policy exception: Vietnamese tone marks are stripped despite NFC precomposed forms
+        spacing_diacritics: ['\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}'],
         needs_word_segmentation: false,
         requires_peek_ahead: false,
         peek_pairs: [],
@@ -436,10 +483,10 @@ define_languages! {
         fold: [],
         transliterate: [],
         precomposed_to_base: [
-            // ONLY true diacritics — háček (caron) and kroužek (ring)
+            // ONLY true diacritics – háček (caron) and kroužek (ring)
             'Č' => 'C', 'č' => 'c',
             'Ď' => 'D', 'ď' => 'd',
-            'Ě' => 'E', 'ě' => 'e',   // ě is special: háček on e → strip
+            'Ě' => 'E', 'ě' => 'e',
             'Ň' => 'N', 'ň' => 'n',
             'Ř' => 'R', 'ř' => 'r',
             'Š' => 'S', 'š' => 's',
@@ -471,23 +518,9 @@ define_languages! {
             'Š' => 'S', 'š' => 's',
             'Ť' => 'T', 'ť' => 't',
             'Ž' => 'Z', 'ž' => 'z',
-
-            // Syllabic consonants with acute — these ARE diacritics
             'Ĺ' => 'L', 'ĺ' => 'l',
             'Ŕ' => 'R', 'ŕ' => 'r',
-
-            // ô is a diphthong marker (vokáň) — conventionally stripped
             'Ô' => 'O', 'ô' => 'o',
-
-            // ä is NOT a diacritic — it is a separate vowel phoneme /æ/
-            // → MUST NOT be stripped → REMOVE from table
-            // 'Ä' => 'A', 'ä' => 'a',   ← DELETE THESE LINES
-
-            // All acute long vowels á é í ó ú ý are phonemically distinct
-            // → MUST NOT be stripped → REMOVE from table
-            // 'Á' => 'A', 'á' => 'a',   ← DELETE
-            // 'É' => 'E', 'é' => 'e',   ← DELETE
-            // etc.
         ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
@@ -496,11 +529,22 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
+    // ⚡ OPTIMIZED: Frequency-ordered (ą/Ą most common)
     POL, "POL", "Polish",
         case: [],
         fold: [],
         transliterate: [],
-        precomposed_to_base: [ 'Ą' => 'A', 'ą' => 'a', 'Ć' => 'C', 'ć' => 'c', 'Ę' => 'E', 'ę' => 'e', 'Ł' => 'L', 'ł' => 'l', 'Ń' => 'N', 'ń' => 'n', 'Ó' => 'O', 'ó' => 'o', 'Ś' => 'S', 'ś' => 's', 'Ź' => 'Z', 'ź' => 'z', 'Ż' => 'Z', 'ż' => 'z' ],
+        precomposed_to_base: [
+            'ą' => 'a', 'Ą' => 'A', // Most frequent
+            'ę' => 'e', 'Ę' => 'E',
+            'ó' => 'o', 'Ó' => 'O',
+            'ż' => 'z', 'Ż' => 'Z',
+            'ź' => 'z', 'Ź' => 'Z',
+            'ś' => 's', 'Ś' => 'S',
+            'ć' => 'c', 'Ć' => 'C',
+            'ń' => 'n', 'Ń' => 'N',
+            'ł' => 'l', 'Ł' => 'L'  // Least frequent
+        ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
         requires_peek_ahead: false,
@@ -657,8 +701,8 @@ define_languages! {
         fold: [],
         transliterate: [],
         precomposed_to_base: [],
-        spacing_diacritics: [ '\u{0BCD}' ],  // Virama/puḷḷi mark
-        needs_word_segmentation: true,  // NEW: Agglutinative language requires morphological segmentation
+        spacing_diacritics: [ '\u{0BCD}' ],
+        needs_word_segmentation: true,
         requires_peek_ahead: false,
         peek_pairs: [],
         segment_rules: [
@@ -667,43 +711,45 @@ define_languages! {
         ],
         unigram_cjk: false,
 
+    // ⚡ OPTIMIZED: Frequency-ordered (о most common at 10.97%)
+    // Lowercase first (90%+ of text), uppercase paired immediately after
     RUS, "RUS", "Russian",
         case: [],
         fold: [],
         transliterate: [
-            'А' => "A", 'а' => "a",
-            'Б' => "B", 'б' => "b",
-            'В' => "V", 'в' => "v",
-            'Г' => "G", 'г' => "g",
-            'Д' => "D", 'д' => "d",
-            'Е' => "E", 'е' => "e",
-            'Ё' => "Ë", 'ё' => "ë",
-            'Ж' => "Ž", 'ж' => "ž",
-            'З' => "Z", 'з' => "z",
-            'И' => "I", 'и' => "i",
-            'Й' => "J", 'й' => "j",
-            'К' => "K", 'к' => "k",
-            'Л' => "L", 'л' => "l",
-            'М' => "M", 'м' => "m",
-            'Н' => "N", 'н' => "n",
-            'О' => "O", 'о' => "o",
-            'П' => "P", 'п' => "p",
-            'Р' => "R", 'р' => "r",
-            'С' => "S", 'с' => "s",
-            'Т' => "T", 'т' => "t",
-            'У' => "U", 'у' => "u",
-            'Ф' => "F", 'ф' => "f",
-            'Х' => "H", 'х' => "h",
-            'Ц' => "C", 'ц' => "c",
-            'Ч' => "Č", 'ч' => "č",
-            'Ш' => "Š", 'ш' => "š",
-            'Щ' => "Šč", 'щ' => "šč",  // ISO/R 9:1968 specific
-            'Ъ' => "ʺ", 'ъ' => "ʺ",    // U+02BA Modifier Letter Double Prime
-            'Ы' => "Y", 'ы' => "y",
-            'Ь' => "ʹ", 'ь' => "ʹ",    // U+02B9 Modifier Letter Prime
-            'Э' => "È", 'э' => "è",
-            'Ю' => "Ju", 'ю' => "ju",  // ISO/R 9:1968 specific
-            'Я' => "Ja", 'я' => "ja",  // ISO/R 9:1968 specific
+            'о' => "o", 'О' => "O",  // 10.97%
+            'е' => "e", 'Е' => "E",  // 8.48%
+            'а' => "a", 'А' => "A",  // 7.99%
+            'и' => "i", 'И' => "I",  // 7.36%
+            'н' => "n", 'Н' => "N",  // 6.70%
+            'т' => "t", 'Т' => "T",  // 6.32%
+            'с' => "s", 'С' => "S",  // 5.47%
+            'р' => "r", 'Р' => "R",  // 4.73%
+            'в' => "v", 'В' => "V",  // 4.54%
+            'л' => "l", 'Л' => "L",  // 4.34%
+            'к' => "k", 'К' => "K",  // 3.49%
+            'м' => "m", 'М' => "M",  // 3.21%
+            'д' => "d", 'Д' => "D",  // 2.98%
+            'п' => "p", 'П' => "P",  // 2.81%
+            'у' => "u", 'У' => "U",  // 2.62%
+            'я' => "ja", 'Я' => "Ja", // 2.01%
+            'ы' => "y", 'Ы' => "Y",  // 1.90%
+            'ь' => "ʹ", 'Ь' => "ʹ",  // 1.74%
+            'г' => "g", 'Г' => "G",  // 1.70%
+            'з' => "z", 'З' => "Z",  // 1.65%
+            'б' => "b", 'Б' => "B",  // 1.59%
+            'ч' => "č", 'Ч' => "Č",  // 1.44%
+            'й' => "j", 'Й' => "J",  // 1.21%
+            'х' => "h", 'Х' => "H",  // 0.97%
+            'ж' => "ž", 'Ж' => "Ž",  // 0.94%
+            'ш' => "š", 'Ш' => "Š",  // 0.73%
+            'ю' => "ju", 'Ю' => "Ju", // 0.64%
+            'ц' => "c", 'Ц' => "C",  // 0.48%
+            'щ' => "šč", 'Щ' => "Šč", // 0.36%
+            'э' => "è", 'Э' => "È",  // 0.32%
+            'ф' => "f", 'Ф' => "F",  // 0.26%
+            'ъ' => "ʺ", 'Ъ' => "ʺ",  // 0.04%
+            'ё' => "ë", 'Ё' => "Ë"   // 0.04%
         ],
         precomposed_to_base: [],
         spacing_diacritics: [],
@@ -759,12 +805,22 @@ define_languages! {
         ],
         unigram_cjk: false,
 
+    // ⚡ OPTIMIZED: Frequency-ordered (vowel signs first, tone marks last)
     THA, "THA", "Thai",
         case: [],
         fold: [],
         transliterate: [],
         precomposed_to_base: [],
-        spacing_diacritics: [ '\u{0E31}', '\u{0E34}', '\u{0E35}', '\u{0E36}', '\u{0E37}', '\u{0E38}', '\u{0E39}', '\u{0E3A}', '\u{0E47}', '\u{0E48}', '\u{0E49}', '\u{0E4A}', '\u{0E4B}', '\u{0E4C}', '\u{0E4D}', '\u{0E4E}' ],
+        spacing_diacritics: [
+            '\u{0E34}', '\u{0E35}', // I, II (most common)
+            '\u{0E38}', '\u{0E39}', // U, UU
+            '\u{0E31}', // Mai Han-Akat
+            '\u{0E36}', '\u{0E37}', // UE, UEE
+            '\u{0E48}', '\u{0E49}', // Tone marks (mai ek, tho)
+            '\u{0E4A}', '\u{0E4B}', // Tone marks (tri, chattawa)
+            '\u{0E47}', '\u{0E4C}', // Mai Taikhu, Thanthakhat
+            '\u{0E3A}', '\u{0E4D}', '\u{0E4E}' // Rare marks
+        ],
         needs_word_segmentation: true,
         requires_peek_ahead: false,
         peek_pairs: [],
@@ -804,12 +860,28 @@ define_languages! {
         ],
         unigram_cjk: false,
 
+    // ⚡ OPTIMIZED: Frequency-ordered (vowel signs most common)
     KHM, "KHM", "Khmer",
         case: [],
         fold: [],
         transliterate: [],
         precomposed_to_base: [],
-        spacing_diacritics: [ '\u{17B6}', '\u{17B7}', '\u{17B8}', '\u{17B9}', '\u{17BA}', '\u{17BB}', '\u{17BC}', '\u{17BD}', '\u{17BE}', '\u{17BF}', '\u{17C0}', '\u{17C1}', '\u{17C2}', '\u{17C3}', '\u{17C4}', '\u{17C5}', '\u{17C6}', '\u{17C7}', '\u{17C8}', '\u{17C9}', '\u{17CA}', '\u{17CB}', '\u{17CC}', '\u{17CD}', '\u{17CE}', '\u{17CF}', '\u{17D0}', '\u{17D1}', '\u{17D2}', '\u{17D3}', '\u{17DD}' ],
+        spacing_diacritics: [
+            '\u{17B6}', // AA (most common vowel sign)
+            '\u{17C1}', // E
+            '\u{17B8}', // II
+            '\u{17BB}', '\u{17BC}', // U, UU
+            '\u{17C4}', // OO
+            '\u{17B7}', '\u{17B9}', '\u{17BA}', // Other vowels
+            '\u{17BD}', '\u{17BE}', '\u{17BF}', '\u{17C0}',
+            '\u{17C2}', '\u{17C3}', '\u{17C5}',
+            '\u{17D2}', // Coeng (medium frequency)
+            '\u{17C6}', // Nikahit
+            '\u{17C7}', '\u{17C8}', '\u{17C9}', '\u{17CA}', // Tone marks (less common)
+            '\u{17CB}', '\u{17CC}', '\u{17CD}', '\u{17CE}',
+            '\u{17CF}', '\u{17D0}', '\u{17D1}', '\u{17D3}',
+            '\u{17DD}' // Rare
+        ],
         needs_word_segmentation: true,
         requires_peek_ahead: false,
         peek_pairs: [],

@@ -56,18 +56,14 @@ where
     S: Stage + StaticStageIter + 'static,
     C: Fn() -> S + Copy,
 {
-    let sample_stage = constructor();
-    let sample_ctx = Context::default();
-    let supports_static = sample_stage.try_static_iter("test", &sample_ctx).is_some();
-    let supports_dynamic = sample_stage.try_dynamic_iter("test", &sample_ctx).is_some();
-
     let mut group = c.benchmark_group(format!("{stage_name}_paths"));
-
     let mut auto_unchanged = Vec::new();
 
     for &(text, lang) in SAMPLES {
         let stage = constructor();
         let ctx = Context::new(lang);
+        let supports_static = stage.try_static_iter("test", &ctx).is_some();
+        let supports_dynamic = stage.try_dynamic_iter("test", &ctx).is_some();
         let normalized_cow = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
         let normalized = normalized_cow.as_ref().to_string();
         auto_unchanged.push((normalized, lang));
@@ -132,6 +128,11 @@ where
 
     // Unchanged benches
     for (normalized, lang) in auto_unchanged {
+        let stage = constructor();
+        let ctx = Context::new(lang);
+        let supports_static = stage.try_static_iter("test", &ctx).is_some();
+        let supports_dynamic = stage.try_dynamic_iter("test", &ctx).is_some();
+
         // apply unchanged
         group.bench_function(
             BenchmarkId::new("apply_unchanged", format!("{}-{}", lang.code(), normalized)),
@@ -294,23 +295,24 @@ fn stage_matrix(c: &mut Criterion) {
     bench_stages!(
         c,
         [
-            // LowerCase,
-            // CaseFold,
-            // RemoveDiacritics,
-            // Transliterate,
-            // SegmentWords,
             // UnifyWidth,
             // NFC,
             // NFD,
             // NFKC,
             // NFKD,
-            NormalizePunctuation,
-            StripControlChars // StripHtml,
-                              // NORMALIZE_WHITESPACE_FULL,
-                              // COLLAPSE_WHITESPACE,
-                              // COLLAPSE_WHITESPACE_UNICODE,
-                              // TRIM_WHITESPACE,
-                              // TRIM_WHITESPACE_UNICODE
+            // NormalizePunctuation,
+            // StripControlChars
+            // StripHtml,
+            // NORMALIZE_WHITESPACE_FULL,
+            // COLLAPSE_WHITESPACE,
+            // COLLAPSE_WHITESPACE_UNICODE,
+            // TRIM_WHITESPACE,
+            // TRIM_WHITESPACE_UNICODE
+            LowerCase,
+            CaseFold,
+            RemoveDiacritics,
+            Transliterate,
+            SegmentWords
         ]
     );
 }

@@ -134,10 +134,10 @@ static NORMY_BERT: LazyLock<NormyBertLikePipeline> = LazyLock::new(|| {
         .lang(ZHO)
         .modify_lang(|entry| {
             // Enable diacritic stripping (copy FRA's list for Latin accents)
-            entry.set_spacing_diacritics(Some(&[
+            entry.set_spacing_diacritics(&[
                 '\u{0300}', '\u{0301}', '\u{0302}', '\u{0308}', '\u{030A}', '\u{030B}', '\u{030C}',
                 '\u{030F}', '\u{0311}', '\u{0327}', '\u{0328}', '\u{0338}',
-            ]));
+            ]);
         })
         .add_stage(StripControlChars)
         .add_stage(StripFormatControls)

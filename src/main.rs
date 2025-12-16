@@ -65,7 +65,7 @@ mod tests {
                 *precomposed.entry(lang.code()).or_default() += e.pre_composed_to_base_map().len();
             }
             if e.has_spacing_diacritics() {
-                let cnt = e.spacing_diacritics_slice().unwrap_or(&[]).len();
+                let cnt = e.spacing_diacritics().len();
                 *spacing_diacritics.entry(lang.code()).or_default() += cnt;
             }
             if e.has_peek_pairs() {
