@@ -4,6 +4,7 @@
 
 use crate::{
     context::Context,
+    process::{ChainedProcess, DynamicProcess, EmptyProcess, Process},
     stage::{Stage, StageError},
 };
 use smallvec::SmallVec;
@@ -203,6 +204,47 @@ impl ProcessFused for DynamicProcessFused {
             .collect();
 
         // Use the same fusion algorithm
+        fuse_and_process(text, &stage_refs, ctx)
+    }
+
+    fn collect_stages<'a>(&'a self, out: &mut Vec<&'a dyn Stage>) {
+        for stage in &self.stages {
+            out.push(stage.as_ref() as &dyn Stage);
+        }
+    }
+}
+
+impl ProcessFused for EmptyProcess {
+    #[inline(always)]
+    fn process_fused<'a>(&self, text: &'a str, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        Ok(Cow::Borrowed(text))
+    }
+
+    fn collect_stages<'a>(&'a self, _out: &mut Vec<&'a dyn Stage>) {}
+}
+
+impl<S: Stage, P: ProcessFused + Process> ProcessFused for ChainedProcess<S, P> {
+    #[inline(always)]
+    fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        let mut stages = Vec::new();
+        self.collect_stages(&mut stages);
+        fuse_and_process(text, &stages, ctx)
+    }
+
+    fn collect_stages<'a>(&'a self, out: &mut Vec<&'a dyn Stage>) {
+        self.previous.collect_stages(out);
+        out.push(&self.stage);
+    }
+}
+
+impl ProcessFused for DynamicProcess {
+    #[inline(always)]
+    fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        let stage_refs: Vec<&dyn Stage> = self
+            .stages
+            .iter()
+            .map(|s| s.as_ref() as &dyn Stage)
+            .collect();
         fuse_and_process(text, &stage_refs, ctx)
     }
 

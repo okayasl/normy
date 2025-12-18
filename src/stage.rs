@@ -116,7 +116,7 @@ pub trait FusableStage: Stage {
 }
 
 /// Static (monomorphized) version for compile-time optimization
-pub trait StaticFusableStage: FusableStage {
+pub trait StaticFusableStage: Stage {
     type Adapter<'a, I>: FusedIterator<Item = char> + 'a
     where
         I: FusedIterator<Item = char> + 'a;
