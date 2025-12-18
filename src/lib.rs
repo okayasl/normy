@@ -3,6 +3,7 @@
 // #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
 pub mod context;
+pub mod fused_process;
 pub mod lang;
 pub mod process;
 pub mod profile;

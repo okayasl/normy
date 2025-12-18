@@ -57,6 +57,21 @@ pub trait Stage: Send + Sync {
     /// You must never try to "be clever" and return the input unchanged.
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
 
+    /// Whether `needs_apply` on the *original* input text is a safe approximation
+    /// for whether this stage will perform work, even after previous stages.
+    ///
+    /// If `true`, the fused pipeline may optimistically skip this stage
+    /// based on the original text without breaking correctness.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        false // default: conservative
+    }
+
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        None // Default: not fusable
+    }
+
     /// Return a dynamic iterator
     /// Only called when needs_apply returned true.
     /// Always allocate. May mutate and may be slow.
@@ -84,4 +99,29 @@ pub trait StaticStageIter {
     fn try_static_iter<'a>(&self, _text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         None
     }
+}
+
+// ============================================================================
+// FusableStage Traits
+// ============================================================================
+
+/// A stage that can wrap an iterator input and produce an iterator output
+pub trait FusableStage: Stage {
+    /// Dynamic iterator adapter
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a>;
+}
+
+/// Static (monomorphized) version for compile-time optimization
+pub trait StaticFusableStage: FusableStage {
+    type Adapter<'a, I>: FusedIterator<Item = char> + 'a
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    fn static_fused_adapter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
 }
