@@ -1,5 +1,10 @@
 use crate::{
-    context::Context, fused_process::ProcessFused, lang::{DEFAULT_LANG, Lang}, process::{ChainedProcess, DynamicProcess, EmptyProcess, Process}, profile::{Profile, ProfileError}, stage::{Stage, StageError, StaticStageIter}
+    context::Context,
+    fused_process::ProcessFused,
+    lang::{DEFAULT_LANG, Lang},
+    process::{ChainedProcess, DynamicProcess, EmptyProcess, Process},
+    profile::{Profile, ProfileError},
+    stage::{Stage, StageError, StaticStageIter},
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, sync::Arc};
