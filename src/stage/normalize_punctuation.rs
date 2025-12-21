@@ -2,7 +2,7 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::normalize_punctuation_char,
 };
@@ -43,9 +43,31 @@ impl Stage for NormalizePunctuation {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        Ok(Cow::Owned(
-            text.chars().map(normalize_punctuation_char).collect(),
-        ))
+        // Punctuation normalization usually results in the same or smaller string.
+        let mut out = String::with_capacity(text.len());
+
+        for c in text.chars() {
+            let n = normalize_punctuation_char(c);
+            if n != '\0' {
+                out.push(n);
+            }
+        }
+
+        Ok(Cow::Owned(out))
+    }
+
+    /// NormalizePunctuation is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since it only performs 1:1 mappings or removals.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// NormalizePunctuation is always fusable. Performs 1:1 character mappings
+    /// or character removal (when normalized to '\0').
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
     }
 
     fn try_dynamic_iter<'a>(
@@ -57,12 +79,72 @@ impl Stage for NormalizePunctuation {
     }
 }
 
+impl StaticFusableStage for NormalizePunctuation {
+    type Adapter<'a, I>
+        = NormalizePunctuationAdapter<I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        NormalizePunctuationAdapter { input }
+    }
+}
+
+pub struct NormalizePunctuationAdapter<I> {
+    input: I,
+}
+
+impl<I: Iterator<Item = char>> Iterator for NormalizePunctuationAdapter<I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Use a loop to skip characters that normalize to '\0'
+        loop {
+            let c = self.input.next()?;
+            let n = normalize_punctuation_char(c);
+            if n != '\0' {
+                return Some(n);
+            }
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.input.size_hint();
+        (0, upper) // Lower bound is 0 because we might filter everything
+    }
+}
+
+impl<I: FusedIterator<Item = char>> FusedIterator for NormalizePunctuationAdapter<I> {}
+
 impl StaticStageIter for NormalizePunctuation {
     type Iter<'a> = NormalizePunctuationIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(NormalizePunctuationIter::new(text))
+    }
+}
+
+// ============================================================================
+// FusableStage Implementation - Dynamic Iterator Fusion
+// ============================================================================
+
+impl FusableStage for NormalizePunctuation {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        _ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(NormalizePunctuationAdapter { input })
     }
 }
 

@@ -2,12 +2,11 @@
 mod integration_tests {
 
     use crate::{
-        ARA, COLLAPSE_WHITESPACE, CaseFold, DEU, JPN, LowerCase, NLD, Normy,
-        TRIM_WHITESPACE, TUR, ZHO,SegmentWords,
+        ARA, COLLAPSE_WHITESPACE, CaseFold, DEU, JPN, LowerCase, NLD, Normy, SegmentWords,
+        TRIM_WHITESPACE, TUR, ZHO,
         stage::{
-            normalize_punctuation::NormalizePunctuation,
-            remove_diacritics::RemoveDiacritics, strip_control_chars::StripControlChars,
-            unify_width::UnifyWidth,
+            normalize_punctuation::NormalizePunctuation, remove_diacritics::RemoveDiacritics,
+            strip_control_chars::StripControlChars, unify_width::UnifyWidth,
         },
     };
 
@@ -22,6 +21,28 @@ mod integration_tests {
         let input = " İSTANBUL  ";
         let result = normy.normalize(input).unwrap();
         assert_eq!(result, "istanbul");
+    }
+
+    #[test]
+    fn production_pipeline_fused_turkish() {
+        let normy = Normy::builder()
+            .lang(TUR)
+            .add_stage(TRIM_WHITESPACE)
+            .add_stage(LowerCase)
+            .build();
+
+        let input = " İSTANBUL  ";
+        let result = normy.normalize_fused(input).unwrap();
+        assert_eq!(result, "istanbul");
+    }
+
+    #[test]
+    fn production_pipeline_fused_german() {
+        let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
+
+        let input = " Fußball Maßstab Straße ";
+        let result = normy.normalize_fused(input).unwrap();
+        assert_eq!(result, " fussball massstab strasse ");
     }
 
     #[test]
@@ -81,6 +102,19 @@ mod integration_tests {
 
         // Text contains U+0670 (superscript alif) – not in the static list.
         let out = normy.normalize("الْكِتَابُٰ").unwrap();
+        // Expected: الكتاب (all diacritics stripped)
+        assert_eq!(out, "الكتاب"); // ← FAILS – the superscript alif remains
+    }
+
+    #[test]
+    fn arabic_diacritics_fused_missing() {
+        let normy = Normy::builder()
+            .lang(ARA)
+            .add_stage(RemoveDiacritics)
+            .build();
+
+        // Text contains U+0670 (superscript alif) – not in the static list.
+        let out = normy.normalize_fused("الْكِتَابُٰ").unwrap();
         // Expected: الكتاب (all diacritics stripped)
         assert_eq!(out, "الكتاب"); // ← FAILS – the superscript alif remains
     }

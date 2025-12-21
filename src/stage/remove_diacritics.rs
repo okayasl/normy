@@ -2,7 +2,7 @@ use crate::{
     ARA, CES, FRA, POL, SLK, VIE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::iter::FusedIterator;
@@ -84,6 +84,20 @@ impl Stage for RemoveDiacritics {
         Ok(Cow::Owned(out))
     }
 
+    /// RemoveDiacritics is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since it only performs 1:1 mappings or removals.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// RemoveDiacritics is always fusable since it only performs 1:1 character mappings
+    /// or character removal (spacing diacritics). No multi-character expansions.
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
+    }
+
     fn try_dynamic_iter<'a>(
         &self,
         text: &'a str,
@@ -93,12 +107,90 @@ impl Stage for RemoveDiacritics {
     }
 }
 
+impl StaticFusableStage for RemoveDiacritics {
+    type Adapter<'a, I>
+        = RemoveDiacriticsAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        RemoveDiacriticsAdapter {
+            input,
+            lang: &ctx.lang_entry,
+        }
+    }
+}
+
+pub struct RemoveDiacriticsAdapter<'a, I> {
+    input: I,
+    lang: &'a LangEntry,
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for RemoveDiacriticsAdapter<'a, I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let c = self.input.next()?;
+
+            // 1. Try 1:1 mapping (é -> e)
+            if let Some(base) = self.lang.find_pre_composed_to_base_map(c) {
+                return Some(base);
+            }
+
+            // 2. Skip if it's a standalone spacing diacritic
+            if self.lang.is_spacing_diacritic(c) {
+                continue;
+            }
+
+            // 3. Return as-is
+            return Some(c);
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.input.size_hint();
+        // Lower is 0 because spacing diacritics can be removed entirely
+        (0, upper)
+    }
+}
+
+impl<'a, I: FusedIterator<Item = char>> FusedIterator for RemoveDiacriticsAdapter<'a, I> {}
+
 impl StaticStageIter for RemoveDiacritics {
     type Iter<'a> = RemoveDiacriticsIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(RemoveDiacriticsIter::new(text, ctx))
+    }
+}
+
+// ============================================================================
+// FusableStage Implementation - Dynamic Iterator Fusion
+// ============================================================================
+
+impl FusableStage for RemoveDiacritics {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(RemoveDiacriticsAdapter {
+            input,
+            lang: &ctx.lang_entry,
+        })
     }
 }
 

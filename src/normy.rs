@@ -5,6 +5,7 @@ use crate::{
     process::{ChainedProcess, DynamicProcess, EmptyProcess, Process},
     profile::{Profile, ProfileError},
     stage::{Stage, StageError, StaticStageIter},
+    static_fused_process::StaticFusedProcess,
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, sync::Arc};
@@ -49,6 +50,18 @@ impl<P: Process> Normy<P> {
         assert_utf8(text);
         self.pipeline
             .process_fused(text, &self.ctx)
+            .map_err(Into::into)
+    }
+
+    #[inline(always)]
+    pub fn normalize_static_fused<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, NormyError>
+    where
+        P: StaticFusedProcess,
+    {
+        #[cfg(debug_assertions)]
+        assert_utf8(text);
+        self.pipeline
+            .process_static(text, &self.ctx)
             .map_err(Into::into)
     }
 

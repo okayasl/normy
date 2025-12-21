@@ -2,9 +2,11 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
+use std::iter::FusedIterator;
+
 use icu_normalizer::{
     ComposingNormalizer, ComposingNormalizerBorrowed, DecomposingNormalizer,
     DecomposingNormalizerBorrowed,
@@ -51,8 +53,73 @@ pub const NFKD: NfkdStage = NfkdStage;
 // Macro to eliminate duplication—generates all four impls from one source
 // src/stage/normalization.rs
 
+// macro_rules! impl_composing_stage {
+//     ($stage:ty, $name:literal, $norm:ident) => {
+//         impl Stage for $stage {
+//             fn name(&self) -> &'static str {
+//                 $name
+//             }
+
+//             #[inline(always)]
+//             fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
+//                 Ok(!$norm.is_normalized(text))
+//             }
+
+//             #[inline(always)]
+//             fn apply<'a>(
+//                 &self,
+//                 text: Cow<'a, str>,
+//                 _ctx: &Context,
+//             ) -> Result<Cow<'a, str>, StageError> {
+//                 Ok($norm.normalize(text.as_ref()).into_owned().into())
+//             }
+
+//             #[inline]
+//             fn safe_skip_approximation(&self) -> bool {
+//                 // UNSAFE when chained with different normalization forms!
+//                 // NFC → NFD reverses the transformation, so checking needs_apply
+//                 // on the original input is not a valid approximation.
+//                 // Example: decomposed input → NFC → composed → NFD needs to run,
+//                 // but NFD.needs_apply(decomposed) = false!
+//                 false
+//             }
+
+//             #[inline]
+//             fn as_fusable(&self) -> Option<&dyn FusableStage> {
+//                 Some(self)
+//             }
+
+//             fn try_dynamic_iter<'a>(
+//                 &self,
+//                 text: &'a str,
+//                 _ctx: &'a Context,
+//             ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+//                 // Wrap ICU4X's iterator with our FusedIterator wrapper
+//                 let iter = FusedComposition($norm.normalize_iter(text.chars()));
+//                 Some(Box::new(iter))
+//             }
+//         }
+
+//         impl StaticStageIter for $stage {
+//             type Iter<'a> = Empty<char>;
+//         }
+
+//         impl FusableStage for $stage {
+//             fn dyn_fused_adapter<'a>(
+//                 &self,
+//                 input: Box<dyn FusedIterator<Item = char> + 'a>,
+//                 _ctx: &'a Context,
+//             ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+//                 // Wrap ICU4X's iterator with our FusedIterator wrapper
+//                 Box::new(FusedComposition($norm.normalize_iter(input)))
+//             }
+//         }
+//     };
+// }
+
+// --- 4. Macro for Decomposing Normalizers (NFD, NFKD) ---
 macro_rules! impl_normalization_stage {
-    ($stage:ty, $name:literal, $norm:ident) => {
+    ($stage:ty, $name:literal, $norm:ident, $adapter:ident) => {
         impl Stage for $stage {
             fn name(&self) -> &'static str {
                 $name
@@ -71,24 +138,131 @@ macro_rules! impl_normalization_stage {
             ) -> Result<Cow<'a, str>, StageError> {
                 Ok($norm.normalize(text.as_ref()).into_owned().into())
             }
+
+            #[inline]
+            fn safe_skip_approximation(&self) -> bool {
+                // UNSAFE when chained with different normalization forms!
+                // See impl_composing_stage for explanation.
+                false
+            }
+
+            #[inline]
+            fn as_fusable(&self) -> Option<&dyn FusableStage> {
+                Some(self)
+            }
+
+            fn try_dynamic_iter<'a>(
+                &self,
+                text: &'a str,
+                _ctx: &'a Context,
+            ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
+                // Wrap ICU4X's iterator with our FusedIterator wrapper
+                Some(Box::new($adapter {
+                    iter: $norm.normalize_iter(text.chars()),
+                    _marker: std::marker::PhantomData,
+                }))
+            }
         }
+
+        impl StaticFusableStage for $stage {
+            type Adapter<'a, I>
+                = $adapter<'a, I>
+            where
+                I: FusedIterator<Item = char> + 'a;
+
+            fn supports_static_fusion(&self) -> bool {
+                true
+            }
+
+            #[inline(always)]
+            fn static_fused_adapter<'a, I>(
+                &self,
+                input: I,
+                _ctx: &'a Context,
+            ) -> Self::Adapter<'a, I>
+            where
+                I: FusedIterator<Item = char> + 'a,
+            {
+                $adapter {
+                    iter: $norm.normalize_iter(input),
+                    _marker: std::marker::PhantomData,
+                }
+            }
+        }
+
         impl StaticStageIter for $stage {
             type Iter<'a> = Empty<char>;
+        }
+
+        impl FusableStage for $stage {
+            fn dyn_fused_adapter<'a>(
+                &self,
+                input: Box<dyn FusedIterator<Item = char> + 'a>,
+                _ctx: &'a Context,
+            ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+                // Wrap ICU4X's iterator with our FusedIterator wrapper
+                Box::new($adapter {
+                    iter: $norm.normalize_iter(input),
+                    _marker: std::marker::PhantomData,
+                })
+            }
         }
     };
 }
 
-// Apply to all four forms
-impl_normalization_stage!(NfcStage, "nfc", ICU4X_NFC);
-impl_normalization_stage!(NfdStage, "nfd", ICU4X_NFD);
-impl_normalization_stage!(NfkcStage, "nfkc", ICU4X_NFKC);
-impl_normalization_stage!(NfkdStage, "nfkd", ICU4X_NFKD);
+// --- 5. Apply Macros ---
+impl_normalization_stage!(NfcStage, "nfc", ICU4X_NFC, NormalizationComposeAdapter);
+impl_normalization_stage!(NfkcStage, "nfkc", ICU4X_NFKC, NormalizationComposeAdapter);
+impl_normalization_stage!(NfdStage, "nfd", ICU4X_NFD, NormalizationDecomposeAdapter);
+impl_normalization_stage!(NfkdStage, "nfkd", ICU4X_NFKD, NormalizationDecomposeAdapter);
+
+// Generic Adapter for Composition (NFC, NFKC)
+pub struct NormalizationComposeAdapter<'a, I>
+where
+    I: Iterator<Item = char>,
+{
+    iter: icu_normalizer::Composition<'static, I>,
+    _marker: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for NormalizationComposeAdapter<'a, I> {
+    type Item = char;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<'a, I: Iterator<Item = char>> FusedIterator for NormalizationComposeAdapter<'a, I> {}
+
+// Generic Adapter for Decomposition (NFD, NFKD)
+pub struct NormalizationDecomposeAdapter<'a, I>
+where
+    I: Iterator<Item = char>,
+{
+    iter: icu_normalizer::Decomposition<'static, I>,
+    _marker: std::marker::PhantomData<&'a ()>,
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for NormalizationDecomposeAdapter<'a, I> {
+    type Item = char;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+impl<'a, I: Iterator<Item = char>> FusedIterator for NormalizationDecomposeAdapter<'a, I> {}
 
 // --- 4. Implementation for StageTestConfig (Must be Duplicated) ---
-
-// NOTE: Since we removed the generic structure, we MUST duplicate the
-// StageTestConfig implementation for ALL four concrete structs.
-
 macro_rules! impl_stage_test_config {
     ($type:ty) => {
         impl StageTestConfig for $type {
@@ -152,14 +326,50 @@ mod tests {
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
+    /// Helper to verify that apply() and fusable iterator produce identical results
+    fn assert_apply_equals_fusable(stage: &dyn Stage, text: &str, ctx: &Context) -> TestResult {
+        // Get result from apply method
+        let apply_result = stage.apply(Cow::Borrowed(text), ctx)?;
+
+        // Get result from fusable iterator path
+        if let Some(fusable) = stage.as_fusable() {
+            let iter: Box<dyn FusedIterator<Item = char>> = Box::new(text.chars());
+            let fused_iter = fusable.dyn_fused_adapter(iter, ctx);
+            let fusable_result: String = fused_iter.collect();
+
+            assert_eq!(
+                apply_result.as_ref(),
+                fusable_result.as_str(),
+                "Stage {} produced different results: apply='{}' vs fusable='{}'",
+                stage.name(),
+                apply_result,
+                fusable_result
+            );
+        } else {
+            panic!(
+                "Stage {} should be fusable but as_fusable() returned None",
+                stage.name()
+            );
+        }
+
+        Ok(())
+    }
+
     #[test]
     fn test_canonical_nfc_nfd() -> TestResult {
         let c = Context::default();
         let text = "cafe\u{0301}";
+
+        // Test NFC
         let nfc = NFC.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfc, "café");
+        assert_apply_equals_fusable(&NFC, text, &c)?;
+
+        // Test NFD
         let nfd = NFD.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfd, "cafe\u{0301}");
+        assert_apply_equals_fusable(&NFD, text, &c)?;
+
         Ok(())
     }
 
@@ -167,10 +377,17 @@ mod tests {
     fn test_compatibility_nfkc_nfkd() -> TestResult {
         let c = Context::default();
         let text = "ﬀﬁ ½ ①";
+
+        // Test NFKC
         let nfkc = NFKC.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfkc, "fffi 1⁄2 1");
+        assert_apply_equals_fusable(&NFKC, text, &c)?;
+
+        // Test NFKD
         let nfkd = NFKD.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfkd, "fffi 1⁄2 1");
+        assert_apply_equals_fusable(&NFKD, text, &c)?;
+
         Ok(())
     }
 
@@ -179,18 +396,19 @@ mod tests {
         let c = Context::default();
         let text = "café naïve ﬁ";
 
-        // 1. Create a list of the concrete stage instances, wrapped in a Box<dyn Stage>
         let stages: Vec<Box<dyn Stage>> =
             vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
 
-        for stage in stages.into_iter() {
-            // Iterate over the trait objects
-            // Need to dereference the Box to use the Stage trait methods
+        for stage in stages.iter() {
+            // Test apply idempotency
             let once = stage.apply(Cow::Borrowed(text), &c)?;
             let twice = stage.apply(once.clone(), &c)?;
-
             assert_eq!(once, twice, "Stage {} not idempotent", stage.name());
-            assert!(!(stage.needs_apply(&once, &c)?));
+            assert!(!stage.needs_apply(&once, &c)?);
+
+            // Verify apply equals fusable for both original and normalized text
+            assert_apply_equals_fusable(stage.as_ref(), text, &c)?;
+            assert_apply_equals_fusable(stage.as_ref(), &once, &c)?;
         }
 
         Ok(())
@@ -201,10 +419,15 @@ mod tests {
         let c = Context::default();
         let original = "El Niño café naïve";
 
+        // Test with apply
         let nfd = NFD.apply(Cow::Borrowed(original), &c)?;
         let back_to_nfc = NFC.apply(nfd, &c)?;
-
         assert_eq!(back_to_nfc, original);
+
+        // Verify fusable produces same results
+        assert_apply_equals_fusable(&NFD, original, &c)?;
+        assert_apply_equals_fusable(&NFC, &back_to_nfc, &c)?;
+
         Ok(())
     }
 
@@ -212,15 +435,18 @@ mod tests {
     fn test_multilingual_nfkc() -> TestResult {
         let stage = NFKC;
         let c = Context::default();
-
         let input = "Hello, 世界! ﬁﬀ caféﬀﬃﬃ";
-        let result = stage.apply(Cow::Borrowed(input), &c)?;
 
+        let result = stage.apply(Cow::Borrowed(input), &c)?;
         // ligatures expanded, accents composed, full-width preserved
         assert_eq!(result, "Hello, 世界! fiff caféffffiffi");
 
         // Already normalized
         assert!(!stage.needs_apply(&result, &c)?);
+
+        // Verify fusable produces same results
+        assert_apply_equals_fusable(&stage, input, &c)?;
+        assert_apply_equals_fusable(&stage, &result, &c)?;
 
         Ok(())
     }
@@ -228,7 +454,6 @@ mod tests {
     #[test]
     fn test_search_vs_display_pipeline() -> TestResult {
         let c = Context::default();
-
         let query = "café naïve ff"; // decomposed + ligatures
         let stage_search = NFKC;
         let normalized_query = stage_search.apply(Cow::Borrowed(query), &c)?;
@@ -239,6 +464,10 @@ mod tests {
 
         assert_eq!(normalized_query, normalized_display);
 
+        // Verify fusable produces same results
+        assert_apply_equals_fusable(&stage_search, query, &c)?;
+        assert_apply_equals_fusable(&stage_display, display_text, &c)?;
+
         Ok(())
     }
 
@@ -248,13 +477,76 @@ mod tests {
         let empty = "";
         let ascii = "hello world";
 
-        // 1. Create a list of the concrete stage instances, wrapped in a Box<dyn Stage>
         let stages: Vec<Box<dyn Stage>> =
             vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
 
-        for stage in stages.into_iter() {
+        for stage in stages.iter() {
             assert_eq!(stage.apply(Cow::Borrowed(empty), &c)?, "");
             assert_eq!(stage.apply(Cow::Borrowed(ascii), &c)?, ascii);
+
+            // Verify fusable produces same results
+            assert_apply_equals_fusable(stage.as_ref(), empty, &c)?;
+            assert_apply_equals_fusable(stage.as_ref(), ascii, &c)?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fusable_chaining() -> TestResult {
+        let c = Context::default();
+        let text = "café ﬁ";
+
+        // Test chaining multiple fusable stages
+        // Chain: text -> NFD -> NFKC
+        let nfd_fusable = NFD.as_fusable().unwrap();
+        let nfkc_fusable = NFKC.as_fusable().unwrap();
+
+        // Build fused chain
+        let iter1: Box<dyn FusedIterator<Item = char>> = Box::new(text.chars());
+        let iter2 = nfd_fusable.dyn_fused_adapter(iter1, &c);
+        let iter3 = nfkc_fusable.dyn_fused_adapter(iter2, &c);
+        let fused_result: String = iter3.collect();
+
+        // Compare with sequential apply
+        let step1 = NFD.apply(Cow::Borrowed(text), &c)?;
+        let step2 = NFKC.apply(step1, &c)?;
+
+        assert_eq!(
+            fused_result,
+            step2.as_ref(),
+            "Fused chain should produce same result as sequential apply"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_fusable_with_special_chars() -> TestResult {
+        let c = Context::default();
+
+        // Test various Unicode categories
+        let test_cases = vec![
+            ("", "empty string"),
+            ("a", "simple ASCII"),
+            ("café", "composed accents"),
+            ("cafe\u{0301}", "decomposed accents"),
+            ("ﬁﬀ", "ligatures"),
+            ("½①", "fractions and circled numbers"),
+            ("日本語", "CJK characters"),
+            ("𝕳𝖊𝖑𝖑𝖔", "mathematical alphanumeric symbols"),
+            ("🎉🎊", "emoji"),
+            ("\u{200B}\u{200C}\u{200D}", "zero-width characters"),
+        ];
+
+        let stages: Vec<Box<dyn Stage>> =
+            vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
+
+        for (text, desc) in test_cases {
+            for stage in stages.iter() {
+                assert_apply_equals_fusable(stage.as_ref(), text, &c)
+                    .map_err(|e| format!("Failed for {}: {}", desc, e))?;
+            }
         }
 
         Ok(())

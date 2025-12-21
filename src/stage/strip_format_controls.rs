@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{contains_format_controls, is_format_control},
 };
@@ -38,8 +38,27 @@ impl Stage for StripFormatControls {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // We are here → format controls exist → allocate once, filter perfectly
-        Ok(Cow::Owned(StripFormatControlsIter::new(&text).collect()))
+        // Direct allocation path: avoid iterator abstraction for single-stage execution
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            if !is_format_control(c) {
+                out.push(c);
+            }
+        }
+        Ok(Cow::Owned(out))
+    }
+
+    /// StripFormatControls is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since it only removes characters.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// StripFormatControls is always fusable. Only performs character removal (filtering).
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
     }
 
     fn try_dynamic_iter<'a>(
@@ -51,12 +70,64 @@ impl Stage for StripFormatControls {
     }
 }
 
+impl StaticFusableStage for StripFormatControls {
+    type Adapter<'a, I>
+        = StripFormatControlsAdapter<I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        StripFormatControlsAdapter { input }
+    }
+}
+
+pub struct StripFormatControlsAdapter<I> {
+    input: I,
+}
+
+impl<I: Iterator<Item = char>> Iterator for StripFormatControlsAdapter<I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Skips characters until is_format_control(c) returns false
+        self.input.find(|&c| !is_format_control(c))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.input.size_hint();
+        (0, upper) // Can only shrink
+    }
+}
+
+impl<I: FusedIterator<Item = char>> FusedIterator for StripFormatControlsAdapter<I> {}
+
 impl StaticStageIter for StripFormatControls {
     type Iter<'a> = StripFormatControlsIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(StripFormatControlsIter::new(text))
+    }
+}
+
+impl FusableStage for StripFormatControls {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        _ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(StripFormatControlsAdapter { input })
     }
 }
 

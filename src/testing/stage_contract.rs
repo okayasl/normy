@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::stage::StaticStageIter;
+use crate::stage::{StaticFusableStage, StaticStageIter};
 use crate::{lang::Lang, stage::Stage};
 
 /// Trait that stages implement to opt into the universal test suite.
@@ -42,7 +42,7 @@ pub trait StageTestConfig: Stage + Sized {
 ///
 /// ### The Seven Universal Contracts:
 /// 1. `zero_copy_when_no_changes` → no allocation when input == output
-/// 2. `iter_paths_equivalent_to_apply` → try_iter and try_dynamic_iter produce identical results to apply()
+/// 2. `static_and_dynamic_iter_paths_equivalent_to_apply` → try_iter and try_dynamic_iter produce identical results to apply()
 /// 3. `stage_is_idempotent` → applying twice yields same result as once
 /// 4. `needs_apply_is_accurate` → correctly predicts whether apply() would change text
 /// 5. `handles_empty_string_and_ascii` → graceful on edge cases
@@ -54,7 +54,9 @@ pub trait StageTestConfig: Stage + Sized {
 macro_rules! assert_stage_contract {
     ($stage:expr) => {
         $crate::testing::stage_contract::zero_copy_when_no_changes($stage);
-        $crate::testing::stage_contract::iter_paths_equivalent_to_apply($stage);
+        $crate::testing::stage_contract::static_and_dynamic_iter_paths_equivalent_to_apply($stage);
+        $crate::testing::stage_contract::fused_iter_path_equivalent_to_apply($stage);
+        $crate::testing::stage_contract::static_fused_path_equivalent_to_apply($stage);
         $crate::testing::stage_contract::stage_is_idempotent($stage);
         $crate::testing::stage_contract::needs_apply_is_accurate($stage);
         $crate::testing::stage_contract::handles_empty_string_and_ascii($stage);
@@ -70,6 +72,8 @@ macro_rules! assert_stage_contract {
 use crate::{ENG, all_langs, context::Context};
 #[cfg(test)]
 use std::borrow::Cow;
+#[cfg(test)]
+use std::iter::FusedIterator;
 
 #[cfg(test)]
 pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
@@ -131,7 +135,11 @@ pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
 }
 
 #[cfg(test)]
-pub fn iter_paths_equivalent_to_apply<S: Stage + StaticStageIter + StageTestConfig>(stage: S) {
+pub fn static_and_dynamic_iter_paths_equivalent_to_apply<
+    S: Stage + StaticStageIter + StageTestConfig,
+>(
+    stage: S,
+) {
     for &lang in S::one_to_one_languages() {
         let ctx = Context::new(lang);
         let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
@@ -152,6 +160,56 @@ pub fn iter_paths_equivalent_to_apply<S: Stage + StaticStageIter + StageTestConf
                 via_apply.as_ref(),
                 via_dyn,
                 "dynamic iter path ≠ apply() in {lang:?}\n apply(): {via_apply:?}\n dynamic iter: {via_dyn:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+pub fn fused_iter_path_equivalent_to_apply<S: Stage + StageTestConfig>(stage: S) {
+    for &lang in S::one_to_one_languages() {
+        let ctx = Context::new(lang);
+        let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
+
+        let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+
+        // Build a dummy previous iterator (just the input chars)
+        let prev_iter: Box<dyn FusedIterator<Item = char>> = Box::new(input.chars());
+
+        if let Some(fusable_stage) = stage.as_fusable() {
+            let fused_iter = fusable_stage.dyn_fused_adapter(prev_iter, &ctx);
+            let via_fused: String = fused_iter.collect();
+
+            assert_eq!(
+                via_apply.as_ref(),
+                via_fused,
+                "fused adapter path ≠ apply() in {lang:?}\n\
+             apply(): {via_apply:?}\n\
+             fused:   {via_fused:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+pub fn static_fused_path_equivalent_to_apply<S: Stage + StaticFusableStage + StageTestConfig>(
+    stage: S,
+) {
+    for &lang in S::one_to_one_languages() {
+        let ctx = Context::new(lang);
+        let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
+
+        let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+
+        if stage.supports_static_fusion() {
+            let adapter = stage.static_fused_adapter(input.chars(), &ctx);
+            let via_fused: String = adapter.collect();
+            assert_eq!(
+                via_apply.as_ref(),
+                via_fused,
+                "static fused adapter path ≠ apply() in {lang:?}\n\
+             apply(): {via_apply:?}\n\
+             fused:   {via_fused:?}"
             );
         }
     }

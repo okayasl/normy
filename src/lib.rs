@@ -8,6 +8,7 @@ pub mod lang;
 pub mod process;
 pub mod profile;
 pub mod stage;
+pub mod static_fused_process;
 pub mod testing;
 
 pub use lang::data::*;

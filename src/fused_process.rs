@@ -92,7 +92,7 @@ fn fuse_and_process<'a>(
 
     while i < stages.len() {
         // Find next fusable segment
-        let segment_end = find_fusable_end(stages, i);
+        let segment_end = find_fusable_segment_end(stages, i);
 
         if segment_end > i {
             // We have fusable stages - process as segment
@@ -113,10 +113,27 @@ fn fuse_and_process<'a>(
 }
 
 /// Find where the fusable segment ends
-fn find_fusable_end(stages: &[&dyn Stage], start: usize) -> usize {
-    let mut end = start;
-    while end < stages.len() && stages[end].safe_skip_approximation() {
-        end += 1;
+fn find_fusable_segment_end(stages: &[&dyn Stage], start: usize) -> usize {
+    let first_stage = stages[start];
+
+    // If not fusable at all, return start (segment = 0)
+    if first_stage.as_fusable().is_none() {
+        return start;
+    }
+
+    // If fusable but NOT safe_skip, segment = 1 ✅
+    if !first_stage.safe_skip_approximation() {
+        return start + 1; // Single-stage segment!
+    }
+
+    // If fusable AND safe_skip, try to extend segment
+    let mut end = start + 1;
+    while end < stages.len() {
+        if stages[end].as_fusable().is_some() && stages[end].safe_skip_approximation() {
+            end += 1;
+        } else {
+            break;
+        }
     }
     end
 }

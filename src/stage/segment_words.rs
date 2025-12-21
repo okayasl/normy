@@ -4,7 +4,7 @@ use crate::{
     DEU, ENG, FRA, HIN, JPN, KOR, SPA, ZHO,
     context::Context,
     lang::{Lang, LangEntry, SegmentRule},
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{
         CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
@@ -201,7 +201,83 @@ impl Stage for SegmentWords {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        Ok(Cow::Owned(SegmentWordsIter::new(&text, ctx).collect()))
+        let entry = ctx.lang_entry;
+        let mut out = String::with_capacity(self.expected_capacity(text.len()));
+
+        let mut prev_char: Option<char> = None;
+        let mut prev_class: Option<CharClass> = None;
+        let mut prev_is_virama = false;
+
+        for curr in text.chars() {
+            // 1. Whitespace/ZWSP resets state and passes through
+            if is_any_whitespace(curr) || curr == zwsp() {
+                out.push(curr);
+                prev_char = None;
+                prev_class = None;
+                prev_is_virama = false;
+                continue;
+            }
+
+            // 2. Joiners pass through but don't reset state
+            if curr == '\u{200D}' || curr == '\u{200C}' {
+                out.push(curr);
+                continue;
+            }
+
+            let curr_class = classify(curr);
+            let curr_is_virama = is_virama(curr);
+
+            // 3. Boundary Check Logic
+            if let (Some(_p_char), Some(p_class)) = (prev_char, prev_class) {
+                let mut need_boundary = false;
+                let mut use_zwsp = false;
+
+                // Indic Rule
+                if p_class == Indic && prev_is_virama && !curr_is_virama && curr_class == Indic {
+                    if !(entry.code() == HIN.code && should_prevent_indic_break(curr)) {
+                        need_boundary = true;
+                        use_zwsp = true;
+                    }
+                }
+                // Script Boundary Rule
+                else if check_boundary_with_classes(p_class, curr_class, &entry) {
+                    need_boundary = true;
+                }
+
+                if need_boundary {
+                    out.push(if use_zwsp { zwsp() } else { ' ' });
+                }
+            }
+
+            // 4. Update state and push current
+            out.push(curr);
+            prev_char = Some(curr);
+            prev_class = Some(curr_class);
+            prev_is_virama = curr_is_virama;
+        }
+
+        Ok(Cow::Owned(out))
+    }
+
+    /// SegmentWords is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since it only inserts characters (spaces/ZWSP).
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// SegmentWords is always fusable since it only inserts delimiters (spaces or ZWSP)
+    /// between characters. No character transformations or multi-character expansions.
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
+    }
+
+    #[inline]
+    fn expected_capacity(&self, input_len: usize) -> usize {
+        // Heuristic: segmentation adds roughly 10-20% length for mixed scripts,
+        // but up to 100% for CJK unigrams.
+        (input_len * 12) >> 3 // ~1.5x to be safe
     }
 
     fn try_dynamic_iter<'a>(
@@ -213,12 +289,156 @@ impl Stage for SegmentWords {
     }
 }
 
+impl StaticFusableStage for SegmentWords {
+    type Adapter<'a, I>
+        = SegmentWordsAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        SegmentWordsAdapter {
+            input,
+            lang: &ctx.lang_entry,
+            prev_char: None,
+            prev_class: None,
+            prev_is_virama: false,
+            pending_space: None,
+        }
+    }
+}
+
+pub struct SegmentWordsAdapter<'a, I> {
+    input: I,
+    lang: &'a LangEntry,
+    prev_char: Option<char>,
+    prev_class: Option<CharClass>,
+    prev_is_virama: bool,
+    pending_space: Option<char>,
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for SegmentWordsAdapter<'a, I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // 1. First priority: emit any boundary character we've decided to inject
+        if let Some(space) = self.pending_space.take() {
+            return Some(space);
+        }
+
+        loop {
+            let curr = match self.input.next() {
+                Some(c) => c,
+                None => {
+                    // End of stream: return the last buffered character if it exists
+                    return self.prev_char.take();
+                }
+            };
+
+            // 2. Whitespace/ZWSP resets boundary detection state
+            if is_any_whitespace(curr) || curr == zwsp() {
+                if let Some(prev) = self.prev_char.take() {
+                    self.prev_class = None;
+                    self.prev_is_virama = false;
+                    self.pending_space = Some(curr);
+                    return Some(prev);
+                }
+                return Some(curr);
+            }
+
+            // 3. Joiners are transparent: emit but don't reset script state
+            if curr == '\u{200D}' || curr == '\u{200C}' {
+                if self.prev_char.is_some() {
+                    continue;
+                }
+                return Some(curr);
+            }
+
+            let curr_class = classify(curr);
+            let curr_is_virama = is_virama(curr);
+
+            // 4. Check for boundaries if we have a previous character
+            if let (Some(prev), Some(p_class)) = (self.prev_char, self.prev_class) {
+                let mut need_boundary = false;
+                let mut use_zwsp = false;
+
+                // Indic Rule
+                if p_class == Indic && self.prev_is_virama && !curr_is_virama && curr_class == Indic
+                {
+                    if !(self.lang.code() == HIN.code && should_prevent_indic_break(curr)) {
+                        need_boundary = true;
+                        use_zwsp = true;
+                    }
+                }
+                // Script Boundary Rule
+                else if check_boundary_with_classes(p_class, curr_class, self.lang) {
+                    need_boundary = true;
+                }
+
+                if need_boundary {
+                    self.pending_space = Some(if use_zwsp { zwsp() } else { ' ' });
+                }
+
+                // Buffer current and return previous
+                self.prev_char = Some(curr);
+                self.prev_class = Some(curr_class);
+                self.prev_is_virama = curr_is_virama;
+                return Some(prev);
+            }
+
+            // 5. Initial character buffering
+            self.prev_char = Some(curr);
+            self.prev_class = Some(curr_class);
+            self.prev_is_virama = curr_is_virama;
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lower, upper) = self.input.size_hint();
+        // This stage can double the size in the worst case (Cjk Unigrams)
+        (lower, upper.map(|u| u.saturating_mul(2)))
+    }
+}
+
+impl<'a, I: FusedIterator<Item = char>> FusedIterator for SegmentWordsAdapter<'a, I> {}
+
 impl StaticStageIter for SegmentWords {
     type Iter<'a> = SegmentWordsIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(SegmentWordsIter::new(text, ctx))
+    }
+}
+
+// ============================================================================
+// FusableStage Implementation - Dynamic Iterator Fusion
+// ============================================================================
+
+impl FusableStage for SegmentWords {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(SegmentWordsAdapter {
+            input,
+            lang: &ctx.lang_entry,
+            prev_char: None,
+            prev_class: None,
+            prev_is_virama: false,
+            pending_space: None,
+        })
     }
 }
 

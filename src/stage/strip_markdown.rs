@@ -1,11 +1,14 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use std::{borrow::Cow, iter::Empty};
+use std::{
+    borrow::Cow,
+    iter::{Empty, FusedIterator},
+};
 
 /// Fast pre-scan: checks for common Markdown indicators.
 /// If none appear, we skip the parser entirely.
@@ -185,6 +188,27 @@ impl Stage for StripMarkdown {
         } else {
             Ok(Cow::Owned(out))
         }
+    }
+}
+
+impl StaticFusableStage for StripMarkdown {
+    type Adapter<'a, I>
+        = crate::stage::StaticIdentityAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    // Trigger the fallback to the optimized apply() method
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        crate::stage::StaticIdentityAdapter::new(input)
     }
 }
 

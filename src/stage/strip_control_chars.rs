@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::is_control,
 };
@@ -41,8 +41,27 @@ impl Stage for StripControlChars {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // We are here → control chars exist → allocate once, filter perfectly
-        Ok(Cow::Owned(StripControlCharsIter::new(&text).collect()))
+        // Direct allocation path for standalone execution
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            if !is_control(c) {
+                out.push(c);
+            }
+        }
+        Ok(Cow::Owned(out))
+    }
+
+    /// StripControlChars is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since it only removes characters.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// StripControlChars is always fusable. Only performs character removal (filtering).
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
     }
 
     fn try_dynamic_iter<'a>(
@@ -54,12 +73,65 @@ impl Stage for StripControlChars {
     }
 }
 
+impl StaticFusableStage for StripControlChars {
+    type Adapter<'a, I>
+        = StripControlCharsAdapter<I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        StripControlCharsAdapter { input }
+    }
+}
+
+pub struct StripControlCharsAdapter<I> {
+    input: I,
+}
+
+impl<I: Iterator<Item = char>> Iterator for StripControlCharsAdapter<I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Simple filter pattern: find the next non-control character
+        self.input.find(|&c| !is_control(c))
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, upper) = self.input.size_hint();
+        // It can only shrink, so lower bound is 0
+        (0, upper)
+    }
+}
+
+impl<I: FusedIterator<Item = char>> FusedIterator for StripControlCharsAdapter<I> {}
+
 impl StaticStageIter for StripControlChars {
     type Iter<'a> = StripControlCharsIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(StripControlCharsIter::new(text))
+    }
+}
+
+impl FusableStage for StripControlChars {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        _ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(StripControlCharsAdapter { input })
     }
 }
 

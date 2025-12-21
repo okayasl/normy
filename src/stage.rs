@@ -72,6 +72,11 @@ pub trait Stage: Send + Sync {
         None // Default: not fusable
     }
 
+    #[inline]
+    fn expected_capacity(&self, input_len: usize) -> usize {
+        input_len // Default: 1:1 ratio
+    }
+
     /// Return a dynamic iterator
     /// Only called when needs_apply returned true.
     /// Always allocate. May mutate and may be slow.
@@ -115,13 +120,43 @@ pub trait FusableStage: Stage {
     ) -> Box<dyn FusedIterator<Item = char> + 'a>;
 }
 
+pub struct StaticIdentityAdapter<'a, I>(pub I, pub std::marker::PhantomData<&'a ()>);
+
+impl<'a, I> StaticIdentityAdapter<'a, I> {
+    #[inline(always)]
+    pub fn new(input: I) -> Self {
+        Self(input, std::marker::PhantomData)
+    }
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for StaticIdentityAdapter<'a, I> {
+    type Item = char;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.0.size_hint()
+    }
+}
+
+impl<'a, I: FusedIterator<Item = char>> FusedIterator for StaticIdentityAdapter<'a, I> {}
+
 /// Static (monomorphized) version for compile-time optimization
 pub trait StaticFusableStage: Stage {
+    // Default to the Identity adapter
     type Adapter<'a, I>: FusedIterator<Item = char> + 'a
     where
         I: FusedIterator<Item = char> + 'a;
 
-    fn static_fused_adapter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::Adapter<'a, I>
+    /// Returns true if this stage actually provides a real fuser
+    fn supports_static_fusion(&self) -> bool {
+        false
+    }
+
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
     where
         I: FusedIterator<Item = char> + 'a;
 }

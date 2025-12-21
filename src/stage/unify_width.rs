@@ -2,7 +2,7 @@ use crate::{
     JPN, KOR, ZHO,
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{fullwidth_to_halfwidth, is_fullwidth},
 };
@@ -35,8 +35,25 @@ impl Stage for UnifyWidth {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // We are here → full-width chars exist → allocate once, convert perfectly
-        Ok(Cow::Owned(UnifyWidthIter::new(&text).collect()))
+        // Direct allocation path: 1:1 mapping means capacity matches exactly
+        let mut out = String::with_capacity(text.len());
+        for c in text.chars() {
+            out.push(fullwidth_to_halfwidth(c));
+        }
+        Ok(Cow::Owned(out))
+    }
+
+    /// UnifyWidth is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since it only performs 1:1 mappings.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// UnifyWidth is always fusable. Only performs 1:1 character mappings.
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
     }
 
     fn try_dynamic_iter<'a>(
@@ -48,12 +65,63 @@ impl Stage for UnifyWidth {
     }
 }
 
+impl StaticFusableStage for UnifyWidth {
+    type Adapter<'a, I>
+        = UnifyWidthAdapter<I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        UnifyWidthAdapter { input }
+    }
+}
+
+pub struct UnifyWidthAdapter<I> {
+    input: I,
+}
+
+impl<I: Iterator<Item = char>> Iterator for UnifyWidthAdapter<I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.input.next().map(fullwidth_to_halfwidth)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        // 1:1 mapping preserves exact string length
+        self.input.size_hint()
+    }
+}
+
+impl<I: FusedIterator<Item = char>> FusedIterator for UnifyWidthAdapter<I> {}
+
 impl StaticStageIter for UnifyWidth {
     type Iter<'a> = UnifyWidthIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(UnifyWidthIter::new(text))
+    }
+}
+
+impl FusableStage for UnifyWidth {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        _ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(UnifyWidthAdapter { input })
     }
 }
 

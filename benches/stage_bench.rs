@@ -2,14 +2,11 @@ use std::{borrow::Cow, hint::black_box, time::Duration};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
-    ARA, COLLAPSE_WHITESPACE, COLLAPSE_WHITESPACE_UNICODE, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN,
-    JPN, KOR, LIT, LowerCase, NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL,
-    NormalizePunctuation, Normy, POL, RUS, RemoveDiacritics, SPA, SegmentWords, StripControlChars,
-    StripHtml, THA, TRIM_WHITESPACE, TRIM_WHITESPACE_UNICODE, TUR, Transliterate, UnifyWidth, VIE,
-    ZHO,
+    ARA, CaseFold, DEU, ENG, FRA, HIN, JPN, KOR, LIT, LowerCase, NLD, Normy, RUS, RemoveDiacritics,
+    SegmentWords, TUR, Transliterate, VIE, ZHO,
     context::Context,
     lang::Lang,
-    stage::{Stage, StaticStageIter},
+    stage::{Stage, StaticFusableStage, StaticStageIter},
 };
 
 // 16 languages — the exact set that will appear in the Normy white paper
@@ -53,7 +50,7 @@ const SAMPLES: &[(&str, Lang)] = &[
 
 fn stage_paths_benches_auto<S, C>(c: &mut Criterion, stage_name: &str, constructor: C)
 where
-    S: Stage + StaticStageIter + 'static,
+    S: Stage + StaticStageIter + StaticFusableStage + 'static,
     C: Fn() -> S + Copy,
 {
     let mut group = c.benchmark_group(format!("{stage_name}_paths"));
@@ -64,6 +61,8 @@ where
         let ctx = Context::new(lang);
         let supports_static = stage.try_static_iter("test", &ctx).is_some();
         let supports_dynamic = stage.try_dynamic_iter("test", &ctx).is_some();
+        let supports_static_fusion = stage.supports_static_fusion();
+
         let normalized_cow = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
         let normalized = normalized_cow.as_ref().to_string();
         auto_unchanged.push((normalized, lang));
@@ -85,6 +84,24 @@ where
             },
         );
 
+        if supports_static_fusion {
+            group.bench_function(
+                BenchmarkId::new("static_fusion_changed", format!("{}-{}", lang.code(), text)),
+                |b| {
+                    b.iter_batched(
+                        constructor,
+                        |stage| {
+                            let ctx = Context::new(lang);
+                            let static_iter = stage.static_fused_adapter(text.chars(), &ctx);
+                            let s = static_iter.collect::<String>();
+                            black_box(s)
+                        },
+                        BatchSize::SmallInput,
+                    )
+                },
+            );
+        }
+
         // static_iter changed
         if supports_static {
             group.bench_function(
@@ -93,7 +110,7 @@ where
                     b.iter_batched(
                         constructor,
                         |stage| {
-                            let ctx = normy::context::Context::new(lang);
+                            let ctx = Context::new(lang);
                             if let Some(iter) = stage.try_static_iter(text, &ctx) {
                                 let s = iter.collect::<String>();
                                 black_box(s);
@@ -113,7 +130,7 @@ where
                     b.iter_batched(
                         constructor,
                         |stage| {
-                            let ctx = normy::context::Context::new(lang);
+                            let ctx = Context::new(lang);
                             if let Some(iter) = stage.try_dynamic_iter(text, &ctx) {
                                 let s = iter.collect::<String>();
                                 black_box(s);
@@ -132,6 +149,7 @@ where
         let ctx = Context::new(lang);
         let supports_static = stage.try_static_iter("test", &ctx).is_some();
         let supports_dynamic = stage.try_dynamic_iter("test", &ctx).is_some();
+        let supports_static_fusion = stage.supports_static_fusion();
 
         // apply unchanged
         group.bench_function(
@@ -150,6 +168,27 @@ where
             },
         );
 
+        if supports_static_fusion {
+            group.bench_function(
+                BenchmarkId::new(
+                    "static_fusion_unchanged",
+                    format!("{}-{}", lang.code(), normalized),
+                ),
+                |b| {
+                    b.iter_batched(
+                        constructor,
+                        |stage| {
+                            let ctx = Context::new(lang);
+                            let static_iter = stage.static_fused_adapter(normalized.chars(), &ctx);
+                            let s = static_iter.collect::<String>();
+                            black_box(s)
+                        },
+                        BatchSize::SmallInput,
+                    )
+                },
+            );
+        }
+
         // static_iter unchanged
         if supports_static {
             group.bench_function(
@@ -161,7 +200,7 @@ where
                     b.iter_batched(
                         constructor,
                         |stage| {
-                            let ctx = normy::context::Context::new(lang);
+                            let ctx = Context::new(lang);
                             if let Some(iter) = stage.try_static_iter(&normalized, &ctx) {
                                 let s = iter.collect::<String>();
                                 black_box(s);
@@ -200,10 +239,9 @@ where
     group.finish();
 }
 
-// S is the concrete stage type (e.g. LowerCase, CaseFold, ...)
 fn stage_benches_auto<S, C>(c: &mut Criterion, stage_name: &str, constructor: C)
 where
-    S: normy::stage::Stage + StaticStageIter + 'static, // ← correct bound
+    S: Stage + StaticStageIter + StaticFusableStage + 'static,
     C: Fn() -> S,
 {
     let mut group = c.benchmark_group(stage_name);

@@ -3,8 +3,12 @@
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use normy::COLLAPSE_WHITESPACE_UNICODE;
+use normy::fused_process::ProcessFused;
+use normy::process::Process;
 use normy::stage::StaticStageIter;
 use normy::stage::normalization::NfdStage;
+use normy::stage::normalize_whitespace::NormalizeWhitespace;
 use rand::random;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::sync::LazyLock;
@@ -12,10 +16,7 @@ use std::{borrow::Cow, hint::black_box};
 
 use tokenizers::{NormalizedString, Normalizer, normalizers::BertNormalizer};
 
-use normy::{
-    LowerCase, NFD, Normy, RemoveDiacritics, StripControlChars, StripFormatControls, ZHO,
-    stage::normalize_whitespace::NormalizeWhitespace,
-};
+use normy::{LowerCase, NFD, Normy, RemoveDiacritics, StripControlChars, StripFormatControls, ZHO};
 
 // ──────────────────────────────────────────────────────────────
 // Compatibility stage (exact HF Bert Chinese spacing behavior)
@@ -58,31 +59,6 @@ impl normy::stage::Stage for BertCompatChineseChars {
 impl StaticStageIter for BertCompatChineseChars {
     type Iter<'a> = std::iter::Empty<char>;
 }
-
-// impl normy::stage::CharMapper for BertCompatChineseChars {
-//     #[inline(always)]
-//     fn map(&self, c: char, _: &normy::context::Context) -> Option<char> {
-//         if is_chinese_char(c) { None } else { Some(c) }
-//     }
-//     #[inline(always)]
-//     fn bind<'a>(
-//         &self,
-//         text: &'a str,
-//         _: &normy::context::Context,
-//     ) -> Box<dyn std::iter::FusedIterator<Item = char> + 'a> {
-//         Box::new(text.chars().flat_map(|c| {
-//             if is_chinese_char(c) {
-//                 Box::new(
-//                     std::iter::once(' ')
-//                         .chain(std::iter::once(c))
-//                         .chain(std::iter::once(' ')),
-//                 ) as Box<dyn std::iter::Iterator<Item = char>>
-//             } else {
-//                 Box::new(std::iter::once(c)) as Box<dyn std::iter::Iterator<Item = char>>
-//             }
-//         }))
-//     }
-// }
 
 fn is_chinese_char(c: char) -> bool {
     matches!(
@@ -141,12 +117,7 @@ static NORMY_BERT: LazyLock<NormyBertLikePipeline> = LazyLock::new(|| {
         })
         .add_stage(StripControlChars)
         .add_stage(StripFormatControls)
-        .add_stage(NormalizeWhitespace {
-            collapse: false,
-            trim: false,
-            normalize_unicode: true,
-            replacement_char: ' ',
-        })
+        .add_stage(COLLAPSE_WHITESPACE_UNICODE)
         .add_stage(BertCompatChineseChars) // ← this one (replaces BertCompatCjkPunct and SegmentWords)
         .add_stage(NFD) // Decompose precomposed accents (é → e + ´)
         .add_stage(RemoveDiacritics) // Now removes ´ (Mn) via enabled list
@@ -154,18 +125,46 @@ static NORMY_BERT: LazyLock<NormyBertLikePipeline> = LazyLock::new(|| {
         .build()
 });
 
+// fn normy_bert_pipeline() -> Normy<impl Process + ProcessFused> {
+//     Normy::builder()
+//         .lang(ZHO)
+//         .modify_lang(|entry| {
+//             // Enable Latin accent stripping (same list used by BERT)
+//             entry.set_spacing_diacritics(&[
+//                 '\u{0300}', '\u{0301}', '\u{0302}', '\u{0308}', '\u{030A}', '\u{030B}', '\u{030C}',
+//                 '\u{030F}', '\u{0311}', '\u{0327}', '\u{0328}', '\u{0338}',
+//             ]);
+//         })
+//         .add_stage(StripControlChars)
+//         .add_stage(StripFormatControls)
+//         .add_stage(COLLAPSE_WHITESPACE_UNICODE) // handles Unicode → ASCII space
+//         .add_stage(BertCompatChineseChars)
+//         .add_stage(NFD)
+//         .add_stage(RemoveDiacritics)
+//         .add_stage(LowerCase)
+//         .build()
+// }
+
 // ──────────────────────────────────────────────────────────────
 // HuggingFace BertNormalizer
 // ──────────────────────────────────────────────────────────────
 static HF_BERT: LazyLock<BertNormalizer> =
     LazyLock::new(|| BertNormalizer::new(true, true, Some(true), true));
 
+fn needs_transform_pool() -> &'static [&'static str; 5] {
+    (&[
+        "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}résumé",
+        "你好世界",
+        "NAÏVE déjà-vu",
+        "Hello world\u{3000}",
+        "Ｈｅｌｌｏ　世界　café",
+    ]) as _
+}
+
 // ──────────────────────────────────────────────────────────────
 // Realistic corpora
 // ──────────────────────────────────────────────────────────────
 fn corpus_needs_transform(seed: u64, kb: usize) -> String {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let mut out = String::with_capacity(kb * 1024);
     let pool = &[
         "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}résumé",
         "你好世界",
@@ -173,6 +172,8 @@ fn corpus_needs_transform(seed: u64, kb: usize) -> String {
         "Hello\u{00A0}\u{2003}world\u{3000}",
         "Ｈｅｌｌｏ　世界　café",
     ];
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut out = String::with_capacity(kb * 1024);
     while out.len() < kb * 1024 {
         let s = pool[rng.random_range(0..pool.len())];
         out.push_str(s);
@@ -232,11 +233,18 @@ fn bench_bert_normalizers(c: &mut Criterion) {
     ];
 
     for (name, corpus) in corpora {
+        println!("Running normy bench..");
+
         // ── Normy (zero-copy aware) ─────────────────────────────────────
         bench_normy(&mut group, name, corpus);
 
+        println!("Running hf bench..");
         // ── HuggingFace (always allocates) ───────────────────────────────
         bench_hf_bert(&mut group, name, corpus);
+
+        println!("Running normy fused bench..");
+        // ── Normy Fused (zero-copy aware) ─────────────────────────────────────
+        bench_normy_fused(&mut group, name, corpus);
     }
 
     group.finish();
@@ -269,6 +277,33 @@ fn bench_normy(
     println!("   Normy  - {scenario}: ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
 }
 
+fn bench_normy_fused(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    scenario: &str,
+    corpus: &str,
+) {
+    let mut zero_copy_hits = 0usize;
+    let mut total = 0usize;
+
+    group.bench_function(BenchmarkId::new("Normy Fused (zero-copy)", scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_BERT.normalize_fused(black_box(corpus)).unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        })
+    });
+
+    let pct = if total > 0 {
+        (zero_copy_hits as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    println!("   Normy Fused  - {scenario}: ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
+}
+
 fn bench_hf_bert(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     scenario: &str,
@@ -289,33 +324,23 @@ criterion_main!(benches);
 
 #[cfg(test)]
 mod tests {
+    #[cfg(test)]
+    use std::borrow::Cow;
+
+    #[cfg(test)]
+    use tokenizers::{NormalizedString, Normalizer};
+
+    #[cfg(test)]
+    use crate::{HF_BERT, needs_transform_pool};
 
     #[test]
     fn bert_normalizer_semantic_equivalence() {
-        let normy = NORMY_BERT();
-        let hf = HF_BERT();
+        let normy = &*NORMY_BERT();
+        let hf = &*HF_BERT;
 
-        // Test cases covering every code path in BertNormalizer
-        let cases = &[
-            // 1. Full-width + CJK + control chars + accents + mixed whitespace
-            "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}\u{00A0}\u{2028}résumé",
-            // 2. Pure CJK
-            "你好世界",
-            // 3. Already normalized (critical for zero-copy test)
-            "hello world",
-            // 4. Controls only
-            "\u{0001}\u{0002}hello\u{001F}world",
-            // 5. Unicode whitespace only
-            "hello\u{00A0}\u{1680}\u{2003}world\u{3000}",
-            // 6. Accents + lowercase edge cases
-            "NAÏVE ÉLÉPHANT naïve déjà-vu",
-            // 7. Mixed script (important: no false segmentation)
-            "Hello世界naïveCafé",
-            // 8. Empty string
-            "",
-        ];
+        let pool = needs_transform_pool();
 
-        for (i, &input) in cases.iter().enumerate() {
+        for (i, &input) in pool.iter().enumerate() {
             // --- Hugging Face ---
             let mut hf_ns = NormalizedString::from(input);
             hf.normalize(&mut hf_ns).expect("HF normalize failed");
@@ -324,6 +349,12 @@ mod tests {
             // --- Normy ---
             let normy_result = normy.normalize(input).expect("Normy normalize failed");
             let normy_output: String = normy_result.clone().into_owned();
+
+            // --- Normy ---
+            let normy_fusable_result = normy
+                .normalize_fused(input)
+                .expect("Normy normalize fused failed");
+            let normy_fusable_output: String = normy_fusable_result.clone().into_owned();
 
             // Semantic equivalence
             assert_eq!(
@@ -341,6 +372,23 @@ mod tests {
                 normy_output,
                 hf_output.len(),
                 normy_output.len()
+            );
+
+            assert_eq!(
+                hf_output,
+                normy_fusable_output,
+                "\n\nFailed equivalence on test case #{}\n\
+             Input:  {:?}\n\
+             HF:     {:?}\n\
+             Normy:  {:?}\n\
+             HF len:  {} chars\n\
+             Normy len: {} chars\n",
+                i + 1,
+                input,
+                hf_output,
+                normy_fusable_output,
+                hf_output.len(),
+                normy_fusable_output.len()
             );
 
             // --- Zero-copy proof on unchanged input ---
@@ -361,3 +409,23 @@ mod tests {
         }
     }
 }
+
+// // Test cases covering every code path in BertNormalizer
+// let cases = &[
+//     // 1. Full-width + CJK + control chars + accents + mixed whitespace
+//     "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}\u{00A0}\u{2028}résumé",
+//     // 2. Pure CJK
+//     "你好世界",
+//     // 3. Already normalized (critical for zero-copy test)
+//     "hello world",
+//     // 4. Controls only
+//     "\u{0001}\u{0002}hello\u{001F}world",
+//     // 5. Unicode whitespace only
+//     "hello\u{00A0}\u{1680}\u{2003}world\u{3000}",
+//     // 6. Accents + lowercase edge cases
+//     "NAÏVE ÉLÉPHANT naïve déjà-vu",
+//     // 7. Mixed script (important: no false segmentation)
+//     "Hello世界naïveCafé",
+//     // 8. Empty string
+//     "",
+// ];

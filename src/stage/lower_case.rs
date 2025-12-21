@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::iter::FusedIterator;
@@ -62,7 +62,37 @@ impl Stage for LowerCase {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        Ok(Cow::Owned(LowercaseIter::new(&text, ctx).collect()))
+        let cap = self.expected_capacity(text.len());
+        let mut out = String::with_capacity(cap);
+
+        // Manual loop is often easier for the compiler to vectorize
+        // compared to .collect() or .extend() for simple 1:1 maps.
+        for c in text.chars() {
+            out.push(ctx.lang_entry.apply_lowercase(c));
+        }
+
+        Ok(Cow::Owned(out))
+    }
+
+    /// LowerCase is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since lowercase is strictly 1:1.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// LowerCase is always fusable since it only performs 1:1 character mappings.
+    /// Unlike CaseFold, there are no multi-character expansions or peek-ahead rules.
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
+    }
+    #[inline(always)]
+    fn expected_capacity(&self, input_len: usize) -> usize {
+        // While characters are 1:1, byte size can change.
+        // e.g., 'I' (1 byte) -> 'ı' (2 bytes) in Turkish.
+        // 1.1x is a safe buffer for these growth cases.
+        (input_len as f64 * 1.1) as usize
     }
 
     fn try_dynamic_iter<'a>(
@@ -74,12 +104,82 @@ impl Stage for LowerCase {
     }
 }
 
+impl StaticFusableStage for LowerCase {
+    type Adapter<'a, I>
+        = LowercaseAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        LowercaseAdapter {
+            input,
+            lang: &ctx.lang_entry,
+        }
+    }
+}
+
+pub struct LowercaseAdapter<'a, I> {
+    input: I,
+    lang: &'a LangEntry,
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for LowercaseAdapter<'a, I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Direct 1:1 mapping as per Normy's LowerCase philosophy
+        self.input.next().map(|c| self.lang.apply_lowercase(c))
+    }
+
+    #[inline(always)]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.input.size_hint()
+    }
+}
+
+impl<'a, I: FusedIterator<Item = char>> FusedIterator for LowercaseAdapter<'a, I> {}
+
+impl<'a, I: ExactSizeIterator + Iterator<Item = char>> ExactSizeIterator
+    for LowercaseAdapter<'a, I>
+{
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.input.len()
+    }
+}
+
 impl StaticStageIter for LowerCase {
     type Iter<'a> = LowercaseIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(LowercaseIter::new(text, ctx))
+    }
+}
+
+// ============================================================================
+// FusableStage Implementation - Dynamic Iterator Fusion
+// ============================================================================
+
+impl FusableStage for LowerCase {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(LowercaseAdapter {
+            input,
+            lang: &ctx.lang_entry,
+        })
     }
 }
 

@@ -1,11 +1,14 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use memchr::memchr;
-use std::{borrow::Cow, iter::Empty};
+use std::{
+    borrow::Cow,
+    iter::{Empty, FusedIterator},
+};
 
 /// Fast pre-scan: if no '<' appears, text is guaranteed to have no tags
 #[inline(always)]
@@ -413,6 +416,27 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
         temp_chars.peek(),
         Some('>') | Some(' ') | Some('\t') | Some('\n') | Some('\r') | None
     )
+}
+
+impl StaticFusableStage for StripHtml {
+    type Adapter<'a, I>
+        = crate::stage::StaticIdentityAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    // Trigger the fallback to the optimized apply() method
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        crate::stage::StaticIdentityAdapter::new(input)
+    }
 }
 
 impl StaticStageIter for StripHtml {

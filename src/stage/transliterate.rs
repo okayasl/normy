@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, FRA, ISL, NOR, SWE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusedIterator, Stage, StageError, StaticStageIter},
+    stage::{FusableStage, FusedIterator, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
@@ -48,7 +48,38 @@ impl Stage for Transliterate {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        Ok(Cow::Owned(TransliterateIter::new(&text, ctx).collect()))
+        let entry = ctx.lang_entry;
+        // Pre-calculate capacity: expansions are rare, but 1.1x is a safe starting point
+        let mut out = String::with_capacity(text.len() + (text.len() >> 3));
+
+        for c in text.chars() {
+            if let Some(replacement) = entry.find_transliterate_map(c) {
+                out.push_str(replacement);
+            } else {
+                out.push(c);
+            }
+        }
+        Ok(Cow::Owned(out))
+    }
+
+    /// Transliterate is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation. Even with 1:N expansions, the check is valid.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// Transliterate is always fusable. Handles both 1:1 mappings (e.g., Ł→l)
+    /// and 1:N expansions (e.g., Œ→"oe") through a pending buffer mechanism.
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
+    }
+
+    #[inline]
+    fn expected_capacity(&self, input_len: usize) -> usize {
+        // Heuristic: (~12% buffer) handles most European transliterations without re-allocating.
+        input_len + (input_len >> 3)
     }
 
     fn try_dynamic_iter<'a>(
@@ -60,12 +91,111 @@ impl Stage for Transliterate {
     }
 }
 
+impl StaticFusableStage for Transliterate {
+    type Adapter<'a, I>
+        = TransliterateAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        TransliterateAdapter {
+            input,
+            lang: &ctx.lang_entry,
+            pending: None,
+        }
+    }
+}
+
+pub struct TransliterateAdapter<'a, I> {
+    input: I,
+    lang: &'a LangEntry,
+    /// Buffer for multi-character expansions (e.g. "oe", "ss")
+    pending: Option<&'a str>,
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for TransliterateAdapter<'a, I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        // 1. Drain pending expansion buffer first
+        if let Some(pending_str) = self.pending {
+            let mut chars = pending_str.chars();
+            let first = chars.next().expect("Pending string should not be empty");
+            let rest = chars.as_str();
+
+            self.pending = if rest.is_empty() { None } else { Some(rest) };
+            return Some(first);
+        }
+
+        // 2. Pull next char from source
+        let c = self.input.next()?;
+
+        // 3. Look up in language-specific transliteration table
+        if let Some(replacement) = self.lang.find_transliterate_map(c) {
+            let mut chars = replacement.chars();
+            let first = chars
+                .next()
+                .expect("Replacement map entries must not be empty");
+            let rest = chars.as_str();
+
+            if !rest.is_empty() {
+                self.pending = Some(rest);
+            }
+            return Some(first);
+        }
+
+        Some(c)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lower, upper) = self.input.size_hint();
+        let pending_len = self.pending.map_or(0, |s| s.chars().count());
+
+        // Expansion could potentially double the size (e.g. all chars are 'ß')
+        (
+            lower + pending_len,
+            upper.map(|u| u.saturating_mul(2).saturating_add(pending_len)),
+        )
+    }
+}
+
+impl<'a, I: FusedIterator<Item = char>> FusedIterator for TransliterateAdapter<'a, I> {}
+
 impl StaticStageIter for Transliterate {
     type Iter<'a> = TransliterateIter<'a>;
 
     #[inline(always)]
     fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
         Some(TransliterateIter::new(text, ctx))
+    }
+}
+
+// ============================================================================
+// FusableStage Implementation - Dynamic Iterator Fusion
+// ============================================================================
+
+impl FusableStage for Transliterate {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        Box::new(TransliterateAdapter {
+            input,
+            lang: &ctx.lang_entry,
+            pending: None,
+        })
     }
 }
 

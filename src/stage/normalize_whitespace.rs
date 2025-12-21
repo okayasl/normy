@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
     testing::stage_contract::StageTestConfig,
     unicode::{is_ascii_whitespace_fast, is_unicode_whitespace},
 };
@@ -228,6 +228,20 @@ impl Stage for NormalizeWhitespace {
         }
         // Canonical path: handles all whitespace, all configurations, one pass, one allocation
         Ok(self.apply_full(text))
+    }
+
+    /// NormalizeWhitespace is always fusable - checking needs_apply on the original text
+    /// is always a safe approximation since it only normalizes/removes/collapses whitespace.
+    #[inline]
+    fn safe_skip_approximation(&self) -> bool {
+        true
+    }
+
+    /// NormalizeWhitespace is always fusable. Handles whitespace normalization, collapsing,
+    /// and trimming through stateful iterator logic.
+    #[inline]
+    fn as_fusable(&self) -> Option<&dyn FusableStage> {
+        Some(self)
     }
 
     fn try_dynamic_iter<'a>(
@@ -463,6 +477,380 @@ impl NormalizeWhitespace {
         Cow::Owned(result)
     }
 }
+
+impl StaticFusableStage for NormalizeWhitespace {
+    type Adapter<'a, I>
+        = NormalizeWhitespaceStaticAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    fn supports_static_fusion(&self) -> bool {
+        true
+    }
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        if self.collapse {
+            NormalizeWhitespaceStaticAdapter::Collapse(WhitespaceCollapseAdapter {
+                input,
+                config: *self,
+                ws_count: 0,
+                first_ws: '\0',
+                first_ws_needs_replacement: false,
+                next_char: None,
+                started: false,
+            })
+        } else {
+            NormalizeWhitespaceStaticAdapter::Preserve(WhitespacePreserveAdapter {
+                input,
+                config: *self,
+                pending_ws: SmallVec::new(),
+                next_char: None,
+                started: false,
+            })
+        }
+    }
+}
+
+// We use an enum to handle the choice between Collapse and Preserve in the Static path
+pub enum NormalizeWhitespaceStaticAdapter<'a, I> {
+    Collapse(WhitespaceCollapseAdapter<I>),
+    Preserve(WhitespacePreserveAdapter<I>),
+    _Phantom(std::marker::PhantomData<&'a ()>),
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for NormalizeWhitespaceStaticAdapter<'a, I> {
+    type Item = char;
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Collapse(a) => a.next(),
+            Self::Preserve(a) => a.next(),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl<'a, I: FusedIterator<Item = char>> FusedIterator for NormalizeWhitespaceStaticAdapter<'a, I> {}
+
+// ============================================================================
+// Whitespace Collapse Adapter (Generic)
+// ============================================================================
+pub struct WhitespaceCollapseAdapter<I> {
+    input: I,
+    config: NormalizeWhitespace,
+    ws_count: usize,
+    first_ws: char,
+    first_ws_needs_replacement: bool,
+    next_char: Option<char>,
+    started: bool,
+}
+
+impl<I: Iterator<Item = char>> Iterator for WhitespaceCollapseAdapter<I> {
+    type Item = char;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(c) = self.next_char.take() {
+            return Some(c);
+        }
+
+        loop {
+            match self.input.next() {
+                Some(c) => {
+                    let (is_ws, needs_rep) =
+                        self.config.check_whitespace_and_single_char_replacement(c);
+                    if is_ws {
+                        if self.ws_count == 0 {
+                            self.first_ws = c;
+                            self.first_ws_needs_replacement = needs_rep;
+                        }
+                        self.ws_count += 1;
+                        continue;
+                    }
+
+                    if self.ws_count > 0 {
+                        let count = std::mem::replace(&mut self.ws_count, 0);
+                        let should_emit = !self.config.trim || self.started;
+                        if should_emit {
+                            self.started = true;
+                            self.next_char = Some(c);
+                            return Some(if count >= 2 || self.first_ws_needs_replacement {
+                                self.config.replacement_char
+                            } else {
+                                self.first_ws
+                            });
+                        }
+                    }
+                    self.started = true;
+                    return Some(c);
+                }
+                None => {
+                    if self.ws_count > 0 && !self.config.trim {
+                        let count = std::mem::replace(&mut self.ws_count, 0);
+                        return Some(if count >= 2 || self.first_ws_needs_replacement {
+                            self.config.replacement_char
+                        } else {
+                            self.first_ws
+                        });
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+impl<I: FusedIterator<Item = char>> FusedIterator for WhitespaceCollapseAdapter<I> {}
+
+// ============================================================================
+// Whitespace Preserve Adapter (Generic)
+// ============================================================================
+pub struct WhitespacePreserveAdapter<I> {
+    input: I,
+    config: NormalizeWhitespace,
+    pending_ws: SmallVec<[char; 4]>,
+    next_char: Option<char>,
+    started: bool,
+}
+
+impl<I: Iterator<Item = char>> Iterator for WhitespacePreserveAdapter<I> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.pending_ws.is_empty() {
+            return Some(self.pending_ws.remove(0));
+        }
+        if let Some(c) = self.next_char.take() {
+            self.started = true;
+            return Some(c);
+        }
+
+        let c = self.input.next()?;
+        if self.config.is_whitespace_for_config(c) {
+            let mut ws_run = SmallVec::<[char; 4]>::new();
+            ws_run.push(c);
+            loop {
+                match self.input.next() {
+                    Some(nc) if self.config.is_whitespace_for_config(nc) => ws_run.push(nc),
+                    Some(nc) => {
+                        self.next_char = Some(nc);
+                        break;
+                    }
+                    None => break,
+                }
+            }
+            if self.config.trim && (!self.started || self.next_char.is_none()) {
+                self.started = true;
+                return self.next();
+            }
+            self.pending_ws = ws_run;
+            self.started = true;
+            return self.next();
+        }
+        self.started = true;
+        Some(c)
+    }
+}
+
+impl<I: FusedIterator<Item = char>> FusedIterator for WhitespacePreserveAdapter<I> {}
+
+// ============================================================================
+// FusableStage Implementation - Dynamic Iterator Fusion
+// ============================================================================
+
+impl FusableStage for NormalizeWhitespace {
+    fn dyn_fused_adapter<'a>(
+        &self,
+        input: Box<dyn FusedIterator<Item = char> + 'a>,
+        _ctx: &'a Context,
+    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
+        if self.collapse {
+            Box::new(NormalizeWhitespaceCollapseAdapter {
+                input,
+                config: *self,
+                ws_count: 0,
+                first_ws: '\0',
+                first_ws_needs_replacement: false,
+                next_char: None,
+                started: false,
+            })
+        } else {
+            Box::new(NormalizeWhitespacePreserveAdapter {
+                input,
+                config: *self,
+                pending_ws: SmallVec::new(),
+                next_char: None,
+                started: false,
+            })
+        }
+    }
+}
+
+// ============================================================================
+// Iterator Adapters for Fused Pipelines
+// ============================================================================
+
+/// Dynamic adapter for whitespace normalization with collapsing in fused iterator chains.
+/// Collapses consecutive whitespace into a single replacement character.
+struct NormalizeWhitespaceCollapseAdapter<'a> {
+    input: Box<dyn FusedIterator<Item = char> + 'a>,
+    config: NormalizeWhitespace,
+    ws_count: u8,
+    first_ws: char,
+    first_ws_needs_replacement: bool,
+    next_char: Option<char>,
+    started: bool,
+}
+
+impl Iterator for NormalizeWhitespaceCollapseAdapter<'_> {
+    type Item = char;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        // Fast path: emit buffered lookahead char
+        if let Some(c) = self.next_char.take() {
+            return Some(c);
+        }
+
+        loop {
+            match self.input.next() {
+                Some(c) => {
+                    let (is_ws, needs_replacement) =
+                        self.config.check_whitespace_and_single_char_replacement(c);
+                    if is_ws {
+                        if self.ws_count == 0 {
+                            self.first_ws = c;
+                            self.first_ws_needs_replacement = needs_replacement;
+                        }
+                        self.ws_count = self.ws_count.saturating_add(1);
+                        continue;
+                    }
+
+                    // Non-whitespace: process accumulated WS
+                    if self.ws_count > 0 {
+                        let should_emit = !self.config.trim || self.started;
+                        let count = replace(&mut self.ws_count, 0);
+
+                        if should_emit {
+                            self.started = true;
+                            self.next_char = Some(c);
+
+                            return Some(if count >= 2 || self.first_ws_needs_replacement {
+                                self.config.replacement_char
+                            } else {
+                                self.first_ws
+                            });
+                        }
+                    }
+
+                    self.started = true;
+                    return Some(c);
+                }
+                None => {
+                    // End of input: handle trailing whitespace
+                    if self.ws_count > 0 {
+                        let should_emit = !self.config.trim;
+                        let count = replace(&mut self.ws_count, 0);
+
+                        if should_emit {
+                            return Some(if count >= 2 || self.first_ws_needs_replacement {
+                                self.config.replacement_char
+                            } else {
+                                self.first_ws
+                            });
+                        }
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+impl FusedIterator for NormalizeWhitespaceCollapseAdapter<'_> {}
+
+/// Dynamic adapter for whitespace normalization without collapsing in fused iterator chains.
+/// Preserves all whitespace characters (with optional trimming at edges).
+struct NormalizeWhitespacePreserveAdapter<'a> {
+    input: Box<dyn FusedIterator<Item = char> + 'a>,
+    config: NormalizeWhitespace,
+    pending_ws: SmallVec<[char; 4]>,
+    next_char: Option<char>,
+    started: bool,
+}
+
+impl Iterator for NormalizeWhitespacePreserveAdapter<'_> {
+    type Item = char;
+
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        // First, drain any pending whitespace
+        if !self.pending_ws.is_empty() {
+            return Some(self.pending_ws.remove(0));
+        }
+
+        // Return buffered non-whitespace character BEFORE trying to read from input
+        // This is critical for correct trim behavior!
+        if let Some(c) = self.next_char.take() {
+            self.started = true;
+            return Some(c);
+        }
+
+        // Main loop
+        let c = self.input.next()?;
+
+        if self.config.is_whitespace_for_config(c) {
+            // Collect the whitespace run
+            let mut ws_run = SmallVec::<[char; 4]>::new();
+            ws_run.push(c);
+
+            // Peek ahead to collect all consecutive whitespace
+            loop {
+                // We need to actually consume from input to check
+                match self.input.next() {
+                    Some(next_c) if self.config.is_whitespace_for_config(next_c) => {
+                        ws_run.push(next_c);
+                    }
+                    Some(next_c) => {
+                        // Found non-whitespace terminator
+                        self.next_char = Some(next_c);
+                        break;
+                    }
+                    None => {
+                        // End of input
+                        break;
+                    }
+                }
+            }
+
+            // Handle trimming
+            let is_leading = !self.started;
+            let is_trailing = self.next_char.is_none();
+            let should_trim = self.config.trim && (is_leading || is_trailing);
+
+            if should_trim {
+                // Discard the whitespace run, but next_char holds the first real character
+                self.started = true;
+                // Recursively call next() to emit the buffered character
+                self.next()
+            } else {
+                // Emit the whitespace run
+                self.pending_ws = ws_run;
+                self.started = true;
+                self.next()
+            }
+        } else {
+            // Non-whitespace character
+            self.started = true;
+            Some(c)
+        }
+    }
+}
+
+impl FusedIterator for NormalizeWhitespacePreserveAdapter<'_> {}
 
 impl StaticStageIter for NormalizeWhitespace {
     // The concrete iterator type — compiler sees this!
