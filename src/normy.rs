@@ -4,7 +4,7 @@ use crate::{
     lang::{DEFAULT_LANG, Lang},
     process::{ChainedProcess, DynamicProcess, EmptyProcess, Process},
     profile::{Profile, ProfileError},
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{Stage, StageError},
     static_fused_process::StaticFusedProcess,
 };
 use smallvec::SmallVec;
@@ -109,10 +109,7 @@ impl<P: Process> NormyBuilder<P> {
     }
 
     #[inline(always)]
-    pub fn add_stage<S: Stage + StaticStageIter + 'static>(
-        self,
-        stage: S,
-    ) -> NormyBuilder<ChainedProcess<S, P>> {
+    pub fn add_stage<S: Stage + 'static>(self, stage: S) -> NormyBuilder<ChainedProcess<S, P>> {
         NormyBuilder {
             ctx: self.ctx,
             current: ChainedProcess {

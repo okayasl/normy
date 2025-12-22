@@ -9,7 +9,7 @@ use normy::{
     ZHO,
     context::Context,
     lang::Lang,
-    stage::{Stage, StaticStageIter},
+    stage::{Stage, StaticFusableStage},
 };
 
 // 16 languages — the exact set that will appear in the Normy white paper
@@ -53,7 +53,7 @@ const SAMPLES: &[(&str, Lang)] = &[
 
 fn collection_methods_benches_auto<S, C>(c: &mut Criterion, stage_name: &str, constructor: C)
 where
-    S: Stage + StaticStageIter + 'static,
+    S: Stage + StaticFusableStage + 'static,
     C: Fn() -> S + Copy,
 {
     let mut group = c.benchmark_group(format!("{stage_name}_collection_methods"));
@@ -61,14 +61,12 @@ where
     for &(text, lang) in SAMPLES {
         let stage = constructor();
         let ctx = Context::new(lang);
-        let supports_static = stage.try_static_iter("test", &ctx).is_some();
-        let supports_dynamic = stage.try_dynamic_iter("test", &ctx).is_some();
 
         if !stage.needs_apply(text, &ctx).unwrap() {
             continue; // Skip unchanged; collection only happens on changed paths
         }
 
-        if supports_static {
+        if stage.supports_static_fusion() {
             // Bench extend (option 1)
             group.bench_function(
                 BenchmarkId::new("extend_changed_static", format!("{}-{}", lang.code(), text)),
@@ -76,7 +74,7 @@ where
                     b.iter_batched(
                         constructor,
                         |stage| {
-                            let iter = stage.try_static_iter(text, &ctx).unwrap();
+                            let iter = stage.static_fused_adapter(text.chars(), &ctx);
                             let mut out = String::with_capacity(text.len());
                             out.extend(iter);
                             black_box(out)
@@ -96,7 +94,7 @@ where
                     b.iter_batched(
                         constructor,
                         |stage| {
-                            let iter = stage.try_static_iter(text, &ctx).unwrap();
+                            let iter = stage.static_fused_adapter(text.chars(), &ctx);
                             let out: String = iter.collect();
                             black_box(out)
                         },
@@ -112,7 +110,7 @@ where
                     b.iter_batched(
                         constructor,
                         |stage| {
-                            let iter = stage.try_static_iter(text, &ctx).unwrap();
+                            let iter = stage.static_fused_adapter(text.chars(), &ctx);
                             let mut out = String::with_capacity(text.len());
                             for c in iter {
                                 out.push(c);
@@ -125,7 +123,7 @@ where
             );
         }
 
-        if supports_dynamic {
+        if let Some(dynamic_fused_stage) = stage.as_fusable() {
             // Similar benches for dynamic iter
             // Bench extend dynamic
             group.bench_function(
@@ -136,8 +134,9 @@ where
                 |b| {
                     b.iter_batched(
                         constructor,
-                        |stage| {
-                            let iter = stage.try_dynamic_iter(text, &ctx).unwrap();
+                        |_| {
+                            let iter =
+                                dynamic_fused_stage.dyn_fused_adapter(Box::new(text.chars()), &ctx);
                             let mut out = String::with_capacity(text.len());
                             out.extend(iter);
                             black_box(out)
@@ -156,8 +155,9 @@ where
                 |b| {
                     b.iter_batched(
                         constructor,
-                        |stage| {
-                            let iter = stage.try_dynamic_iter(text, &ctx).unwrap();
+                        |_| {
+                            let iter =
+                                dynamic_fused_stage.dyn_fused_adapter(Box::new(text.chars()), &ctx);
                             let out: String = iter.collect();
                             black_box(out)
                         },
@@ -172,8 +172,9 @@ where
                 |b| {
                     b.iter_batched(
                         constructor,
-                        |stage| {
-                            let iter = stage.try_dynamic_iter(text, &ctx).unwrap();
+                        |_| {
+                            let iter =
+                                dynamic_fused_stage.dyn_fused_adapter(Box::new(text.chars()), &ctx);
                             let mut out = String::with_capacity(text.len());
                             for c in iter {
                                 out.push(c);

@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, FRA, ISL, NOR, SWE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, FusedIterator, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, FusedIterator, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
@@ -80,14 +80,6 @@ impl Stage for Transliterate {
     fn expected_capacity(&self, input_len: usize) -> usize {
         // Heuristic: (~12% buffer) handles most European transliterations without re-allocating.
         input_len + (input_len >> 3)
-    }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        Some(Box::new(TransliterateIter::new(text, ctx)))
     }
 }
 
@@ -172,15 +164,6 @@ impl<'a, I: Iterator<Item = char>> Iterator for TransliterateAdapter<'a, I> {
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for TransliterateAdapter<'a, I> {}
 
-impl StaticStageIter for Transliterate {
-    type Iter<'a> = TransliterateIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(TransliterateIter::new(text, ctx))
-    }
-}
-
 // ============================================================================
 // FusableStage Implementation - Dynamic Iterator Fusion
 // ============================================================================
@@ -198,66 +181,6 @@ impl FusableStage for Transliterate {
         })
     }
 }
-
-/// Unified iterator — handles both 1→1 and 1→N transliteration safely and efficiently
-pub struct TransliterateIter<'a> {
-    chars: std::str::Chars<'a>,
-    lang: &'a LangEntry,
-    /// Buffer for multi-character expansions (e.g. "oe", "aa", "ss")
-    pending: Option<&'a str>,
-}
-
-impl<'a> TransliterateIter<'a> {
-    #[inline(always)]
-    pub fn new(text: &'a str, ctx: &'a Context) -> Self {
-        Self {
-            chars: text.chars(),
-            lang: &ctx.lang_entry,
-            pending: None,
-        }
-    }
-}
-
-impl Iterator for TransliterateIter<'_> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        // First, emit any pending characters from a previous 1→N mapping
-        if let Some(pending_str) = self.pending {
-            let mut chars = pending_str.chars();
-            let first = chars.next().unwrap(); // safe: pending_str is never empty when set
-            if chars.as_str().is_empty() {
-                self.pending = None;
-            } else {
-                self.pending = Some(chars.as_str());
-            }
-            return Some(first);
-        }
-
-        let c = self.chars.next()?;
-
-        if let Some(to) = self.lang.find_transliterate_map(c) {
-            if to.len() == 1 {
-                // Fast path: 1→1 — emit directly
-                return Some(to.chars().next().unwrap());
-            } else {
-                // 1→N path: emit first char now, store rest in pending
-                let mut chars = to.chars();
-                let first = chars.next().unwrap();
-                let rest = chars.as_str();
-                if !rest.is_empty() {
-                    self.pending = Some(rest);
-                }
-                return Some(first);
-            }
-        }
-
-        Some(c)
-    }
-}
-
-impl FusedIterator for TransliterateIter<'_> {}
 
 impl StageTestConfig for Transliterate {
     fn one_to_one_languages() -> &'static [Lang] {

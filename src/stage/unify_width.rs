@@ -2,7 +2,7 @@ use crate::{
     JPN, KOR, ZHO,
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::{fullwidth_to_halfwidth, is_fullwidth},
 };
@@ -55,14 +55,6 @@ impl Stage for UnifyWidth {
     fn as_fusable(&self) -> Option<&dyn FusableStage> {
         Some(self)
     }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        Some(Box::new(UnifyWidthIter::new(text)))
-    }
 }
 
 impl StaticFusableStage for UnifyWidth {
@@ -106,15 +98,6 @@ impl<I: Iterator<Item = char>> Iterator for UnifyWidthAdapter<I> {
 
 impl<I: FusedIterator<Item = char>> FusedIterator for UnifyWidthAdapter<I> {}
 
-impl StaticStageIter for UnifyWidth {
-    type Iter<'a> = UnifyWidthIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(UnifyWidthIter::new(text))
-    }
-}
-
 impl FusableStage for UnifyWidth {
     fn dyn_fused_adapter<'a>(
         &self,
@@ -124,31 +107,6 @@ impl FusableStage for UnifyWidth {
         Box::new(UnifyWidthAdapter { input })
     }
 }
-
-/// Pure 1→1 iterator — no heap, no closure, no overhead
-pub struct UnifyWidthIter<'a> {
-    chars: std::str::Chars<'a>,
-}
-
-impl<'a> UnifyWidthIter<'a> {
-    #[inline(always)]
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            chars: text.chars(),
-        }
-    }
-}
-
-impl Iterator for UnifyWidthIter<'_> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.chars.next().map(fullwidth_to_halfwidth)
-    }
-}
-
-impl FusedIterator for UnifyWidthIter<'_> {}
 
 impl StageTestConfig for UnifyWidth {
     fn one_to_one_languages() -> &'static [Lang] {

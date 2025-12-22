@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::is_control,
 };
@@ -63,14 +63,6 @@ impl Stage for StripControlChars {
     fn as_fusable(&self) -> Option<&dyn FusableStage> {
         Some(self)
     }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        Some(Box::new(StripControlCharsIter::new(text)))
-    }
 }
 
 impl StaticFusableStage for StripControlChars {
@@ -116,15 +108,6 @@ impl<I: Iterator<Item = char>> Iterator for StripControlCharsAdapter<I> {
 
 impl<I: FusedIterator<Item = char>> FusedIterator for StripControlCharsAdapter<I> {}
 
-impl StaticStageIter for StripControlChars {
-    type Iter<'a> = StripControlCharsIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(StripControlCharsIter::new(text))
-    }
-}
-
 impl FusableStage for StripControlChars {
     fn dyn_fused_adapter<'a>(
         &self,
@@ -134,36 +117,6 @@ impl FusableStage for StripControlChars {
         Box::new(StripControlCharsAdapter { input })
     }
 }
-
-pub struct StripControlCharsIter<'a> {
-    chars: std::str::Chars<'a>,
-}
-
-impl<'a> StripControlCharsIter<'a> {
-    #[inline(always)]
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            chars: text.chars(),
-        }
-    }
-}
-
-impl Iterator for StripControlCharsIter<'_> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let c = self.chars.next()?;
-            if !is_control(c) {
-                return Some(c);
-            }
-            // skip control char
-        }
-    }
-}
-
-impl FusedIterator for StripControlCharsIter<'_> {}
 
 impl StageTestConfig for StripControlChars {
     fn one_to_one_languages() -> &'static [Lang] {

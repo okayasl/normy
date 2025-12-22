@@ -1,14 +1,11 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use memchr::memchr;
-use std::{
-    borrow::Cow,
-    iter::{Empty, FusedIterator},
-};
+use std::{borrow::Cow, iter::FusedIterator};
 
 /// Fast pre-scan: if no '<' appears, text is guaranteed to have no tags
 #[inline(always)]
@@ -437,10 +434,6 @@ impl StaticFusableStage for StripHtml {
     {
         crate::stage::StaticIdentityAdapter::new(input)
     }
-}
-
-impl StaticStageIter for StripHtml {
-    type Iter<'a> = Empty<char>;
 }
 
 // UNIVERSAL CONTRACT COMPLIANCE

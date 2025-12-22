@@ -5,7 +5,7 @@
 //! DynamicProcess  is the dynamic fallback.
 use crate::{
     context::Context,
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{Stage, StageError},
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, sync::Arc};
@@ -26,20 +26,20 @@ pub struct ChainedProcess<S: Stage, P: Process> {
     pub previous: P,
 }
 
-impl<S: Stage + StaticStageIter, P: Process> Process for ChainedProcess<S, P> {
+impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
     #[inline(always)]
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let current: Cow<'_, str> = self.previous.process(text, ctx)?;
         if !self.stage.needs_apply(&current, ctx)? {
             return Ok(current);
         }
-        if let Some(iter) = self.stage.try_static_iter(&current, ctx) {
-            let mut out = String::with_capacity(current.len());
-            for c in iter {
-                out.push(c);
-            }
-            return Ok(Cow::Owned(out));
-        }
+        // if let Some(iter) = self.stage.try_static_iter(&current, ctx) {
+        //     let mut out = String::with_capacity(current.len());
+        //     for c in iter {
+        //         out.push(c);
+        //     }
+        //     return Ok(Cow::Owned(out));
+        // }
         self.stage.apply(current, ctx)
     }
 }
@@ -72,16 +72,7 @@ impl Process for DynamicProcess {
             if !stage.needs_apply(&text, ctx)? {
                 continue;
             }
-            if stage.try_dynamic_iter(&text, ctx).is_some() {
-                let iter = stage.try_dynamic_iter(&text, ctx).unwrap();
-                let mut out = String::with_capacity(text.len());
-                for c in iter {
-                    out.push(c);
-                }
-                text = Cow::Owned(out);
-            } else {
-                text = stage.apply(text, ctx)?;
-            }
+            text = stage.apply(text, ctx)?;
         }
         Ok(text)
     }

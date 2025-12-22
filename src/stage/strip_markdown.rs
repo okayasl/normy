@@ -1,14 +1,11 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
-use std::{
-    borrow::Cow,
-    iter::{Empty, FusedIterator},
-};
+use std::{borrow::Cow, iter::FusedIterator};
 
 /// Fast pre-scan: checks for common Markdown indicators.
 /// If none appear, we skip the parser entirely.
@@ -210,10 +207,6 @@ impl StaticFusableStage for StripMarkdown {
     {
         crate::stage::StaticIdentityAdapter::new(input)
     }
-}
-
-impl StaticStageIter for StripMarkdown {
-    type Iter<'a> = Empty<char>;
 }
 
 impl StageTestConfig for StripMarkdown {

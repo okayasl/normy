@@ -2,7 +2,7 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use std::iter::FusedIterator;
@@ -11,7 +11,7 @@ use icu_normalizer::{
     ComposingNormalizer, ComposingNormalizerBorrowed, DecomposingNormalizer,
     DecomposingNormalizerBorrowed,
 };
-use std::{borrow::Cow, iter::Empty, sync::LazyLock};
+use std::{borrow::Cow, sync::LazyLock};
 // ── ICU4X ──
 static ICU4X_NFC: LazyLock<ComposingNormalizerBorrowed> =
     LazyLock::new(ComposingNormalizer::new_nfc);
@@ -48,76 +48,6 @@ pub const NFD: NfdStage = NfdStage;
 pub const NFKC: NfkcStage = NfkcStage;
 pub const NFKD: NfkdStage = NfkdStage;
 
-// --- 3. Implement the Stage Trait Directly for EACH Struct ---
-
-// Macro to eliminate duplication—generates all four impls from one source
-// src/stage/normalization.rs
-
-// macro_rules! impl_composing_stage {
-//     ($stage:ty, $name:literal, $norm:ident) => {
-//         impl Stage for $stage {
-//             fn name(&self) -> &'static str {
-//                 $name
-//             }
-
-//             #[inline(always)]
-//             fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
-//                 Ok(!$norm.is_normalized(text))
-//             }
-
-//             #[inline(always)]
-//             fn apply<'a>(
-//                 &self,
-//                 text: Cow<'a, str>,
-//                 _ctx: &Context,
-//             ) -> Result<Cow<'a, str>, StageError> {
-//                 Ok($norm.normalize(text.as_ref()).into_owned().into())
-//             }
-
-//             #[inline]
-//             fn safe_skip_approximation(&self) -> bool {
-//                 // UNSAFE when chained with different normalization forms!
-//                 // NFC → NFD reverses the transformation, so checking needs_apply
-//                 // on the original input is not a valid approximation.
-//                 // Example: decomposed input → NFC → composed → NFD needs to run,
-//                 // but NFD.needs_apply(decomposed) = false!
-//                 false
-//             }
-
-//             #[inline]
-//             fn as_fusable(&self) -> Option<&dyn FusableStage> {
-//                 Some(self)
-//             }
-
-//             fn try_dynamic_iter<'a>(
-//                 &self,
-//                 text: &'a str,
-//                 _ctx: &'a Context,
-//             ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-//                 // Wrap ICU4X's iterator with our FusedIterator wrapper
-//                 let iter = FusedComposition($norm.normalize_iter(text.chars()));
-//                 Some(Box::new(iter))
-//             }
-//         }
-
-//         impl StaticStageIter for $stage {
-//             type Iter<'a> = Empty<char>;
-//         }
-
-//         impl FusableStage for $stage {
-//             fn dyn_fused_adapter<'a>(
-//                 &self,
-//                 input: Box<dyn FusedIterator<Item = char> + 'a>,
-//                 _ctx: &'a Context,
-//             ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-//                 // Wrap ICU4X's iterator with our FusedIterator wrapper
-//                 Box::new(FusedComposition($norm.normalize_iter(input)))
-//             }
-//         }
-//     };
-// }
-
-// --- 4. Macro for Decomposing Normalizers (NFD, NFKD) ---
 macro_rules! impl_normalization_stage {
     ($stage:ty, $name:literal, $norm:ident, $adapter:ident) => {
         impl Stage for $stage {
@@ -150,18 +80,6 @@ macro_rules! impl_normalization_stage {
             fn as_fusable(&self) -> Option<&dyn FusableStage> {
                 Some(self)
             }
-
-            fn try_dynamic_iter<'a>(
-                &self,
-                text: &'a str,
-                _ctx: &'a Context,
-            ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-                // Wrap ICU4X's iterator with our FusedIterator wrapper
-                Some(Box::new($adapter {
-                    iter: $norm.normalize_iter(text.chars()),
-                    _marker: std::marker::PhantomData,
-                }))
-            }
         }
 
         impl StaticFusableStage for $stage {
@@ -188,10 +106,6 @@ macro_rules! impl_normalization_stage {
                     _marker: std::marker::PhantomData,
                 }
             }
-        }
-
-        impl StaticStageIter for $stage {
-            type Iter<'a> = Empty<char>;
         }
 
         impl FusableStage for $stage {

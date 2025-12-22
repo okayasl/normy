@@ -4,9 +4,6 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use normy::COLLAPSE_WHITESPACE_UNICODE;
-use normy::fused_process::ProcessFused;
-use normy::process::Process;
-use normy::stage::StaticStageIter;
 use normy::stage::normalization::NfdStage;
 use normy::stage::normalize_whitespace::NormalizeWhitespace;
 use rand::random;
@@ -54,10 +51,6 @@ impl normy::stage::Stage for BertCompatChineseChars {
         }
         Ok(Cow::Owned(out))
     }
-}
-
-impl StaticStageIter for BertCompatChineseChars {
-    type Iter<'a> = std::iter::Empty<char>;
 }
 
 fn is_chinese_char(c: char) -> bool {

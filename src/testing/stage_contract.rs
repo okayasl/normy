@@ -1,5 +1,5 @@
 #[cfg(test)]
-use crate::stage::{StaticFusableStage, StaticStageIter};
+use crate::stage::StaticFusableStage;
 use crate::{lang::Lang, stage::Stage};
 
 /// Trait that stages implement to opt into the universal test suite.
@@ -54,9 +54,7 @@ pub trait StageTestConfig: Stage + Sized {
 macro_rules! assert_stage_contract {
     ($stage:expr) => {
         $crate::testing::stage_contract::zero_copy_when_no_changes($stage);
-        $crate::testing::stage_contract::static_and_dynamic_iter_paths_equivalent_to_apply($stage);
-        $crate::testing::stage_contract::fused_iter_path_equivalent_to_apply($stage);
-        $crate::testing::stage_contract::static_fused_path_equivalent_to_apply($stage);
+        $crate::testing::stage_contract::fused_path_equivalent_to_apply($stage);
         $crate::testing::stage_contract::stage_is_idempotent($stage);
         $crate::testing::stage_contract::needs_apply_is_accurate($stage);
         $crate::testing::stage_contract::handles_empty_string_and_ascii($stage);
@@ -72,8 +70,6 @@ macro_rules! assert_stage_contract {
 use crate::{ENG, all_langs, context::Context};
 #[cfg(test)]
 use std::borrow::Cow;
-#[cfg(test)]
-use std::iter::FusedIterator;
 
 #[cfg(test)]
 pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
@@ -135,66 +131,7 @@ pub fn zero_copy_when_no_changes<S: StageTestConfig>(stage: S) {
 }
 
 #[cfg(test)]
-pub fn static_and_dynamic_iter_paths_equivalent_to_apply<
-    S: Stage + StaticStageIter + StageTestConfig,
->(
-    stage: S,
-) {
-    for &lang in S::one_to_one_languages() {
-        let ctx = Context::new(lang);
-        let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
-        let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        // Test static iter path
-        if let Some(iter) = stage.try_static_iter(input, &ctx) {
-            let via_static: String = iter.collect();
-            assert_eq!(
-                via_apply.as_ref(),
-                via_static,
-                "static iter path ≠ apply() in {lang:?}\n apply(): {via_apply:?}\n static iter: {via_static:?}"
-            );
-        }
-        // Test dynamic iter path
-        if let Some(dyn_iter) = stage.try_dynamic_iter(input, &ctx) {
-            let via_dyn: String = dyn_iter.collect();
-            assert_eq!(
-                via_apply.as_ref(),
-                via_dyn,
-                "dynamic iter path ≠ apply() in {lang:?}\n apply(): {via_apply:?}\n dynamic iter: {via_dyn:?}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-pub fn fused_iter_path_equivalent_to_apply<S: Stage + StageTestConfig>(stage: S) {
-    for &lang in S::one_to_one_languages() {
-        let ctx = Context::new(lang);
-        let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
-
-        let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-
-        // Build a dummy previous iterator (just the input chars)
-        let prev_iter: Box<dyn FusedIterator<Item = char>> = Box::new(input.chars());
-
-        if let Some(fusable_stage) = stage.as_fusable() {
-            let fused_iter = fusable_stage.dyn_fused_adapter(prev_iter, &ctx);
-            let via_fused: String = fused_iter.collect();
-
-            assert_eq!(
-                via_apply.as_ref(),
-                via_fused,
-                "fused adapter path ≠ apply() in {lang:?}\n\
-             apply(): {via_apply:?}\n\
-             fused:   {via_fused:?}"
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-pub fn static_fused_path_equivalent_to_apply<S: Stage + StaticFusableStage + StageTestConfig>(
-    stage: S,
-) {
+pub fn fused_path_equivalent_to_apply<S: Stage + StaticFusableStage + StageTestConfig>(stage: S) {
     for &lang in S::one_to_one_languages() {
         let ctx = Context::new(lang);
         let input = "AbCdEfGhIjKlMnOpQrStUvWxYz ÀÉÎÖÜñç 123!@# テスト";
@@ -212,11 +149,22 @@ pub fn static_fused_path_equivalent_to_apply<S: Stage + StaticFusableStage + Sta
              fused:   {via_fused:?}"
             );
         }
+        if let Some(fusable_stage) = stage.as_fusable() {
+            let dyn_adapter = fusable_stage.dyn_fused_adapter(Box::new(input.chars()), &ctx);
+            let via_dyn_fused: String = dyn_adapter.collect();
+            assert_eq!(
+                via_apply.as_ref(),
+                via_dyn_fused,
+                "dynamic fused adapter path ≠ apply() in {lang:?}\n\
+             apply(): {via_apply:?}\n\
+             fused:   {via_dyn_fused:?}"
+            );
+        }
     }
 }
 
 #[cfg(test)]
-pub fn stage_is_idempotent<S: Stage + StaticStageIter + StageTestConfig>(stage: S) {
+pub fn stage_is_idempotent<S: Stage + StaticFusableStage + StageTestConfig>(stage: S) {
     for &lang in all_langs() {
         let ctx = Context::new(lang);
         for &input in S::samples(lang) {
@@ -228,25 +176,25 @@ pub fn stage_is_idempotent<S: Stage + StaticStageIter + StageTestConfig>(stage: 
                 "apply() not idempotent in {lang:?} on `{input}`"
             );
 
-            if stage.try_static_iter(input, &ctx).is_some() {
-                let iter = stage.try_static_iter(input, &ctx).unwrap();
-                let via_static_once: String = iter.collect();
-                let iter2 = stage.try_static_iter(input, &ctx).unwrap();
-                let via_static_twice: String = iter2.collect();
+            if stage.supports_static_fusion() {
+                let once = stage.static_fused_adapter(input.chars(), &ctx);
+                let twice = stage.static_fused_adapter(input.chars(), &ctx);
+                let once: String = once.collect();
+                let twice: String = twice.collect();
                 assert_eq!(
-                    via_static_once, via_static_twice,
-                    "try_iter() not idempotent in {lang:?} on `{input}`"
+                    once, twice,
+                    "static_fused_adapter() not idempotent in {lang:?} on `{input}`"
                 );
             }
 
-            if stage.try_dynamic_iter(input, &ctx).is_some() {
-                let iter = stage.try_dynamic_iter(input, &ctx).unwrap();
-                let via_dynamic_once: String = iter.collect();
-                let iter2 = stage.try_dynamic_iter(input, &ctx).unwrap();
-                let via_dynamic_twice: String = iter2.collect();
+            if let Some(fusable_stage) = stage.as_fusable() {
+                let once = fusable_stage.dyn_fused_adapter(Box::new(input.chars()), &ctx);
+                let twice = fusable_stage.dyn_fused_adapter(Box::new(input.chars()), &ctx);
+                let once: String = once.collect();
+                let twice: String = twice.collect();
                 assert_eq!(
-                    via_dynamic_once, via_dynamic_twice,
-                    "try_dynamic_iter() not idempotent in {lang:?} on `{input}`"
+                    once, twice,
+                    "dyn_fused_adapter() not idempotent in {lang:?} on `{input}`"
                 );
             }
         }

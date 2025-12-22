@@ -7,7 +7,7 @@ use normy::{
     ZHO,
     context::Context,
     lang::Lang,
-    stage::{Stage, StaticFusableStage, StaticStageIter},
+    stage::{Stage, StaticFusableStage},
 };
 
 // ============================================================================
@@ -96,7 +96,7 @@ fn bench_stage_focused<S, C>(
     samples: &[(&str, Lang)],
     constructor: C,
 ) where
-    S: Stage + StaticStageIter + StaticFusableStage + 'static,
+    S: Stage + StaticFusableStage + 'static,
     C: Fn() -> S + Copy,
 {
     let mut group = c.benchmark_group(stage_name.to_string());
@@ -114,9 +114,6 @@ fn bench_stage_focused<S, C>(
         let is_unchanged = text == normalized.as_str();
         let status = if is_unchanged { "unchanged" } else { "changed" };
 
-        // Check which paths this stage supports
-        let supports_static = stage.try_static_iter("test", &ctx).is_some();
-        let supports_dynamic = stage.try_dynamic_iter("test", &ctx).is_some();
         let supports_fusion = stage.supports_static_fusion();
 
         // ====================================================================
@@ -149,7 +146,6 @@ fn bench_stage_focused<S, C>(
             )
         });
 
-        // Static fusion
         if supports_fusion {
             group.bench_function(BenchmarkId::new("static_fusion", &id), |b| {
                 b.iter_batched(
@@ -164,32 +160,14 @@ fn bench_stage_focused<S, C>(
             });
         }
 
-        // Static iter
-        if supports_static {
-            group.bench_function(BenchmarkId::new("static_iter", &id), |b| {
+        if let Some(dynamic_stage) = stage.as_fusable() {
+            group.bench_function(BenchmarkId::new("dynamic_fusion", &id), |b| {
                 b.iter_batched(
                     constructor,
-                    |stage| {
+                    |_| {
                         let ctx = Context::new(lang);
-                        if let Some(iter) = stage.try_static_iter(text, &ctx) {
-                            black_box(iter.collect::<String>());
-                        }
-                    },
-                    BatchSize::SmallInput,
-                )
-            });
-        }
-
-        // Dynamic iter
-        if supports_dynamic {
-            group.bench_function(BenchmarkId::new("dynamic_iter", &id), |b| {
-                b.iter_batched(
-                    constructor,
-                    |stage| {
-                        let ctx = Context::new(lang);
-                        if let Some(iter) = stage.try_dynamic_iter(text, &ctx) {
-                            black_box(iter.collect::<String>());
-                        }
+                        let iter = dynamic_stage.dyn_fused_adapter(Box::new(text.chars()), &ctx);
+                        black_box(iter.collect::<String>())
                     },
                     BatchSize::SmallInput,
                 )
@@ -243,32 +221,15 @@ fn bench_stage_focused<S, C>(
                 });
             }
 
-            // Static iter
-            if supports_static {
-                group.bench_function(BenchmarkId::new("static_iter", &unchanged_id), |b| {
+            if let Some(dynamic_stage) = stage.as_fusable() {
+                group.bench_function(BenchmarkId::new("dynamic_fusion", &unchanged_id), |b| {
                     b.iter_batched(
                         constructor,
-                        |stage| {
+                        |_| {
                             let ctx = Context::new(lang);
-                            if let Some(iter) = stage.try_static_iter(&normalized, &ctx) {
-                                black_box(iter.collect::<String>());
-                            }
-                        },
-                        BatchSize::SmallInput,
-                    )
-                });
-            }
-
-            // Dynamic iter
-            if supports_dynamic {
-                group.bench_function(BenchmarkId::new("dynamic_iter", &unchanged_id), |b| {
-                    b.iter_batched(
-                        constructor,
-                        |stage| {
-                            let ctx = Context::new(lang);
-                            if let Some(iter) = stage.try_dynamic_iter(&normalized, &ctx) {
-                                black_box(iter.collect::<String>());
-                            }
+                            let iter =
+                                dynamic_stage.dyn_fused_adapter(Box::new(text.chars()), &ctx);
+                            black_box(iter.collect::<String>())
                         },
                         BatchSize::SmallInput,
                     )

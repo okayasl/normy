@@ -2,11 +2,11 @@ use crate::{
     ARA, CES, FRA, POL, SLK, VIE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
+use std::borrow::Cow;
 use std::iter::FusedIterator;
-use std::{borrow::Cow, str::Chars};
 
 /// Removes language-specific diacritical marks using optimized lookup tables.
 ///
@@ -97,14 +97,6 @@ impl Stage for RemoveDiacritics {
     fn as_fusable(&self) -> Option<&dyn FusableStage> {
         Some(self)
     }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        Some(Box::new(RemoveDiacriticsIter::new(text, ctx)))
-    }
 }
 
 impl StaticFusableStage for RemoveDiacritics {
@@ -168,15 +160,6 @@ impl<'a, I: Iterator<Item = char>> Iterator for RemoveDiacriticsAdapter<'a, I> {
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for RemoveDiacriticsAdapter<'a, I> {}
 
-impl StaticStageIter for RemoveDiacritics {
-    type Iter<'a> = RemoveDiacriticsIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(RemoveDiacriticsIter::new(text, ctx))
-    }
-}
-
 // ============================================================================
 // FusableStage Implementation - Dynamic Iterator Fusion
 // ============================================================================
@@ -193,39 +176,6 @@ impl FusableStage for RemoveDiacritics {
         })
     }
 }
-
-pub struct RemoveDiacriticsIter<'a> {
-    chars: Chars<'a>,
-    lang: &'a LangEntry,
-}
-
-impl<'a> RemoveDiacriticsIter<'a> {
-    pub fn new(text: &'a str, ctx: &'a Context) -> Self {
-        Self {
-            chars: text.chars(),
-            lang: &ctx.lang_entry,
-        }
-    }
-}
-
-impl<'a> Iterator for RemoveDiacriticsIter<'a> {
-    type Item = char;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let c = self.chars.next()?;
-            if let Some(base) = self.lang.find_pre_composed_to_base_map(c) {
-                return Some(base);
-            }
-            if self.lang.is_spacing_diacritic(c) {
-                continue;
-            }
-            return Some(c);
-        }
-    }
-}
-
-impl<'a> FusedIterator for RemoveDiacriticsIter<'a> {}
 
 impl StageTestConfig for RemoveDiacritics {
     fn one_to_one_languages() -> &'static [Lang] {

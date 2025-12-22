@@ -7,7 +7,7 @@ use normy::{
     COLLAPSE_WHITESPACE_UNICODE, Normy, TRIM_WHITESPACE_UNICODE,
     context::Context,
     stage::{
-        Stage, StaticStageIter,
+        Stage, StaticFusableStage,
         normalize_whitespace::{
             COLLAPSE_WHITESPACE, NORMALIZE_WHITESPACE_FULL, NormalizeWhitespace, TRIM_WHITESPACE,
         },
@@ -131,7 +131,7 @@ fn bench_whitespace_variants(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_bind_vs_apply(c: &mut Criterion) {
+fn bench_fusion_vs_apply(c: &mut Criterion) {
     let mut group = c.benchmark_group("NormalizeWhitespace_Bind_vs_Apply");
     let ctx = Context::default();
 
@@ -142,7 +142,7 @@ fn bench_bind_vs_apply(c: &mut Criterion) {
     samples[12] = Box::leak(long_spaces.into_boxed_str());
 
     // ── New reusable closure for BIND vs APPLY comparison ─────────────────────
-    let mut bench_bind_apply_variant = |name: &str, stage: NormalizeWhitespace| {
+    let mut bench_fusion_apply_variant = |name: &str, stage: NormalizeWhitespace| {
         for &input in &samples {
             let input_len = input.len() as u64;
             group.throughput(Throughput::Bytes(input_len));
@@ -164,16 +164,14 @@ fn bench_bind_vs_apply(c: &mut Criterion) {
 
             // 2. Benchmark: Via stage.bind().collect()
             // Measures the Iterator-based path (e.g., WhitespaceCollapseIter) followed by collection
-            let id_bind = BenchmarkId::new(format!("{name}/BIND_COLLECT"), format!("{input:.80}"));
+            let id_bind = BenchmarkId::new(format!("{name}/STATIC_FUSED"), format!("{input:.80}"));
             group.bench_function(id_bind, |b| {
                 b.iter_batched(
                     || input,
                     |text| {
+                        let adapter = stage.static_fused_adapter(text.chars(), &ctx);
                         // Call bind and collect into a String
-                        let result: String = stage
-                            .try_static_iter(black_box(text), &ctx)
-                            .unwrap()
-                            .collect();
+                        let result: String = adapter.collect();
                         black_box(result.len())
                     },
                     BatchSize::SmallInput,
@@ -182,17 +180,17 @@ fn bench_bind_vs_apply(c: &mut Criterion) {
 
             // 3. Benchmark: Via stage.try_iter().collect()
             // Measures the Iterator-based path (e.g., WhitespaceCollapseIter) followed by collection
-            let id_bind =
-                BenchmarkId::new(format!("{name}/TRY_ITER_COLLECT"), format!("{input:.80}"));
+            let id_bind = BenchmarkId::new(format!("{name}/DYNAMIC_FUSED"), format!("{input:.80}"));
             group.bench_function(id_bind, |b| {
                 b.iter_batched(
                     || input,
                     |text| {
-                        // Call bind and collect into a String
-                        let result: String = stage
-                            .try_static_iter(black_box(text), &ctx)
+                        let adapter = stage
+                            .as_fusable()
                             .unwrap()
-                            .collect();
+                            .dyn_fused_adapter(Box::new(text.chars()), &ctx);
+                        // Call bind and collect into a String
+                        let result: String = adapter.collect();
                         black_box(result.len())
                     },
                     BatchSize::SmallInput,
@@ -203,10 +201,10 @@ fn bench_bind_vs_apply(c: &mut Criterion) {
     // ─────────────────────────────────────────────────────────────────────────
 
     // Run the comparisons for multiple configurations to ensure all paths are tested
-    bench_bind_apply_variant("FULL", NORMALIZE_WHITESPACE_FULL);
-    bench_bind_apply_variant("COLLAPSE_UNICODE", COLLAPSE_WHITESPACE_UNICODE);
-    bench_bind_apply_variant("TRIM_UNICODE", TRIM_WHITESPACE_UNICODE);
-    bench_bind_apply_variant("COLLAPSE_ASCII", COLLAPSE_WHITESPACE);
+    bench_fusion_apply_variant("FULL", NORMALIZE_WHITESPACE_FULL);
+    bench_fusion_apply_variant("COLLAPSE_UNICODE", COLLAPSE_WHITESPACE_UNICODE);
+    bench_fusion_apply_variant("TRIM_UNICODE", TRIM_WHITESPACE_UNICODE);
+    bench_fusion_apply_variant("COLLAPSE_ASCII", COLLAPSE_WHITESPACE);
 
     group.finish();
 }
@@ -219,7 +217,7 @@ criterion_group! {
         .sample_size(500)
         .noise_threshold(0.02)
         .significance_level(0.05);
-    targets = bench_bind_vs_apply
+    targets = bench_fusion_vs_apply
 }
 
 criterion_main!(benches);

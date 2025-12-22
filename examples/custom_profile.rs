@@ -13,7 +13,7 @@ use normy::{
             search, social_media, web_scraping,
         },
     },
-    stage::{Stage, StageError, StaticStageIter},
+    stage::{Stage, StageError},
 };
 
 // ————————————————————————————————
@@ -45,10 +45,6 @@ impl Stage for StripEmoji {
     fn apply<'a>(&self, text: Cow<'a, str>, _: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(Cow::Owned(text.chars().filter(|&c| !is_emoji(c)).collect()))
     }
-}
-
-impl StaticStageIter for StripEmoji {
-    type Iter<'a> = std::iter::Empty<char>;
 }
 
 pub fn custom_social_media() -> Profile<impl Process> {

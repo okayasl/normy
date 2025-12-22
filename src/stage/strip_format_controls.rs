@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::{contains_format_controls, is_format_control},
 };
@@ -60,14 +60,6 @@ impl Stage for StripFormatControls {
     fn as_fusable(&self) -> Option<&dyn FusableStage> {
         Some(self)
     }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        Some(Box::new(StripFormatControlsIter::new(text)))
-    }
 }
 
 impl StaticFusableStage for StripFormatControls {
@@ -112,15 +104,6 @@ impl<I: Iterator<Item = char>> Iterator for StripFormatControlsAdapter<I> {
 
 impl<I: FusedIterator<Item = char>> FusedIterator for StripFormatControlsAdapter<I> {}
 
-impl StaticStageIter for StripFormatControls {
-    type Iter<'a> = StripFormatControlsIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(StripFormatControlsIter::new(text))
-    }
-}
-
 impl FusableStage for StripFormatControls {
     fn dyn_fused_adapter<'a>(
         &self,
@@ -130,36 +113,6 @@ impl FusableStage for StripFormatControls {
         Box::new(StripFormatControlsAdapter { input })
     }
 }
-
-pub struct StripFormatControlsIter<'a> {
-    chars: std::str::Chars<'a>,
-}
-
-impl<'a> StripFormatControlsIter<'a> {
-    #[inline(always)]
-    pub fn new(text: &'a str) -> Self {
-        Self {
-            chars: text.chars(),
-        }
-    }
-}
-
-impl Iterator for StripFormatControlsIter<'_> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let c = self.chars.next()?;
-            if !is_format_control(c) {
-                return Some(c);
-            }
-            // skip Cf
-        }
-    }
-}
-
-impl FusedIterator for StripFormatControlsIter<'_> {}
 
 impl StageTestConfig for StripFormatControls {
     fn one_to_one_languages() -> &'static [Lang] {

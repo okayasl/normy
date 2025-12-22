@@ -1,12 +1,12 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::{is_ascii_whitespace_fast, is_unicode_whitespace},
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, iter::FusedIterator, mem::replace, str::Chars};
+use std::{borrow::Cow, iter::FusedIterator, mem::replace};
 
 /// Normalize and standardize whitespace in text pipelines.
 ///
@@ -242,22 +242,6 @@ impl Stage for NormalizeWhitespace {
     #[inline]
     fn as_fusable(&self) -> Option<&dyn FusableStage> {
         Some(self)
-    }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        _ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        if self.collapse {
-            if text.is_ascii() {
-                Some(Box::new(WhitespaceAsciiIter::new(text, *self)))
-            } else {
-                Some(Box::new(WhitespaceCollapseIter::new(text, *self)))
-            }
-        } else {
-            Some(Box::new(WhitespacePreserveIter::new(text, *self)))
-        }
     }
 }
 
@@ -852,437 +836,6 @@ impl Iterator for NormalizeWhitespacePreserveAdapter<'_> {
 
 impl FusedIterator for NormalizeWhitespacePreserveAdapter<'_> {}
 
-impl StaticStageIter for NormalizeWhitespace {
-    // The concrete iterator type — compiler sees this!
-    type Iter<'a> = NormalizeWhitespaceIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, _ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(NormalizeWhitespaceIter {
-            inner: if self.collapse {
-                if text.is_ascii() {
-                    NormalizeWhitespaceInner::Ascii(WhitespaceAsciiIter::new(text, *self))
-                } else {
-                    NormalizeWhitespaceInner::Collapse(WhitespaceCollapseIter::new(text, *self))
-                }
-            } else {
-                NormalizeWhitespaceInner::Preserve(WhitespacePreserveIter::new(text, *self))
-            },
-        })
-    }
-}
-
-// One public iterator type — but with private enum inside
-pub struct NormalizeWhitespaceIter<'a> {
-    inner: NormalizeWhitespaceInner<'a>,
-}
-
-#[derive(Debug)]
-enum NormalizeWhitespaceInner<'a> {
-    Ascii(WhitespaceAsciiIter<'a>),
-    Collapse(WhitespaceCollapseIter<'a>),
-    Preserve(WhitespacePreserveIter<'a>),
-}
-
-impl<'a> Iterator for NormalizeWhitespaceIter<'a> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        match &mut self.inner {
-            NormalizeWhitespaceInner::Ascii(i) => i.next(),
-            NormalizeWhitespaceInner::Collapse(i) => i.next(),
-            NormalizeWhitespaceInner::Preserve(i) => i.next(),
-        }
-    }
-
-    #[inline(always)]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        match &self.inner {
-            NormalizeWhitespaceInner::Ascii(i) => i.size_hint(),
-            NormalizeWhitespaceInner::Collapse(i) => i.size_hint(),
-            NormalizeWhitespaceInner::Preserve(i) => i.size_hint(),
-        }
-    }
-}
-
-impl<'a> FusedIterator for NormalizeWhitespaceIter<'a> {}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TIER 1: ASCII FAST PATH - Byte-level operations, no UTF-8 decoding
-// ═══════════════════════════════════════════════════════════════════════════
-// Benchmark: ~40% faster than UTF-8 path for pure ASCII text
-// Size: ~32 bytes (smallest of all iterators)
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug)]
-struct WhitespaceAsciiIter<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-    config: NormalizeWhitespace,
-
-    // Lightweight whitespace tracking (byte-level!)
-    ws_count: u8,
-    first_ws: u8, // Store as byte, not char
-
-    next_char: Option<u8>, // Lookahead buffer (1 byte vs 4!)
-    started: bool,
-}
-
-impl<'a> WhitespaceAsciiIter<'a> {
-    fn new(text: &'a str, config: NormalizeWhitespace) -> Self {
-        Self {
-            bytes: text.as_bytes(),
-            pos: 0,
-            config,
-            ws_count: 0,
-            first_ws: 0,
-            next_char: None,
-            started: false,
-        }
-    }
-}
-
-impl<'a> Iterator for WhitespaceAsciiIter<'a> {
-    type Item = char;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        // Fast path: emit buffered byte
-        if let Some(b) = self.next_char.take() {
-            return Some(b as char);
-        }
-
-        loop {
-            // Bounds check happens once per iteration (compiler optimizes well)
-            if self.pos >= self.bytes.len() {
-                // Handle trailing whitespace
-                if self.ws_count > 0 {
-                    let should_emit = !self.config.trim;
-                    let count = std::mem::replace(&mut self.ws_count, 0);
-
-                    if should_emit {
-                        return Some(if count >= 2 {
-                            self.config.replacement_char
-                        } else {
-                            self.first_ws as char
-                        });
-                    }
-                }
-                return None;
-            }
-
-            let b = self.bytes[self.pos];
-            self.pos += 1;
-
-            // OPTIMIZATION: Byte-level whitespace check (no char conversion!)
-            if is_ascii_whitespace_fast(b) {
-                if self.ws_count == 0 {
-                    self.first_ws = b;
-                }
-                self.ws_count = self.ws_count.saturating_add(1);
-                continue;
-            }
-
-            // Non-whitespace: process accumulated WS
-            if self.ws_count > 0 {
-                let should_emit = !self.config.trim || self.started;
-                let count = replace(&mut self.ws_count, 0);
-
-                if should_emit {
-                    self.started = true;
-                    self.next_char = Some(b); // Buffer the non-WS byte
-
-                    // Emit collapsed/normalized WS
-                    return Some(if count >= 2 {
-                        self.config.replacement_char
-                    } else {
-                        self.first_ws as char
-                    });
-                }
-            }
-
-            self.started = true;
-            return Some(b as char);
-        }
-    }
-
-    // Provide size_hint to enable optimal capacity
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining_bytes = self.bytes.len().saturating_sub(self.pos);
-
-        // Lower bound: at least 1 char if we have any remaining bytes
-        let lower = if remaining_bytes > 0 { 1 } else { 0 };
-
-        // Upper bound: reuse the proven capacity estimation logic
-        let upper = self.config.estimate_output_capacity(remaining_bytes);
-
-        (lower, Some(upper))
-    }
-}
-
-impl<'a> FusedIterator for WhitespaceAsciiIter<'a> {}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TIER 2: UTF-8 COLLAPSE PATH - Counter-based, zero SmallVec allocation
-// ═══════════════════════════════════════════════════════════════════════════
-// Used when: collapse=true, text contains non-ASCII
-// Size: ~40 bytes
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug)]
-struct WhitespaceCollapseIter<'a> {
-    chars: Chars<'a>,
-    config: NormalizeWhitespace,
-
-    // Lightweight whitespace tracking (replaces SmallVec!)
-    ws_count: u8,
-    first_ws: char,
-    first_ws_needs_replacement: bool,
-
-    next_char: Option<char>, // 4 bytes vs 32+ for SmallVec
-    started: bool,
-}
-
-impl<'a> WhitespaceCollapseIter<'a> {
-    fn new(text: &'a str, config: NormalizeWhitespace) -> Self {
-        Self {
-            chars: text.chars(),
-            config,
-            ws_count: 0,
-            first_ws: '\0',
-            first_ws_needs_replacement: false,
-            next_char: None,
-            started: false,
-        }
-    }
-}
-
-impl<'a> Iterator for WhitespaceCollapseIter<'a> {
-    type Item = char;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        // Fast path: emit buffered lookahead char
-        if let Some(c) = self.next_char.take() {
-            return Some(c);
-        }
-
-        loop {
-            match self.chars.next() {
-                Some(c) => {
-                    let (is_ws, needs_replacement) =
-                        self.config.check_whitespace_and_single_char_replacement(c); // Single check
-                    if is_ws {
-                        if self.ws_count == 0 {
-                            self.first_ws = c;
-                            self.first_ws_needs_replacement = needs_replacement;
-                        }
-                        self.ws_count = self.ws_count.saturating_add(1);
-                        continue;
-                    }
-
-                    // Non-whitespace: process accumulated WS
-                    if self.ws_count > 0 {
-                        let should_emit = !self.config.trim || self.started;
-                        let count = replace(&mut self.ws_count, 0);
-
-                        if should_emit {
-                            self.started = true;
-                            self.next_char = Some(c); // Buffer the non-WS char
-
-                            // Emit collapsed/normalized WS
-                            return Some(if count >= 2 {
-                                // Multi-char run: emit replacement
-                                self.config.replacement_char
-                            } else {
-                                // Single WS: normalize if Unicode
-                                if self.first_ws_needs_replacement {
-                                    self.config.replacement_char
-                                } else {
-                                    self.first_ws
-                                }
-                            });
-                        }
-                    }
-
-                    self.started = true;
-                    return Some(c);
-                }
-                None => {
-                    // End of input: handle trailing whitespace
-                    if self.ws_count > 0 {
-                        let should_emit = !self.config.trim;
-                        let count = replace(&mut self.ws_count, 0);
-
-                        if should_emit {
-                            return Some(if count >= 2 || self.first_ws_needs_replacement {
-                                self.config.replacement_char
-                            } else {
-                                self.first_ws
-                            });
-                        }
-                    }
-                    return None;
-                }
-            }
-        }
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let (lower, upper) = self.chars.size_hint();
-
-        // Chars iterator provides character count, which is what we need
-        let estimated = upper.map(|char_count| self.config.estimate_output_capacity(char_count));
-
-        (lower.min(1), estimated)
-    }
-}
-
-impl<'a> FusedIterator for WhitespaceCollapseIter<'a> {}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// TIER 3: UTF-8 PRESERVE PATH - Must buffer exact WS chars (collapse=false)
-// ═══════════════════════════════════════════════════════════════════════════
-// Used when: collapse=false (must preserve original whitespace)
-// Size: ~65 bytes (requires SmallVec for original chars)
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[derive(Debug)]
-struct WhitespacePreserveIter<'a> {
-    // 1. Full original input slice: required for bulk slicing runs of characters.
-    input: &'a str,
-    // 2. Main iterator: tracks our current consumption point.
-    chars: Chars<'a>,
-    // 3. Bulk iterator: yields the characters of a contiguous whitespace run slice.
-    // This replaces the SmallVec buffer.
-    bulk_iter: Option<Chars<'a>>,
-    // 4. Lookahead buffer: holds the single non-WS character that terminates a run.
-    next_char_after_run: Option<char>,
-    config: NormalizeWhitespace,
-    started: bool,
-}
-
-// Assumed constructor for context (similar to what `bind()` would do)
-impl<'a> WhitespacePreserveIter<'a> {
-    pub fn new(input: &'a str, config: NormalizeWhitespace) -> Self {
-        WhitespacePreserveIter {
-            input,
-            chars: input.chars(),
-            bulk_iter: None,
-            next_char_after_run: None,
-            config,
-            started: false,
-        }
-    }
-}
-
-impl<'a> Iterator for WhitespacePreserveIter<'a> {
-    type Item = char;
-
-    #[inline]
-    fn next(&mut self) -> Option<Self::Item> {
-        // 1. Drain the bulk slice iterator first (zero-copy emission)
-        if let Some(ref mut iter) = self.bulk_iter {
-            if let Some(c) = iter.next() {
-                return Some(c);
-            }
-            // Bulk iterator is exhausted.
-            self.bulk_iter = None;
-        }
-
-        // 2. Return the buffered character (the one that terminated the run)
-        if let Some(c) = self.next_char_after_run.take() {
-            // This is the first non-whitespace character after a run, or the first char
-            // after a leading trim.
-            self.started = true;
-            return Some(c);
-        }
-
-        // 3. Main loop: Scan for content or a whitespace run
-        let c = match self.chars.next() {
-            Some(c) => c,
-            None => {
-                // End of string reached.
-                // NOTE: Trailing WS is handled inside the 'if self.config.is_whitespace_for_config' block.
-                // If the run ended and we are here, there is nothing left to do.
-                return None;
-            }
-        };
-
-        if self.config.is_whitespace_for_config(c) {
-            // WE FOUND A WHITESPACE RUN - BULK SCAN INITIATED
-
-            // Get the byte index of the first WS char (`c`'s start).
-            let run_start_byte_offset = self.input.len() - c.len_utf8() - self.chars.as_str().len();
-
-            // Clone the iterator *after* consuming the first WS char `c`.
-            let mut lookahead = self.chars.clone();
-            let mut terminator: Option<char> = None;
-
-            // This offset will track the byte index of the character being checked by `lookahead`.
-            // The run *ends* at the offset *before* the first non-WS char.
-            let run_end_byte_offset = loop {
-                let next_char_offset = self.input.len() - lookahead.as_str().len();
-
-                match lookahead.next() {
-                    Some(lc) if self.config.is_whitespace_for_config(lc) => {
-                        // Continue scanning for end of run
-                    }
-                    Some(lc) => {
-                        // Found the terminator. The run ends at the start of this char.
-                        terminator = Some(lc);
-                        break next_char_offset;
-                    }
-                    None => {
-                        // End of string. The run ends at the end of the string.
-                        break next_char_offset;
-                    }
-                }
-            };
-
-            // Advance the main iterator to the position of the lookahead iterator.
-            // This skips the entire run (and the terminator, which is now buffered).
-            self.chars = lookahead;
-            self.next_char_after_run = terminator;
-
-            // The slice of the entire whitespace run (including the first char `c`):
-            let ws_slice = &self.input[run_start_byte_offset..run_end_byte_offset];
-
-            // Handle trimming:
-            let should_trim = self.config.trim && !self.started;
-            let is_trailing = terminator.is_none();
-
-            if should_trim || (self.config.trim && is_trailing) {
-                // Leading or Trailing trim: Discard the run.
-                self.started = true;
-            } else {
-                // Internal whitespace: Emit the run in bulk.
-                self.bulk_iter = Some(ws_slice.chars());
-                self.started = true;
-            }
-            self.next()
-        } else {
-            // Non-whitespace: Just return the character
-            self.started = true;
-            Some(c)
-        }
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let (lower, upper) = self.chars.size_hint();
-
-        let estimated = upper.map(|char_count| self.config.estimate_output_capacity(char_count));
-
-        (lower.min(1), estimated)
-    }
-}
-
-impl<'a> FusedIterator for WhitespacePreserveIter<'a> {}
-
 impl StageTestConfig for NormalizeWhitespace {
     fn one_to_one_languages() -> &'static [Lang] {
         &[] // No CharMapper implementation
@@ -1583,11 +1136,11 @@ mod tests {
         let ctx = ctx();
 
         let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        let via_static_iter: String = stage.try_static_iter(input, &ctx).unwrap().collect();
+        let via_static_fusion: String = stage.static_fused_adapter(input.chars(), &ctx).collect();
 
         assert_eq!(
             via_apply.as_ref(),
-            via_static_iter,
+            via_static_fusion,
             "\nPath mismatch for input: {:?}\nConfig: {:?}",
             input,
             stage
@@ -1609,11 +1162,12 @@ mod tests {
 
         for input in inputs {
             let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
-            let via_static_iter: String = stage.try_static_iter(input, &ctx()).unwrap().collect();
+            let via_static_fusion: String =
+                stage.static_fused_adapter(input.chars(), &ctx()).collect();
 
             assert_eq!(
                 via_apply.as_ref(),
-                via_static_iter,
+                via_static_fusion,
                 "Mismatch for input: {:?}",
                 input
             );
@@ -1627,11 +1181,12 @@ mod tests {
 
         for input in inputs {
             let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
-            let via_static_iter: String = stage.try_static_iter(input, &ctx()).unwrap().collect();
+            let via_static_fusion: String =
+                stage.static_fused_adapter(input.chars(), &ctx()).collect();
 
             assert_eq!(
                 via_apply.as_ref(),
-                via_static_iter,
+                via_static_fusion,
                 "Mismatch for input: {:?}",
                 input
             );
@@ -1645,10 +1200,10 @@ mod tests {
         // Test with very long WS runs (>4 chars, would overflow old SmallVec inline)
         let input = format!("a{}b", " ".repeat(100));
         let via_apply = stage.apply(Cow::Borrowed(&input), &ctx()).unwrap();
-        let via_static_iter: String = stage.try_static_iter(&input, &ctx()).unwrap().collect();
+        let via_static_fusion: String = stage.static_fused_adapter(input.chars(), &ctx()).collect();
 
         assert_eq!(via_apply.as_ref(), "a b");
-        assert_eq!(via_static_iter, "a b");
+        assert_eq!(via_static_fusion, "a b");
     }
 
     #[test]
@@ -1753,11 +1308,12 @@ mod property_tests {
 
             let ctx = ctx();
             let via_apply = config.apply(Cow::Borrowed(&input), &ctx).unwrap();
-            let via_bind: String = config.try_static_iter(&input, &ctx).unwrap().collect();
+            let via_static_fusion: String =
+                config.static_fused_adapter(input.chars(), &ctx).collect();
 
             assert_eq!(
                 via_apply.as_ref(),
-                via_bind,
+                via_static_fusion,
                 "\nRandom test failed:\nInput: {:?}\nConfig: {:?}",
                 input,
                 config

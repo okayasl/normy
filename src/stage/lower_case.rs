@@ -2,11 +2,11 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
+use std::borrow::Cow;
 use std::iter::FusedIterator;
-use std::{borrow::Cow, str::Chars};
 
 /// Simple, locale-aware lowercase transformation.
 ///
@@ -94,14 +94,6 @@ impl Stage for LowerCase {
         // 1.1x is a safe buffer for these growth cases.
         (input_len as f64 * 1.1) as usize
     }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        Some(Box::new(LowercaseIter::new(text, ctx)))
-    }
 }
 
 impl StaticFusableStage for LowerCase {
@@ -157,19 +149,6 @@ impl<'a, I: ExactSizeIterator + Iterator<Item = char>> ExactSizeIterator
     }
 }
 
-impl StaticStageIter for LowerCase {
-    type Iter<'a> = LowercaseIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        Some(LowercaseIter::new(text, ctx))
-    }
-}
-
-// ============================================================================
-// FusableStage Implementation - Dynamic Iterator Fusion
-// ============================================================================
-
 impl FusableStage for LowerCase {
     fn dyn_fused_adapter<'a>(
         &self,
@@ -182,43 +161,6 @@ impl FusableStage for LowerCase {
         })
     }
 }
-
-pub struct LowercaseIter<'a> {
-    chars: Chars<'a>,
-    lang: &'a LangEntry,
-}
-
-impl<'a> LowercaseIter<'a> {
-    pub fn new(text: &'a str, ctx: &'a Context) -> Self {
-        Self {
-            chars: text.chars(),
-            lang: &ctx.lang_entry,
-        }
-    }
-}
-
-impl<'a> Iterator for LowercaseIter<'a> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        self.chars.next().map(|c| self.lang.apply_lowercase(c))
-    }
-
-    #[inline]
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.chars.size_hint()
-    }
-}
-
-impl<'a> ExactSizeIterator for LowercaseIter<'a> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.chars.size_hint().0
-    }
-}
-
-impl<'a> FusedIterator for LowercaseIter<'a> {}
 
 impl StageTestConfig for LowerCase {
     fn one_to_one_languages() -> &'static [Lang] {

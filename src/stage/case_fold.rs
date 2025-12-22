@@ -2,10 +2,10 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, FusedIterator, Stage, StageError, StaticFusableStage, StaticStageIter},
+    stage::{FusableStage, FusedIterator, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
-use std::{borrow::Cow, str::Chars};
+use std::borrow::Cow;
 
 /// Locale-sensitive case folding for search and comparison.
 ///
@@ -106,21 +106,6 @@ impl Stage for CaseFold {
         // but German/Greek can expand. 10% overhead is a safe buffer.
         (input_len as f64 * 1.1) as usize
     }
-
-    fn try_dynamic_iter<'a>(
-        &self,
-        text: &'a str,
-        ctx: &'a Context,
-    ) -> Option<Box<dyn FusedIterator<Item = char> + 'a>> {
-        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
-            // Only proceed if we are in the guaranteed 1:1 path.
-            Some(Box::new(CaseFoldIter::new(text, ctx)))
-        } else {
-            // If the language requires expansion (ß->ss) or peek-ahead (IJ->ij),
-            // we MUST fall back to the Stage::apply method.
-            None
-        }
-    }
 }
 
 impl StaticFusableStage for CaseFold {
@@ -212,22 +197,6 @@ where
 }
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for CaseFoldAdapter<'a, I> {}
-
-impl StaticStageIter for CaseFold {
-    type Iter<'a> = CaseFoldIter<'a>;
-
-    #[inline(always)]
-    fn try_static_iter<'a>(&self, text: &'a str, ctx: &'a Context) -> Option<Self::Iter<'a>> {
-        if ctx.lang_entry.has_one_to_one_folds() && !ctx.lang_entry.requires_peek_ahead() {
-            // Only proceed if we are in the guaranteed 1:1 path.
-            Some(CaseFoldIter::new(text, ctx))
-        } else {
-            // If the language requires expansion (ß->ss) or peek-ahead (IJ->ij),
-            // we MUST fall back to the Stage::apply method.
-            None
-        }
-    }
-}
 
 // ============================================================================
 // FusableStage Implementation - Dynamic Iterator Fusion
@@ -329,43 +298,6 @@ fn apply_with_peek_ahead<'a>(
     // Since needs_apply returned true, we MUST return an Owned Cow.
     Ok(Cow::Owned(out))
 }
-
-pub struct CaseFoldIter<'a> {
-    chars: Chars<'a>,
-    lang: &'a LangEntry,
-}
-
-impl<'a> CaseFoldIter<'a> {
-    pub fn new(text: &'a str, ctx: &'a Context) -> Self {
-        Self {
-            chars: text.chars(),
-            lang: &ctx.lang_entry,
-        }
-    }
-}
-
-impl<'a> Iterator for CaseFoldIter<'a> {
-    type Item = char;
-
-    #[inline(always)]
-    fn next(&mut self) -> Option<Self::Item> {
-        let c = self.chars.next()?;
-        self.lang.apply_case_fold(c)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.chars.size_hint()
-    }
-}
-
-impl<'a> ExactSizeIterator for CaseFoldIter<'a> {
-    #[inline]
-    fn len(&self) -> usize {
-        self.chars.size_hint().0
-    }
-}
-
-impl<'a> FusedIterator for CaseFoldIter<'a> {}
 
 impl StageTestConfig for CaseFold {
     fn one_to_one_languages() -> &'static [Lang] {
