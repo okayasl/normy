@@ -67,7 +67,7 @@ harness = false
 [[bench]]
 name = "cfb"
 path = "benches/comparison_fusing_bench.rs"
-harness = false
+harness = true
 
 [[bench]]
 name = "lb"

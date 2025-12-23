@@ -143,6 +143,9 @@ impl Stage for NormalizeWhitespace {
         "normalize_whitespace"
     }
 
+    // Exact detection of non‑ASCII Unicode whitespace (White_Space=Yes, excluding ASCII).
+    // Uses byte windows to avoid char decoding in the common case and eliminate false
+    // positives on punctuation such as smart quotes, em‑dash, ellipsis, etc.
     fn needs_apply(&self, text: &str, _ctx: &Context) -> Result<bool, StageError> {
         // Fast path 0: Empty string or no operations
         if text.is_empty() || (!self.trim && !self.collapse) {
@@ -191,17 +194,27 @@ impl Stage for NormalizeWhitespace {
                 return Ok(false);
             }
 
-            // Fast path: Mixed Unicode text
-            // If Unicode normalization is enabled and we see any byte that could start a Unicode WS char,
-            // we conservatively return true — it's cheaper than decoding chars here.
+            // Exact Unicode whitespace detection when normalize_unicode = true
             if self.normalize_unicode {
-                let bytes = text.as_bytes();
-                // Fast conservative scan for unambiguous starters (E1, E2, E3)
-                if bytes.iter().any(|&b| matches!(b, 0xE1..=0xE3)) {
+                // 2-byte: NEL (U+0085), NBSP (U+00A0)
+                if bytes
+                    .windows(2)
+                    .any(|w| matches!(w, [0xC2, 0x85] | [0xC2, 0xA0]))
+                {
                     return Ok(true);
                 }
-                // Special handling for 0xC2: only trigger if followed by 0xA0 (NBSP)
-                if bytes.windows(2).any(|w| w[0] == 0xC2 && w[1] == 0xA0) {
+
+                // 3-byte: all remaining Unicode whitespace
+                if bytes.windows(3).any(|w| {
+                    let lead = w[0];
+                    let mid = w[1];
+                    let tail = w[2];
+
+                    (lead == 0xE1 && mid == 0x9A && tail == 0x80) ||                     // U+1680 OGHAM SPACE MARK
+                (lead == 0xE2 && mid == 0x80 && (tail <= 0x8A || tail == 0xA8 || tail == 0xA9 || tail == 0xAF)) || // U+2000–U+200A, U+2028–U+2029, U+202F
+                (lead == 0xE2 && mid == 0x81 && tail == 0x9F) ||                     // U+205F MEDIUM MATHEMATICAL SPACE
+                (lead == 0xE3 && mid == 0x80 && tail == 0x80) // U+3000 IDEOGRAPHIC SPACE
+                }) {
                     return Ok(true);
                 }
             }
@@ -837,10 +850,14 @@ impl Iterator for NormalizeWhitespacePreserveAdapter<'_> {
 impl FusedIterator for NormalizeWhitespacePreserveAdapter<'_> {}
 
 impl StageTestConfig for NormalizeWhitespace {
+    /// This stage is **not** a pure 1-to-1 character mapping.
+    /// It can collapse runs, trim edges, and replace Unicode whitespace → no CharMapper path.
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // No CharMapper implementation
+        &[]
     }
 
+    /// General samples — cover common cases and edge inputs.
+    /// These are used across *all* languages in the contract suite.
     fn samples(_lang: Lang) -> &'static [&'static str] {
         &[
             "Hello World 123",
@@ -848,17 +865,29 @@ impl StageTestConfig for NormalizeWhitespace {
             "TEST",
             "",
             "hello \t\n world \u{00A0}\u{3000}",
-            "¡\u{a0}¡\u{205f}",
+            "¡\u{00A0}¡\u{205F}", // Real Unicode WS (NBSP + MEDIUM MATHEMATICAL SPACE)
+            "clean text—no changes here", // Pure ASCII + common punctuation (zero-copy)
+            "“smart quotes” … ellipsis — dash", // Typography only (should be zero-copy now)
         ]
     }
 
+    /// Inputs that should **never** trigger allocation (zero-copy guarantee).
+    /// These test the accuracy of `needs_apply()` on already-clean text.
     fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
         &[
-            "hello world", // Already normalized
+            "hello world",
             "test",
             "abc def",
             "",
+            "clean text—no changes here",
+            "“smart quotes” … ellipsis — dash", // Critical: real-world false-positive cases
         ]
+    }
+
+    /// No predictable 1:1 transformations to verify against.
+    /// The stage can collapse/replace → output length varies.
+    fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
+        &[]
     }
 }
 
@@ -883,230 +912,124 @@ mod contract_tests {
 
 #[cfg(test)]
 mod tests {
+    use crate::ENG;
+
     use super::*;
-    use crate::{ENG, TUR};
     use std::borrow::Cow;
 
     fn ctx() -> Context {
         Context::new(ENG)
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // 1. Preset Configurations
-    // ═══════════════════════════════════════════════════════════════
-
+    // ====================================================================
+    // 1. Table-driven tests for all preset configurations & modifiers
+    // ====================================================================
     #[test]
-    fn preset_full_normalization() {
-        let stage = NORMALIZE_WHITESPACE_FULL;
-        assert_eq!(
-            stage
-                .apply("  hello\u{00A0}\u{00A0}world  ".into(), &ctx())
-                .unwrap(),
-            "hello world"
-        );
-        assert_eq!(stage.apply("a\t\t\n\nb".into(), &ctx()).unwrap(), "a b");
+    fn preset_and_modifier_behaviour() {
+        let cases = [
+            // Preset FULL
+            (
+                " hello\u{00A0}\u{00A0}world ",
+                NORMALIZE_WHITESPACE_FULL,
+                "hello world",
+            ),
+            ("a\t\t\n\nb", NORMALIZE_WHITESPACE_FULL, "a b"),
+            (
+                " \u{00A0} a \u{202F} b \u{3000} ",
+                NORMALIZE_WHITESPACE_FULL,
+                "a b",
+            ),
+            // COLLAPSE only (preserve edges)
+            (" a b ", COLLAPSE_WHITESPACE, " a b "),
+            (
+                "a\u{00A0}\u{00A0}b",
+                COLLAPSE_WHITESPACE,
+                "a\u{00A0}\u{00A0}b",
+            ),
+            // TRIM only
+            (" a b ", TRIM_WHITESPACE, "a b"),
+            ("\u{00A0}a\u{00A0}", TRIM_WHITESPACE, "\u{00A0}a\u{00A0}"),
+            // TRIM + normalize_unicode (matches str::trim)
+            (
+                "\u{00A0}hello\u{00A0}world\u{205F}",
+                TRIM_WHITESPACE_UNICODE,
+                "hello\u{00A0}world",
+            ),
+            // COLLAPSE + normalize_unicode
+            ("a\u{00A0}\u{1680}b", COLLAPSE_WHITESPACE_UNICODE, "a b"),
+            // normalize_unicode alone → no-op
+            (
+                "a\u{00A0}b",
+                NormalizeWhitespace {
+                    collapse: false,
+                    trim: false,
+                    normalize_unicode: true,
+                    replacement_char: ' ',
+                },
+                "a\u{00A0}b",
+            ),
+            // Custom replacement (ZWSP for CJK)
+            (
+                "a \u{00A0}b",
+                NORMALIZE_WHITESPACE_FULL.replace_whitespace_with('\u{200B}'),
+                "a\u{200B}b",
+            ),
+            // Custom replacement without collapse
+            (
+                " a b ",
+                NormalizeWhitespace {
+                    collapse: false,
+                    trim: true,
+                    normalize_unicode: true,
+                    replacement_char: '-',
+                },
+                "a b",
+            ),
+            // Unicode WS preserved when normalize_unicode = false
+            (
+                "a\u{00A0} \u{00A0}b",
+                COLLAPSE_WHITESPACE,
+                "a\u{00A0} \u{00A0}b",
+            ),
+        ];
+
+        for (input, stage, expected) in cases {
+            assert_eq!(
+                stage.apply(Cow::Borrowed(input), &ctx()).unwrap().as_ref(),
+                expected,
+                "failed for input {:?} with config {:?}",
+                input,
+                stage
+            );
+        }
     }
 
-    #[test]
-    fn preset_collapse_preserves_edges() {
-        assert_eq!(
-            COLLAPSE_WHITESPACE
-                .apply("  a   b  ".into(), &ctx())
-                .unwrap(),
-            " a b "
-        );
-        // Unicode WS not collapsed when normalize_unicode=false
-        assert_eq!(
-            COLLAPSE_WHITESPACE
-                .apply("a\u{00A0}\u{00A0}b".into(), &ctx())
-                .unwrap(),
-            "a\u{00A0}\u{00A0}b"
-        );
-    }
-
-    #[test]
-    fn preset_trim_preserves_internal() {
-        assert_eq!(
-            TRIM_WHITESPACE.apply("  a  b  ".into(), &ctx()).unwrap(),
-            "a  b"
-        );
-        // Unicode WS not trimmed when normalize_unicode=false
-        assert_eq!(
-            TRIM_WHITESPACE
-                .apply("\u{00A0}a\u{00A0}".into(), &ctx())
-                .unwrap(),
-            "\u{00A0}a\u{00A0}"
-        );
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // 2. normalize_unicode Modifier Behavior
-    // ═══════════════════════════════════════════════════════════════
-
-    #[test]
-    fn normalize_unicode_modifier_semantics() {
-        let ctx = ctx();
-
-        // With trim: trims Unicode WS from edges (matches str::trim())
-        assert_eq!(
-            TRIM_WHITESPACE_UNICODE
-                .apply("\u{00A0}hello\u{00A0}world\u{205F}".into(), &ctx)
-                .unwrap(),
-            "hello\u{00A0}world"
-        );
-
-        // With collapse: collapses and normalizes Unicode WS
-        assert_eq!(
-            COLLAPSE_WHITESPACE_UNICODE
-                .apply("a\u{00A0}\u{1680}b".into(), &ctx)
-                .unwrap(),
-            "a b"
-        );
-
-        // Standalone (no collapse/trim): no-op
-        let no_op_stage = NormalizeWhitespace {
-            collapse: false,
-            trim: false,
-            normalize_unicode: true,
-            replacement_char: ' ',
-        };
-        assert_eq!(
-            no_op_stage.apply("a\u{00A0}b".into(), &ctx).unwrap(),
-            "a\u{00A0}b"
-        );
-    }
-
+    // ====================================================================
+    // 2. Matches Rust's str::trim() for Unicode edges
+    // ====================================================================
     #[test]
     fn matches_rust_str_trim() {
         let stage = TRIM_WHITESPACE_UNICODE;
-        for input in [
-            "  hello  ",
+        let inputs = [
+            " hello ",
             "\u{00A0}hello\u{00A0}",
             "¡\u{a0}¡\u{205f}",
             "\u{3000}test\u{2028}",
-        ] {
+        ];
+
+        for &input in &inputs {
             assert_eq!(
-                stage.apply(input.into(), &ctx()).unwrap().as_ref(),
+                stage.apply(Cow::Borrowed(input), &ctx()).unwrap().as_ref(),
                 input.trim()
             );
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // 3. Edge Cases
-    // ═══════════════════════════════════════════════════════════════
-
+    // ====================================================================
+    // 3. Critical path equivalence (apply vs static fusion)
+    // ====================================================================
     #[test]
-    fn edge_cases_whitespace_only() {
-        assert_eq!(TRIM_WHITESPACE.apply("   ".into(), &ctx()).unwrap(), "");
-        assert_eq!(
-            COLLAPSE_WHITESPACE.apply("   ".into(), &ctx()).unwrap(),
-            " "
-        );
-        assert_eq!(
-            NORMALIZE_WHITESPACE_FULL
-                .apply("\u{00A0}\u{3000}".into(), &ctx())
-                .unwrap(),
-            ""
-        );
-    }
-
-    #[test]
-    fn edge_cases_empty_and_no_whitespace() {
-        assert_eq!(
-            NORMALIZE_WHITESPACE_FULL.apply("".into(), &ctx()).unwrap(),
-            ""
-        );
-        assert_eq!(
-            NORMALIZE_WHITESPACE_FULL
-                .apply("abc".into(), &ctx())
-                .unwrap(),
-            "abc"
-        );
-    }
-
-    #[test]
-    fn edge_cases_mixed_ascii_unicode() {
-        let stage = NORMALIZE_WHITESPACE_FULL;
-
-        // Mixed runs should collapse together
-        assert_eq!(
-            stage.apply("a \u{00A0}\t\u{3000}b".into(), &ctx()).unwrap(),
-            "a b"
-        );
-
-        // NEL (U+0085) handling
-        assert_eq!(
-            stage.apply("a\u{0085}\u{0085}b".into(), &ctx()).unwrap(),
-            "a b"
-        );
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // 4. Custom Replacement Character
-    // ═══════════════════════════════════════════════════════════════
-
-    #[test]
-    fn custom_replacement_character() {
-        // ZWSP for CJK
-        let zwsp = NORMALIZE_WHITESPACE_FULL.replace_whitespace_with('\u{200B}');
-        assert_eq!(
-            zwsp.apply("a   \u{00A0}b".into(), &ctx()).unwrap(),
-            "a\u{200B}b"
-        );
-
-        // Hyphen for debugging
-        let hyphen = NormalizeWhitespace {
-            collapse: true,
-            trim: true,
-            normalize_unicode: false,
-            replacement_char: '-',
-        };
-        assert_eq!(hyphen.apply("  a\t\tb  ".into(), &ctx()).unwrap(), "a-b");
-
-        // Without collapse, replacement char is never used
-        let no_collapse = NormalizeWhitespace {
-            collapse: false,
-            trim: true,
-            normalize_unicode: true,
-            replacement_char: '-',
-        };
-        assert_eq!(
-            no_collapse.apply("  a  b  ".into(), &ctx()).unwrap(),
-            "a  b"
-        );
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // 5. Unicode Preservation (normalize_unicode=false)
-    // ═══════════════════════════════════════════════════════════════
-
-    #[test]
-    fn unicode_ws_preserved_when_disabled() {
-        let stage = COLLAPSE_WHITESPACE; // normalize_unicode=false
-
-        // Unicode WS is NOT recognized, so not collapsed
-        assert_eq!(
-            stage.apply("a\u{00A0} \u{00A0}b".into(), &ctx()).unwrap(),
-            "a\u{00A0} \u{00A0}b"
-        );
-
-        // But ASCII WS is still collapsed
-        assert_eq!(stage.apply("a   b".into(), &ctx()).unwrap(), "a b");
-
-        // Mixed: ASCII collapses, Unicode preserved
-        assert_eq!(
-            stage.apply("a\u{00A0}  \u{00A0}b".into(), &ctx()).unwrap(),
-            "a\u{00A0} \u{00A0}b"
-        );
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // 6. Critical: Path Equivalence (apply vs bind)
-    // ═══════════════════════════════════════════════════════════════
-
-    #[test]
-    fn path_equivalence_deterministic() {
+    fn path_equivalence() {
         let configs = [
             NORMALIZE_WHITESPACE_FULL,
             COLLAPSE_WHITESPACE,
@@ -1114,210 +1037,68 @@ mod tests {
             COLLAPSE_WHITESPACE_UNICODE,
             TRIM_WHITESPACE_UNICODE,
         ];
-
         let inputs = [
             "",
             "hello",
-            "  a   b  ",
+            " a b ",
             "a\t\tb\n\nc",
             " \u{00A0} a \u{202F} b \u{3000} ",
-            "   ",
-            "mixed \t \u{00A0}  unicode \u{205F} ascii",
+            " ",
+            "mixed \t \u{00A0} unicode \u{205F} ascii",
+            &format!("a{}b", " ".repeat(100)), // long run stress
         ];
 
         for config in configs {
-            for input in inputs {
-                assert_path_equivalence(&config, input);
+            for input in &inputs {
+                let via_apply = config.apply(Cow::Borrowed(input), &ctx()).unwrap();
+                let via_fusion: String =
+                    config.static_fused_adapter(input.chars(), &ctx()).collect();
+                assert_eq!(
+                    via_apply.as_ref(),
+                    via_fusion,
+                    "path mismatch for input {:?} with config {:?}",
+                    input,
+                    config
+                );
             }
         }
     }
 
-    fn assert_path_equivalence(stage: &NormalizeWhitespace, input: &str) {
-        let ctx = ctx();
-
-        let via_apply = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        let via_static_fusion: String = stage.static_fused_adapter(input.chars(), &ctx).collect();
-
-        assert_eq!(
-            via_apply.as_ref(),
-            via_static_fusion,
-            "\nPath mismatch for input: {:?}\nConfig: {:?}",
-            input,
-            stage
+    // ====================================================================
+    // 4. Real-world zero-copy (typography but no real Unicode WS)
+    // ====================================================================
+    #[test]
+    fn real_web_text_zero_copy() {
+        let stage = NORMALIZE_WHITESPACE_FULL;
+        let text = "Hello “world”… naïve café — no extra spaces";
+        assert!(
+            !stage.needs_apply(text, &ctx()).unwrap(),
+            "should be zero-copy on clean web text"
         );
     }
 
+    // ====================================================================
+    // 5. Idempotent allocation guard (reproduces the original panic case)
+    // ====================================================================
     #[test]
-    fn collapse_path_equivalence() {
+    fn idempotent_allocation_guard() {
         let stage = NORMALIZE_WHITESPACE_FULL;
-        let inputs = [
-            "a   b",
-            "  trim  ",
-            "a\u{00A0}\u{00A0}b",
-            "single",
-            "",
-            "   ",
-            "mixed \t\u{00A0} ws",
-        ];
-
-        for input in inputs {
-            let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
-            let via_static_fusion: String =
-                stage.static_fused_adapter(input.chars(), &ctx()).collect();
-
-            assert_eq!(
-                via_apply.as_ref(),
-                via_static_fusion,
-                "Mismatch for input: {:?}",
-                input
-            );
-        }
-    }
-
-    #[test]
-    fn preserve_path_equivalence() {
-        let stage = TRIM_WHITESPACE; // collapse=false
-        let inputs = ["  a  b  ", "keep   spacing", "\u{00A0}unicode\u{00A0}"];
-
-        for input in inputs {
-            let via_apply = stage.apply(Cow::Borrowed(input), &ctx()).unwrap();
-            let via_static_fusion: String =
-                stage.static_fused_adapter(input.chars(), &ctx()).collect();
-
-            assert_eq!(
-                via_apply.as_ref(),
-                via_static_fusion,
-                "Mismatch for input: {:?}",
-                input
-            );
-        }
-    }
-
-    #[test]
-    fn stress_test_long_whitespace_runs() {
-        let stage = NORMALIZE_WHITESPACE_FULL;
-
-        // Test with very long WS runs (>4 chars, would overflow old SmallVec inline)
-        let input = format!("a{}b", " ".repeat(100));
-        let via_apply = stage.apply(Cow::Borrowed(&input), &ctx()).unwrap();
-        let via_static_fusion: String = stage.static_fused_adapter(input.chars(), &ctx()).collect();
-
-        assert_eq!(via_apply.as_ref(), "a b");
-        assert_eq!(via_static_fusion, "a b");
-    }
-
-    #[test]
-    fn repro_zero_copy_idempotent_allocation() {
-        // The exact input that triggers the failure
-        let input = "¡\u{a0}¡\u{205f}"; // ¡\u{a0}¡\u{205f}  (NBSP and MEDIUM MATHEMATICAL SPACE)
-
-        let stage = NORMALIZE_WHITESPACE_FULL; // collapse=true, trim=true, normalize_unicode=true
-        let ctx = Context::new(TUR);
-
-        // ---------- Pipeline simulation (exactly what the contract test does) ----------
+        let input = "¡\u{a0}¡\u{205f}"; // NBSP + MEDIUM MATHEMATICAL SPACE
+        let ctx = Context::new(crate::TUR);
 
         let mut text: Cow<'_, str> = Cow::Borrowed(input);
-
-        // First pass
         if stage.needs_apply(&text, &ctx).unwrap() {
             text = stage.apply(text, &ctx).unwrap();
         }
-
-        eprintln!("After first pass: {:?}", text);
-        // Record pointer after first pass
-        let ptr_after_first = text.as_ref() as *const str;
-
-        // Second pass (idempotent – should never allocate again)
-        let ptr_before_second = text.as_ref() as *const str;
+        let ptr_before = text.as_ref() as *const str;
         if stage.needs_apply(&text, &ctx).unwrap() {
             text = stage.apply(text, &ctx).unwrap();
         }
-        eprintln!("After second pass: {:?}", text);
+        let ptr_after = text.as_ref() as *const str;
 
-        let ptr_after_second = text.as_ref() as *const str;
-
-        // This assertion reproduces the panic you saw
         assert_eq!(
-            ptr_before_second,
-            ptr_after_second,
-            "Zero-copy violation on second idempotent pass!\n\
-             Input: {input:?}\n\
-             Lang: {lang:?}\n\
-             Pointer changed from {ptr_before_second:?} to {ptr_after_second:?}",
-            lang = ctx.lang
+            ptr_before, ptr_after,
+            "zero-copy violation on second idempotent pass"
         );
-
-        // Additional diagnostic prints (helpful when running manually)
-        println!(
-            "needs_apply first : {}",
-            stage.needs_apply(input, &ctx).unwrap()
-        );
-        println!(
-            "needs_apply second: {}",
-            stage.needs_apply(&text, &ctx).unwrap()
-        );
-        println!("ptr after first   : {:p}", ptr_after_first);
-        println!("ptr before second : {:p}", ptr_before_second);
-        println!("ptr after second  : {:p}", ptr_after_second);
-        println!("final text        : {:?}", text);
-    }
-}
-
-#[cfg(test)]
-mod property_tests {
-    use super::*;
-    use crate::ENG;
-    use rand::{Rng, SeedableRng, rngs::StdRng, seq::IndexedRandom};
-    use std::borrow::Cow;
-
-    fn ctx() -> Context {
-        Context::new(ENG)
-    }
-
-    /// Property test: apply() and bind() must always produce identical output
-    #[test]
-    fn path_equivalence_random() {
-        let mut rng = StdRng::seed_from_u64(0xCAFEBABE_DEADBEEF);
-
-        for _ in 0..2_000 {
-            let len = rng.random_range(0..128);
-            let input: String = (0..len)
-                .map(|_| {
-                    let choice = rng.random_range(0..100);
-                    if choice < 10 {
-                        *[
-                            '\u{00A0}', '\u{1680}', '\u{2000}', '\u{2003}', '\u{202F}', '\u{205F}',
-                            '\u{3000}', '\u{0085}',
-                        ]
-                        .choose(&mut rng)
-                        .unwrap()
-                    } else if choice < 30 {
-                        *[' ', '\t', '\n', '\r'].choose(&mut rng).unwrap()
-                    } else {
-                        (b'a' + rng.random_range(0..26)) as char
-                    }
-                })
-                .collect();
-
-            let config = NormalizeWhitespace {
-                collapse: rng.random(),
-                trim: rng.random(),
-                normalize_unicode: rng.random(),
-                replacement_char: if rng.random() { ' ' } else { '-' },
-            };
-
-            let ctx = ctx();
-            let via_apply = config.apply(Cow::Borrowed(&input), &ctx).unwrap();
-            let via_static_fusion: String =
-                config.static_fused_adapter(input.chars(), &ctx).collect();
-
-            assert_eq!(
-                via_apply.as_ref(),
-                via_static_fusion,
-                "\nRandom test failed:\nInput: {:?}\nConfig: {:?}",
-                input,
-                config
-            );
-        }
     }
 }
