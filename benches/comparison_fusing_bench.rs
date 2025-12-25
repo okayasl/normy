@@ -4,7 +4,7 @@ use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_ma
 use normy::{
     ARA, COLLAPSE_WHITESPACE_UNICODE, CaseFold, DEU, ENG, JPN, LowerCase, NFC,
     NormalizePunctuation, Normy, RemoveDiacritics, StripControlChars, StripHtml, StripMarkdown,
-    TUR, UnifyWidth, VIE, fused_process::ProcessFused, lang::Lang, process::Process,
+    TUR, UnifyWidth, VIE, fused_process::FusedProcess, lang::Lang, process::Process,
     static_fused_process::StaticFusedProcess,
 };
 
@@ -77,11 +77,11 @@ const SAMPLES: &[(&str, Lang)] = &[
 ];
 
 // Pipeline builders
-fn build_single_fusable(lang: Lang) -> Normy<impl Process + ProcessFused + StaticFusedProcess> {
+fn build_single_fusable(lang: Lang) -> Normy<impl Process + FusedProcess + StaticFusedProcess> {
     Normy::builder().lang(lang).add_stage(LowerCase).build()
 }
 
-fn build_multi_fusable(lang: Lang) -> Normy<impl Process + ProcessFused + StaticFusedProcess> {
+fn build_multi_fusable(lang: Lang) -> Normy<impl Process + FusedProcess + StaticFusedProcess> {
     Normy::builder()
         .lang(lang)
         .add_stage(LowerCase)
@@ -90,7 +90,7 @@ fn build_multi_fusable(lang: Lang) -> Normy<impl Process + ProcessFused + Static
         .build()
 }
 
-fn build_nfc_fusable(lang: Lang) -> Normy<impl Process + ProcessFused + StaticFusedProcess> {
+fn build_nfc_fusable(lang: Lang) -> Normy<impl Process + FusedProcess + StaticFusedProcess> {
     Normy::builder()
         .lang(lang)
         .add_stage(NFC)
@@ -99,7 +99,7 @@ fn build_nfc_fusable(lang: Lang) -> Normy<impl Process + ProcessFused + StaticFu
         .build()
 }
 
-fn build_mixed_pipeline(lang: Lang) -> Normy<impl Process + ProcessFused + StaticFusedProcess> {
+fn build_mixed_pipeline(lang: Lang) -> Normy<impl Process + FusedProcess + StaticFusedProcess> {
     Normy::builder()
         .lang(lang)
         .add_stage(StripHtml)
@@ -109,7 +109,7 @@ fn build_mixed_pipeline(lang: Lang) -> Normy<impl Process + ProcessFused + Stati
         .build()
 }
 
-fn build_complex_pipeline(lang: Lang) -> Normy<impl Process + ProcessFused + StaticFusedProcess> {
+fn build_complex_pipeline(lang: Lang) -> Normy<impl Process + FusedProcess + StaticFusedProcess> {
     Normy::builder()
         .lang(lang)
         .add_stage(StripHtml)
@@ -139,7 +139,7 @@ fn check_zero_copy<'a>(input: &'a str, result: Cow<'a, str>) -> bool {
 }
 
 // Correctness verification
-fn verify_outputs_match<P: Process + ProcessFused + StaticFusedProcess>(
+fn verify_outputs_match<P: Process + FusedProcess + StaticFusedProcess>(
     pipeline: &Normy<P>,
     text: &str,
 ) -> Result<(), String> {
@@ -410,7 +410,7 @@ mod fusion_correctness_tests {
 
     fn build_all_normalizations(
         lang: Lang,
-    ) -> Normy<impl Process + ProcessFused + StaticFusedProcess> {
+    ) -> Normy<impl Process + FusedProcess + StaticFusedProcess> {
         Normy::builder()
             .lang(lang)
             .add_stage(NFC)
@@ -422,7 +422,7 @@ mod fusion_correctness_tests {
 
     fn build_transliterate_pipeline(
         lang: Lang,
-    ) -> Normy<impl Process + ProcessFused + StaticFusedProcess> {
+    ) -> Normy<impl Process + FusedProcess + StaticFusedProcess> {
         Normy::builder()
             .lang(lang)
             .add_stage(NFC)
@@ -435,7 +435,7 @@ mod fusion_correctness_tests {
     // Core Verification Logic
     // ============================================================================
 
-    fn assert_normalize_equals_fused<P: Process + ProcessFused + StaticFusedProcess>(
+    fn assert_normalize_equals_fused<P: Process + FusedProcess + StaticFusedProcess>(
         pipeline: &Normy<P>,
         text: &str,
         context: &str,
@@ -811,7 +811,8 @@ mod static_fusion_debug {
 mod perf_regression_tests {
     use std::time::Instant;
 
-    use normy::{context::Context, stage::Stage};
+    use normy::{NORMALIZE_WHITESPACE_FULL, context::Context, stage::Stage};
+    use tokenizers::decoders::strip::Strip;
 
     use super::*;
     use crate::{
@@ -826,10 +827,82 @@ mod perf_regression_tests {
     const TURKISH_INPUT: &str = concat!(
         "<div>İSTANBUL'da büyük bir ŞEHİR. İĞNE iğde Iı. ",
         "Longer Turkish text with cafe\u{0301} decomposed. ",
-        "İİİİİİİİİİ ıııııııııı. ",
+        "İİİİİİİİİİ ıııııııııı. •••• ",
         "HTML tags: <p>Paragraf</p> <b>Kalın</b>. ",
-        "Repeated: İstanbul İstanbul İstanbul İstanbul İstanbul.</div>"
+        "Repeated: İstanbul İstanbul      İstanbul İstanbul İstanbul.</div>.  "
     );
+
+    #[test]
+    fn test_uniform_fusion_speedup() {
+        const INPUT: &str = TURKISH_INPUT;
+
+        let pipeline = Normy::builder()
+            .lang(TUR) // Turkish: respects dotted/dotless I
+            .add_stage(StripHtml)
+            .add_stage(LowerCase)
+            .add_stage(NormalizePunctuation)
+            .add_stage(StripControlChars) // fusable
+            .add_stage(NORMALIZE_WHITESPACE_FULL)
+            .build();
+
+        // Warm-up
+        for _ in 0..20 {
+            let _ = pipeline.normalize(INPUT).unwrap();
+            let _ = pipeline.normalize_static_fused(INPUT).unwrap();
+            let _ = pipeline.normalize_fused(INPUT).unwrap();
+        }
+
+        let mut total_normal = Duration::ZERO;
+        let mut total_fused_static = Duration::ZERO;
+        let mut total_fused = Duration::ZERO;
+        const ITERATIONS: usize = 500;
+
+        for _ in 0..ITERATIONS {
+            let start = Instant::now();
+            black_box(pipeline.normalize(INPUT).unwrap());
+            total_normal += start.elapsed();
+
+            let start = Instant::now();
+            black_box(pipeline.normalize_static_fused(INPUT).unwrap());
+            total_fused_static += start.elapsed();
+
+            let start = Instant::now();
+            black_box(pipeline.normalize_fused(INPUT).unwrap());
+            total_fused += start.elapsed();
+        }
+
+        let avg_normal = total_normal / ITERATIONS as u32;
+        let avg_static_fused = total_fused_static / ITERATIONS as u32;
+        let avg_fused = total_fused / ITERATIONS as u32;
+
+        println!("\n=== UNIFORM FUSION PIPELINE (6 fusable stages) ===");
+        println!(
+            "Input: {} bytes, {} chars",
+            INPUT.len(),
+            INPUT.chars().count()
+        );
+        println!("Normal sequential:   {:>8}", format!("{avg_normal:?}"));
+        println!(
+            "Static fused:        {:>8}",
+            format!("{avg_static_fused:?}")
+        );
+        println!("Fused:        {:>8}", format!("{avg_fused:?}"));
+        let fused_static_speedup_pct =
+            (avg_normal.as_nanos() as f64 / avg_static_fused.as_nanos() as f64 - 1.0) * 100.0;
+        println!("Static fused Speedup: {:.1}%", fused_static_speedup_pct);
+        println!("(Expected: 20–50%)");
+
+        let speedup_pct =
+            (avg_normal.as_nanos() as f64 / avg_fused.as_nanos() as f64 - 1.0) * 100.0;
+        println!("Static fused Speedup: {:.1}%", speedup_pct);
+        println!("(Expected: 20–50%)");
+
+        let standard_result = pipeline.normalize(INPUT).unwrap();
+        let fused_result = pipeline.normalize_static_fused(INPUT).unwrap();
+        println!("Standard path result: {}", standard_result);
+        println!("Fused path result:    {}", fused_result);
+        assert_eq!(standard_result, fused_result, "Correctness must match");
+    }
 
     #[test]
     fn test_turkish_complex_pipeline_regression() {
@@ -930,10 +1003,7 @@ mod perf_regression_tests {
             .normalize_static_fused(TURKISH_INPUT)
             .unwrap();
         // Verify correctness
-        assert_eq!(
-            actual_result,
-            actual_static_result
-        );
+        assert_eq!(actual_result, actual_static_result);
 
         println!("🔍 VERIFICATION: Actual pipeline result:");
         println!("   {}\n", actual_result);
@@ -1235,7 +1305,7 @@ mod perf_regression_tests {
 
     const ENGLISH_INPUT: &str = concat!(
         "<html><head><title>Test</title></head><body>",
-        "<h1>Hello Naïve World!</h1>",
+        "<h1>Hello      Naïve World!</h1>",
         "<p>This is a longer paragraph with <b>bold</b>, <i>italic</i>, and <a href=\"#\">links</a>. ",
         "It includes multiple sentences. Café in French. Résumé with accents. ",
         "Decomposed accents: cafe\u{0301} ",

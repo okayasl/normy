@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage, StaticIdentityAdapter},
     testing::stage_contract::StageTestConfig,
 };
 use memchr::memchr;
@@ -417,7 +417,7 @@ fn check_closing_tag(chars: &std::iter::Peekable<std::str::Chars>, tag_name: &st
 
 impl StaticFusableStage for StripHtml {
     type Adapter<'a, I>
-        = crate::stage::StaticIdentityAdapter<'a, I>
+        = StaticIdentityAdapter<'a, I>
     where
         I: FusedIterator<Item = char> + 'a;
 
@@ -432,7 +432,7 @@ impl StaticFusableStage for StripHtml {
     where
         I: FusedIterator<Item = char> + 'a,
     {
-        crate::stage::StaticIdentityAdapter::new(input)
+        StaticIdentityAdapter::new(input)
     }
 }
 

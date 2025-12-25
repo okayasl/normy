@@ -1,359 +1,386 @@
-// ============================================================================
-// process_fused.rs - Iterator fusion with zero-copy optimization
-// ============================================================================
+use std::{borrow::Cow, iter::FusedIterator};
 
 use crate::{
     context::Context,
-    process::{ChainedProcess, DynamicProcess, EmptyProcess, Process},
-    stage::{Stage, StageError},
+    process::{ChainedProcess, EmptyProcess, IslandInfo, Process},
+    stage::{Stage, StageError, StaticFusableStage},
 };
-use smallvec::SmallVec;
-use std::borrow::Cow;
-use std::iter::FusedIterator;
-use std::sync::Arc;
 
-// ============================================================================
-// ProcessFused Trait - Returns Cow for zero-copy when possible
-// ============================================================================
+pub trait ProcessIslandInfo {
+    fn get_island_info(&self) -> IslandInfo;
+}
 
-pub trait ProcessFused {
-    /// Process text using iterator fusion where possible
-    /// Returns Cow::Borrowed when no changes needed (zero allocation!)
+impl ProcessIslandInfo for EmptyProcess {
+    fn get_island_info(&self) -> IslandInfo {
+        IslandInfo::default()
+    }
+}
+
+impl<S: Stage, P: Process> ProcessIslandInfo for ChainedProcess<S, P> {
+    fn get_island_info(&self) -> IslandInfo {
+        self.island_info
+    }
+}
+
+// pub struct FusionChainedProcess<S: Stage, P: Process> {
+//     pub stage: S,
+//     pub previous: P,
+
+//     /// Pre-computed island metadata - calculated once at build time!
+//     /// This eliminates recursive calls at runtime for massive performance gain.
+//     pub island_info: IslandInfo,
+// }
+
+pub trait FusedProcess {
+    /// Iterator type for the fusable island starting from this stage
+    type IslandIter<'a, I>: FusedIterator<Item = char> + 'a
+    where
+        I: FusedIterator<Item = char> + 'a,
+        Self: 'a;
+
+    /// Builds an iterator for ONLY the fusable stages starting from this point
+    fn build_island_iter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::IslandIter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    /// Returns the number of consecutive fusable stages ending at this point
+    fn fusable_chain_len(&self) -> usize;
+
+    /// Process everything BEFORE the current fusable island
+    fn process_before_island<'a>(
+        &self,
+        text: &'a str,
+        ctx: &Context,
+        island_size: usize,
+    ) -> Result<Cow<'a, str>, StageError>;
+
+    /// Check if the island needs to apply
+    fn island_needs_apply(
+        &self,
+        text: &str,
+        ctx: &Context,
+        island_size: usize,
+    ) -> Result<bool, StageError>;
+
+    /// Calculate capacity for the island
+    fn island_capacity(&self, input_len: usize, island_size: usize) -> usize;
+
+    // ========================================================================
+    // 🆕 NEW METHODS (added for single-stage optimization)
+    // ========================================================================
+
+    /// Collect needs_apply results for all stages in the island
+    ///
+    /// Returns Vec where index 0 = first stage, last index = last stage
+    /// Example: [NFC → Lower → Fold] might return [true, true, false]
+    ///
+    /// Used to determine if only 1 stage needs work (optimization)
+    fn collect_island_needs(
+        &self,
+        text: &str,
+        ctx: &Context,
+        island_size: usize,
+    ) -> Result<Vec<bool>, StageError>;
+
+    /// Apply only the stages that need work sequentially (no fusion)
+    ///
+    /// Used when only 1 stage in island needs work - no benefit to fusion!
+    /// This calls apply() directly on that one stage, avoiding iterator overhead.
+    ///
+    /// # Arguments
+    /// - `needs`: Vec from collect_island_needs
+    /// - `current_index`: Position in needs vec (for recursion tracking)
+    fn apply_island_sequentially<'a>(
+        &self,
+        text: Cow<'a, str>,
+        ctx: &Context,
+        island_size: usize,
+        needs: &[bool],
+        current_index: usize,
+    ) -> Result<Cow<'a, str>, StageError>;
+
+    /// Main entry point: process text through this pipeline
     fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
-
-    /// Internal: Collect all stages in this chain (used for fusion analysis)
-    fn collect_stages<'a>(&'a self, out: &mut Vec<&'a dyn Stage>);
 }
 
-// ============================================================================
-// EmptyProcessFused - Base case
-// ============================================================================
+impl FusedProcess for EmptyProcess {
+    type IslandIter<'a, I>
+        = I
+    where
+        I: FusedIterator<Item = char> + 'a;
 
-pub struct EmptyProcessFused;
-
-impl ProcessFused for EmptyProcessFused {
     #[inline(always)]
-    fn process_fused<'a>(&self, text: &'a str, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        Ok(Cow::Borrowed(text)) // Zero allocation!
-    }
-
-    fn collect_stages<'a>(&'a self, _out: &mut Vec<&'a dyn Stage>) {
-        // Base case: nothing to add
-    }
-}
-
-// ============================================================================
-// ChainedProcessFused - Recursive chain
-// ============================================================================
-
-pub struct ChainedProcessFused<S, P> {
-    pub stage: S,
-    pub previous: P,
-}
-
-impl<S, P> ProcessFused for ChainedProcessFused<S, P>
-where
-    S: Stage,
-    P: ProcessFused,
-{
-    fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // Collect all stages in order
-        let mut stages = Vec::new();
-        self.collect_stages(&mut stages);
-
-        // Process with fusion
-        fuse_and_process(text, &stages, ctx)
-    }
-
-    fn collect_stages<'a>(&'a self, out: &mut Vec<&'a dyn Stage>) {
-        // Recursively collect previous stages first
-        self.previous.collect_stages(out);
-        // Then add this stage
-        out.push(&self.stage);
-    }
-}
-
-// ============================================================================
-// Core Fusion Algorithm - Zero-copy optimized
-// ============================================================================
-
-fn fuse_and_process<'a>(
-    text: &'a str,
-    stages: &[&dyn Stage],
-    ctx: &Context,
-) -> Result<Cow<'a, str>, StageError> {
-    // Fast path: no stages
-    if stages.is_empty() {
-        return Ok(Cow::Borrowed(text));
-    }
-
-    let mut current = Cow::Borrowed(text);
-    let mut i = 0;
-
-    while i < stages.len() {
-        // Find next fusable segment
-        let segment_end = find_fusable_segment_end(stages, i);
-
-        if segment_end > i {
-            // We have fusable stages - process as segment
-            current = process_fusable_segment(current, &stages[i..segment_end], ctx)?;
-            i = segment_end;
-        } else {
-            // Single non-fusable stage
-            let stage = stages[i];
-            if stage.needs_apply(current.as_ref(), ctx)? {
-                current = stage.apply(current, ctx)?;
-            }
-            // If doesn't need apply, current stays the same (might still be Borrowed!)
-            i += 1;
-        }
-    }
-
-    Ok(current)
-}
-
-/// Find where the fusable segment ends
-fn find_fusable_segment_end(stages: &[&dyn Stage], start: usize) -> usize {
-    let first_stage = stages[start];
-
-    // If not fusable at all, return start (segment = 0)
-    if first_stage.as_fusable().is_none() {
-        return start;
-    }
-
-    // If fusable but NOT safe_skip, segment = 1 ✅
-    if !first_stage.safe_skip_approximation() {
-        return start + 1; // Single-stage segment!
-    }
-
-    // If fusable AND safe_skip, try to extend segment
-    let mut end = start + 1;
-    while end < stages.len() {
-        if stages[end].as_fusable().is_some() && stages[end].safe_skip_approximation() {
-            end += 1;
-        } else {
-            break;
-        }
-    }
-    end
-}
-
-/// Process a fusable segment with single allocation (or zero if no work needed!)
-fn process_fusable_segment<'a>(
-    input: Cow<'a, str>,
-    segment: &[&dyn Stage],
-    ctx: &Context,
-) -> Result<Cow<'a, str>, StageError> {
-    if segment.is_empty() {
-        return Ok(input);
-    }
-
-    let text = input.as_ref();
-
-    // Check which stages need to apply (all on same input text!)
-    let mut active: Vec<&dyn Stage> = Vec::new();
-    for stage in segment {
-        if stage.needs_apply(text, ctx)? {
-            active.push(*stage);
-        }
-    }
-
-    // ZERO-COPY FAST PATH: No stages need to apply!
-    if active.is_empty() {
-        return Ok(input); // Return input as-is (might be Borrowed!)
-    }
-
-    // Build fused iterator chain
-    let mut iter: Box<dyn FusedIterator<Item = char>> = Box::new(text.chars());
-
-    for stage in active {
-        if let Some(fusable) = stage.as_fusable() {
-            iter = fusable.dyn_fused_adapter(iter, ctx);
-        } else {
-            // Stage claims safe_skip_approximation but isn't fusable?
-            // Fall back to apply
-            let s: String = iter.collect();
-            return stage.apply(Cow::Owned(s), ctx);
-        }
-    }
-
-    // SINGLE ALLOCATION - collect entire fused chain
-    let result: String = iter.collect();
-
-    // Optional optimization: Check if result is same as input
-    // This can save memory when transformation is a no-op despite needs_apply returning true
-    if result == text {
-        Ok(input) // Return original (possibly Borrowed)
-    } else {
-        Ok(Cow::Owned(result))
-    }
-}
-
-// ============================================================================
-// DynamicProcessFused - For dynamic/runtime stage composition
-// ============================================================================
-
-#[derive(Default)]
-pub struct DynamicProcessFused {
-    pub(crate) stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,
-}
-
-impl DynamicProcessFused {
-    #[inline(always)]
-    pub fn new() -> Self {
-        Self::default()
+    fn build_island_iter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::IslandIter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        input
     }
 
     #[inline(always)]
-    pub fn push<T: Stage + Send + Sync + 'static>(mut self, stage: T) -> Self {
-        self.stages.push(Arc::new(stage));
-        self
-    }
-}
-
-impl ProcessFused for DynamicProcessFused {
-    fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // Convert Arc stages to references with explicit cast
-        let stage_refs: Vec<&dyn Stage> = self
-            .stages
-            .iter()
-            .map(|s| s.as_ref() as &dyn Stage)
-            .collect();
-
-        // Use the same fusion algorithm
-        fuse_and_process(text, &stage_refs, ctx)
+    fn fusable_chain_len(&self) -> usize {
+        0
     }
 
-    fn collect_stages<'a>(&'a self, out: &mut Vec<&'a dyn Stage>) {
-        for stage in &self.stages {
-            out.push(stage.as_ref() as &dyn Stage);
-        }
-    }
-}
-
-impl ProcessFused for EmptyProcess {
     #[inline(always)]
-    fn process_fused<'a>(&self, text: &'a str, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+    fn process_before_island<'a>(
+        &self,
+        text: &'a str,
+        _ctx: &Context,
+        _island_size: usize,
+    ) -> Result<Cow<'a, str>, StageError> {
         Ok(Cow::Borrowed(text))
     }
 
-    fn collect_stages<'a>(&'a self, _out: &mut Vec<&'a dyn Stage>) {}
+    #[inline(always)]
+    fn island_needs_apply(
+        &self,
+        _text: &str,
+        _ctx: &Context,
+        _island_size: usize,
+    ) -> Result<bool, StageError> {
+        Ok(false)
+    }
+
+    #[inline(always)]
+    fn island_capacity(&self, input_len: usize, _island_size: usize) -> usize {
+        input_len
+    }
+
+    fn collect_island_needs(
+        &self,
+        _text: &str,
+        _ctx: &Context,
+        _island_size: usize,
+    ) -> Result<Vec<bool>, StageError> {
+        Ok(Vec::new())
+    }
+
+    fn apply_island_sequentially<'a>(
+        &self,
+        text: Cow<'a, str>,
+        _ctx: &Context,
+        _island_size: usize,
+        _needs: &[bool],
+        _current_index: usize,
+    ) -> Result<Cow<'a, str>, StageError> {
+        Ok(text)
+    }
+
+    fn process_fused<'a>(&self, text: &'a str, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        Ok(Cow::Borrowed(text))
+    }
 }
 
-impl<S: Stage, P: ProcessFused + Process> ProcessFused for ChainedProcess<S, P> {
+impl<S, P> FusedProcess for ChainedProcess<S, P>
+where
+    S: Stage + StaticFusableStage,
+    P: Process + FusedProcess,
+{
+    type IslandIter<'a, I>
+        = S::Adapter<'a, P::IslandIter<'a, I>>
+    where
+        I: FusedIterator<Item = char> + 'a,
+        Self: 'a,
+        P::IslandIter<'a, I>: FusedIterator<Item = char>;
+
+    #[inline]
+    fn build_island_iter<'a, I>(&self, input: I, ctx: &'a Context) -> Self::IslandIter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+        S: 'a,
+        P: 'a,
+    {
+        let prev_iter = self.previous.build_island_iter(input, ctx);
+        self.stage.static_fused_adapter(prev_iter, ctx)
+    }
+
     #[inline(always)]
-    fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let mut stages = Vec::new();
-        self.collect_stages(&mut stages);
-        fuse_and_process(text, &stages, ctx)
+    fn fusable_chain_len(&self) -> usize {
+        // 🚀 O(1) field access instead of O(n) recursion!
+        self.island_info.island_len
     }
 
-    fn collect_stages<'a>(&'a self, out: &mut Vec<&'a dyn Stage>) {
-        self.previous.collect_stages(out);
-        out.push(&self.stage);
-    }
-}
+    fn process_before_island<'a>(
+        &self,
+        text: &'a str,
+        ctx: &Context,
+        island_size: usize,
+    ) -> Result<Cow<'a, str>, StageError> {
+        // Debug assertion: caller should pass correct island_size
+        debug_assert_eq!(island_size, self.island_info.island_len);
 
-impl ProcessFused for DynamicProcess {
-    #[inline(always)]
-    fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let stage_refs: Vec<&dyn Stage> = self
-            .stages
-            .iter()
-            .map(|s| s.as_ref() as &dyn Stage)
-            .collect();
-        fuse_and_process(text, &stage_refs, ctx)
+        if island_size <= 1 {
+            // BASE CASE: We're at first stage of island
+            return self.previous.process_fused(text, ctx);
+        }
+
+        // RECURSIVE CASE: Keep walking back through island
+        self.previous
+            .process_before_island(text, ctx, island_size - 1)
     }
 
-    fn collect_stages<'a>(&'a self, out: &mut Vec<&'a dyn Stage>) {
-        for stage in &self.stages {
-            out.push(stage.as_ref() as &dyn Stage);
+    fn island_needs_apply(
+        &self,
+        text: &str,
+        ctx: &Context,
+        island_size: usize,
+    ) -> Result<bool, StageError> {
+        debug_assert_eq!(island_size, self.island_info.island_len);
+
+        // 🚀 OPTIMIZATION: If all stages have safe_skip, can use faster check!
+        if self.island_info.all_safe_skip {
+            // All stages can check on base text - just check this one
+            // If ANY previous returned true, we already know island needs work
+            if island_size <= 1 {
+                return self.stage.needs_apply(text, ctx);
+            }
+
+            let prev_needs = self
+                .previous
+                .island_needs_apply(text, ctx, island_size - 1)?;
+            let this_needs = self.stage.needs_apply(text, ctx)?;
+            return Ok(prev_needs || this_needs);
+        }
+
+        // Standard logic for mixed safe_skip values
+        if island_size <= 1 {
+            return self.stage.needs_apply(text, ctx);
+        }
+
+        let prev_needs = self
+            .previous
+            .island_needs_apply(text, ctx, island_size - 1)?;
+
+        if prev_needs {
+            if self.stage.safe_skip_approximation() {
+                let this_needs = self.stage.needs_apply(text, ctx)?;
+                Ok(prev_needs || this_needs)
+            } else {
+                Ok(true)
+            }
+        } else {
+            self.stage.needs_apply(text, ctx)
         }
     }
+
+    fn island_capacity(&self, input_len: usize, island_size: usize) -> usize {
+        debug_assert_eq!(island_size, self.island_info.island_len);
+
+        // 🚀 O(1) multiplication instead of O(n) recursion!
+        (input_len as f64 * self.island_info.capacity_multiplier).ceil() as usize
+    }
+
+    fn collect_island_needs(
+        &self,
+        text: &str,
+        ctx: &Context,
+        island_size: usize,
+    ) -> Result<Vec<bool>, StageError> {
+        debug_assert_eq!(island_size, self.island_info.island_len);
+
+        if island_size <= 1 {
+            let needs = self.stage.needs_apply(text, ctx)?;
+            return Ok(vec![needs]);
+        }
+
+        let mut needs = self
+            .previous
+            .collect_island_needs(text, ctx, island_size - 1)?;
+
+        let this_needs = if needs.iter().any(|&x| x) {
+            if self.stage.safe_skip_approximation() {
+                self.stage.needs_apply(text, ctx)?
+            } else {
+                true
+            }
+        } else {
+            self.stage.needs_apply(text, ctx)?
+        };
+
+        needs.push(this_needs);
+        Ok(needs)
+    }
+
+    fn apply_island_sequentially<'a>(
+        &self,
+        mut text: Cow<'a, str>,
+        ctx: &Context,
+        island_size: usize,
+        needs: &[bool],
+        current_index: usize,
+    ) -> Result<Cow<'a, str>, StageError> {
+        if island_size <= 1 {
+            if needs[current_index] {
+                return self.stage.apply(text, ctx);
+            } else {
+                return Ok(text);
+            }
+        }
+
+        text = self.previous.apply_island_sequentially(
+            text,
+            ctx,
+            island_size - 1,
+            needs,
+            current_index,
+        )?;
+
+        if needs[current_index + island_size - 1] {
+            text = self.stage.apply(text, ctx)?;
+        }
+
+        Ok(text)
+    }
+
+    #[inline]
+    fn process_fused<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+        // 🚀 Direct field access - no function call overhead!
+        let chain_len = self.island_info.island_len;
+
+        // CASE 1: Island with 2+ stages
+        if chain_len >= 2 {
+            // STEP 1: Process everything before this island
+            let base_text = self.process_before_island(text, ctx, chain_len)?;
+
+            // STEP 2: Analyze which stages need work
+            let needs = self.collect_island_needs(&base_text, ctx, chain_len)?;
+            let active_count = needs.iter().filter(|&&x| x).count();
+
+            // OPTIMIZATION 1: No work needed → zero-copy! 🚀
+            if active_count == 0 {
+                return Ok(base_text);
+            }
+
+            // OPTIMIZATION 2: Only 1 stage needs work → use apply()! 🎯
+            // No benefit to fusion with single stage - just call apply directly
+            if active_count == 1 {
+                return self.apply_island_sequentially(base_text, ctx, chain_len, &needs, 0);
+            }
+
+            // OPTIMIZATION 3: 2+ stages need work → fusion for single allocation! ⚡
+            // 🚀 Use pre-computed capacity!
+            let capacity = self.island_capacity(base_text.len(), chain_len);
+            let mut result = String::with_capacity(capacity);
+
+            let iter = self.build_island_iter(base_text.chars(), ctx);
+            result.extend(iter);
+
+            // SAFETY NET: Handle false positives
+            if result == base_text.as_ref() {
+                return Ok(base_text);
+            }
+
+            return Ok(Cow::Owned(result));
+        }
+
+        // CASE 2: Single stage or barrier - use apply() path
+        let prev_result = self.previous.process_fused(text, ctx)?;
+
+        if !self.stage.needs_apply(&prev_result, ctx)? {
+            return Ok(prev_result);
+        }
+
+        self.stage.apply(prev_result, ctx)
+    }
 }
-
-// ============================================================================
-// Performance characteristics with zero-copy optimization
-// ============================================================================
-
-/*
-EXAMPLE 1: No changes needed
------------------------------
-Pipeline: [RemoveDiacritics, CaseFold]
-Input: "already clean" (no diacritics, all lowercase)
-
-Execution:
-1. Check RemoveDiacritics.needs_apply("already clean") → false
-2. Check CaseFold.needs_apply("already clean") → false
-3. active = []
-4. Return Cow::Borrowed("already clean")
-
-Allocations: 0 ✅ ZERO ALLOCATION!
-
-
-EXAMPLE 2: All fusable with changes
-------------------------------------
-Pipeline: [TRIM, RemoveDiacritics, CaseFold]
-Input: "  Café  "
-
-Execution:
-1. Segment [TRIM, RemoveDiacritics, CaseFold] - all fusable
-2. Check all needs_apply on "  Café  " → all true
-3. Build iterator chain, collect → "cafe"
-4. Compare "cafe" != "  Café  " → return Cow::Owned("cafe")
-
-Allocations: 1 ✅ SINGLE ALLOCATION!
-
-
-EXAMPLE 3: Mixed pipeline
---------------------------
-Pipeline: [TRIM, StripHtml, RemoveDiacritics, CaseFold]
-Input: "  already clean  " (no HTML, no diacritics, lowercase)
-
-Execution:
-1. Segment [TRIM]:
-   - TRIM.needs_apply("  already clean  ") → true
-   - Build iterator, collect → "already clean"
-   - current = Cow::Owned("already clean")
-
-2. Stage [StripHtml]:
-   - StripHtml.needs_apply("already clean") → false
-   - current stays Cow::Owned("already clean") (no allocation!)
-
-3. Segment [RemoveDiacritics, CaseFold]:
-   - RemoveDiacritics.needs_apply("already clean") → false
-   - CaseFold.needs_apply("already clean") → false
-   - active = []
-   - Return current (Cow::Owned("already clean"))
-
-Allocations: 1 (only for TRIM) ✅
-
-
-EXAMPLE 4: Completely unchanged
---------------------------------
-Pipeline: [RemoveDiacritics, CaseFold, StripControlChars]
-Input: "hello" (perfect input)
-
-Execution:
-1. Segment [RemoveDiacritics, CaseFold, StripControlChars]:
-   - All needs_apply("hello") → false
-   - active = []
-   - Return Cow::Borrowed("hello")
-
-Allocations: 0 ✅ ZERO ALLOCATION - ZERO COPY!
-
-
-COMPARISON TABLE:
-================
-
-| Scenario | Regular normalize() | Fused normalize_fused() | Improvement |
-|----------|-------------------|------------------------|-------------|
-| No changes | 0 (Borrowed) | 0 (Borrowed) | Same ✓ |
-| All need work (3 stages) | 3 allocations | 1 allocation | 67% ↓ |
-| Mixed (some need work) | 2-3 allocations | 1-2 allocations | 33-50% ↓ |
-| Partial changes | Variable | Minimal | Better ✓ |
-
-KEY INSIGHT:
-The fused path now has the SAME zero-copy behavior as the regular path
-when no changes are needed, PLUS the fusion benefits when changes are needed!
-*/

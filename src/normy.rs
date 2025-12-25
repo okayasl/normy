@@ -1,10 +1,10 @@
 use crate::{
     context::Context,
-    fused_process::ProcessFused,
+    fused_process::{FusedProcess, ProcessIslandInfo},
     lang::{DEFAULT_LANG, Lang},
-    process::{ChainedProcess, DynamicProcess, EmptyProcess, Process},
+    process::{ChainedProcess, DynamicProcess, EmptyProcess, IslandInfo, Process},
     profile::{Profile, ProfileError},
-    stage::{Stage, StageError},
+    stage::{Stage, StageError, StageMetadata},
     static_fused_process::StaticFusedProcess,
 };
 use smallvec::SmallVec;
@@ -44,7 +44,7 @@ impl<P: Process> Normy<P> {
     #[inline(always)]
     pub fn normalize_fused<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, NormyError>
     where
-        P: ProcessFused,
+        P: FusedProcess,
     {
         #[cfg(debug_assertions)]
         assert_utf8(text);
@@ -61,7 +61,7 @@ impl<P: Process> Normy<P> {
         #[cfg(debug_assertions)]
         assert_utf8(text);
         self.pipeline
-            .process_static(text, &self.ctx)
+            .process_static_fused(text, &self.ctx)
             .map_err(Into::into)
     }
 
@@ -95,7 +95,7 @@ impl Default for NormyBuilder<EmptyProcess> {
     }
 }
 
-impl<P: Process> NormyBuilder<P> {
+impl<P: Process + ProcessIslandInfo> NormyBuilder<P> {
     #[inline(always)]
     pub fn lang(mut self, lang: Lang) -> Self {
         self.ctx = Context::new(lang);
@@ -110,15 +110,40 @@ impl<P: Process> NormyBuilder<P> {
 
     #[inline(always)]
     pub fn add_stage<S: Stage + 'static>(self, stage: S) -> NormyBuilder<ChainedProcess<S, P>> {
+        // Extract metadata from this stage
+        let stage_meta = StageMetadata::from_stage(&stage);
+
+        // Get previous island info
+        let prev_island = self.current.get_island_info();
+
+        // Compute THIS stage's island info based on previous + this stage
+        let island_info = if stage_meta.supports_fusion {
+            // This stage is fusable - extend or start island
+            if prev_island.island_len == 0 {
+                // Starting a new island
+                IslandInfo::new_island(stage_meta.capacity_factor, stage_meta.safe_skip)
+            } else {
+                // Extending existing island
+                IslandInfo::extend_island(
+                    prev_island,
+                    stage_meta.capacity_factor,
+                    stage_meta.safe_skip,
+                )
+            }
+        } else {
+            // Barrier stage - reset island
+            IslandInfo::reset()
+        };
+
         NormyBuilder {
             ctx: self.ctx,
             current: ChainedProcess {
                 stage,
                 previous: self.current,
+                island_info, // ✨ Computed once at build time!
             },
         }
     }
-
     #[inline(always)]
     pub fn build(self) -> Normy<P> {
         Normy {

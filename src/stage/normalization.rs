@@ -79,6 +79,7 @@ macro_rules! impl_normalization_stage {
             #[inline]
             fn as_fusable(&self) -> Option<&dyn FusableStage> {
                 Some(self)
+                //None
             }
         }
 
@@ -90,6 +91,7 @@ macro_rules! impl_normalization_stage {
 
             fn supports_static_fusion(&self) -> bool {
                 true
+                //false
             }
 
             #[inline(always)]

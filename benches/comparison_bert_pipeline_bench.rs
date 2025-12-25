@@ -4,10 +4,13 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use normy::COLLAPSE_WHITESPACE_UNICODE;
+use normy::context::Context;
 use normy::stage::normalization::NfdStage;
 use normy::stage::normalize_whitespace::NormalizeWhitespace;
+use normy::stage::{StaticFusableStage, StaticIdentityAdapter};
 use rand::random;
 use rand::{Rng, SeedableRng, rngs::StdRng};
+use std::iter::FusedIterator;
 use std::sync::LazyLock;
 use std::{borrow::Cow, hint::black_box};
 
@@ -65,6 +68,27 @@ fn is_chinese_char(c: char) -> bool {
         0xF900..=0xFAFF |
         0x2F800..=0x2FA1F
     )
+}
+
+impl StaticFusableStage for BertCompatChineseChars {
+    type Adapter<'a, I>
+        = StaticIdentityAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    // Trigger the fallback to the optimized apply() method
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        StaticIdentityAdapter::new(input)
+    }
 }
 
 // ──────────────────────────────────────────────────────────────

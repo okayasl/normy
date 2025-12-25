@@ -131,29 +131,21 @@ pub trait StaticFusedProcess {
     /// → Fold: 110 * 1.2 = 132 (ß → ss expansion)
     fn island_capacity(&self, input_len: usize, island_size: usize) -> usize;
 
-    /// NEW: Collect needs_apply results for all stages in the island
-    ///
-    /// Returns: Vec<bool> where index 0 = first stage, index chain_len-1 = last stage
-    ///
-    /// Example: [NFC → Lower → Fold] on "Café"
-    /// Returns: [true, true, false] (NFC and Lower need work, Fold doesn't)
+    /// Returns a bitmask where the i-th bit corresponds to the i-th stage in the island.
+    /// Bit 0 is the FIRST stage, Bit (island_size-1) is the CURRENT stage.
     fn collect_island_needs(
         &self,
         text: &str,
         ctx: &Context,
         island_size: usize,
-    ) -> Result<Vec<bool>, StageError>;
+    ) -> Result<u64, StageError>;
 
-    /// NEW: Apply only the stages that need work sequentially
-    ///
-    /// Used when only 1 stage in island needs work (no benefit to fusion)
     fn apply_island_sequentially<'a>(
         &self,
         text: Cow<'a, str>,
         ctx: &Context,
         island_size: usize,
-        needs: &[bool],
-        current_index: usize,
+        needs_mask: u64,
     ) -> Result<Cow<'a, str>, StageError>;
 
     /// Main entry point: process text through this pipeline
@@ -167,7 +159,11 @@ pub trait StaticFusedProcess {
     ///    d. If no: return borrowed input (zero-copy!)
     /// 3. If single stage or barrier:
     ///    - Use regular apply() path
-    fn process_static<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
+    fn process_static_fused<'a>(
+        &self,
+        text: &'a str,
+        ctx: &Context,
+    ) -> Result<Cow<'a, str>, StageError>;
 }
 
 // ============================================================================
@@ -227,24 +223,23 @@ impl StaticFusedProcess for EmptyProcess {
         _text: &str,
         _ctx: &Context,
         _island_size: usize,
-    ) -> Result<Vec<bool>, StageError> {
-        // Base case: no stages
-        Ok(Vec::new())
+    ) -> Result<u64, StageError> {
+        Ok(0)
     }
 
+    #[inline(always)]
     fn apply_island_sequentially<'a>(
         &self,
         text: Cow<'a, str>,
         _ctx: &Context,
         _island_size: usize,
-        _needs: &[bool],
-        _current_index: usize,
+        _needs: u64,
     ) -> Result<Cow<'a, str>, StageError> {
-        // Base case: no stages to apply
+        // Base case: No more stages in this island to apply
         Ok(text)
     }
 
-    fn process_static<'a>(
+    fn process_static_fused<'a>(
         &self,
         text: &'a str,
         _ctx: &Context,
@@ -330,7 +325,7 @@ where
         if island_size <= 1 {
             // BASE CASE: We've walked back to the FIRST stage of island
             // Now process everything BEFORE this stage
-            return self.previous.process_static(text, ctx);
+            return self.previous.process_static_fused(text, ctx);
         }
 
         // RECURSIVE CASE: Not at first stage yet, keep walking back
@@ -414,77 +409,66 @@ where
         }
     }
 
-    /// NEW: Collect needs_apply results for all stages in the island
-    ///
-    /// Returns: Vec<bool> where index 0 = first stage, index chain_len-1 = last stage
-    ///
-    /// Example: [NFC → Lower → Fold] on "Café"
-    /// Returns: [true, true, false] (NFC and Lower need work, Fold doesn't)
     fn collect_island_needs(
         &self,
         text: &str,
         ctx: &Context,
         island_size: usize,
-    ) -> Result<Vec<bool>, StageError> {
+    ) -> Result<u64, StageError> {
         if island_size <= 1 {
-            // BASE CASE: Just this stage
-            let needs = self.stage.needs_apply(text, ctx)?;
-            return Ok(vec![needs]);
+            // First stage: set bit 0 if it needs apply
+            return Ok(if self.stage.needs_apply(text, ctx)? {
+                1
+            } else {
+                0
+            });
         }
 
-        // RECURSIVE CASE: Collect from previous stages first
-        let mut needs = self
+        // 1. Recurse to get mask from previous stages
+        let prev_mask = self
             .previous
             .collect_island_needs(text, ctx, island_size - 1)?;
 
-        // Add this stage's needs_apply result
-        let this_needs = if needs.iter().any(|&x| x) {
-            // Previous stages need work
+        // 2. Check this stage (bit index = island_size - 1)
+        let this_needs = if prev_mask > 0 {
+            // Something before us changed the text
             if self.stage.safe_skip_approximation() {
                 self.stage.needs_apply(text, ctx)?
             } else {
-                true // Can't check accurately, assume true
+                true
             }
         } else {
-            // Previous stages don't need work, check directly
+            // Text is still original
             self.stage.needs_apply(text, ctx)?
         };
 
-        needs.push(this_needs);
-        Ok(needs)
+        // 3. Set the bit at the current position and return
+        if this_needs {
+            Ok(prev_mask | (1 << (island_size - 1)))
+        } else {
+            Ok(prev_mask)
+        }
     }
 
-    /// NEW: Apply only the stages that need work sequentially
-    ///
-    /// Used when only 1 stage in island needs work (no benefit to fusion)
     fn apply_island_sequentially<'a>(
         &self,
         mut text: Cow<'a, str>,
         ctx: &Context,
         island_size: usize,
-        needs: &[bool],
-        current_index: usize,
+        needs_mask: u64,
     ) -> Result<Cow<'a, str>, StageError> {
-        if island_size <= 1 {
-            // BASE CASE: Last stage in island
-            if needs[current_index] {
-                return self.stage.apply(text, ctx);
-            } else {
-                return Ok(text);
-            }
+        if island_size == 0 {
+            return Ok(text);
         }
 
-        // RECURSIVE CASE: Process previous stages first
-        text = self.previous.apply_island_sequentially(
-            text,
-            ctx,
-            island_size - 1,
-            needs,
-            current_index,
-        )?;
+        // Recurse to process earlier stages first
+        text = self
+            .previous
+            .apply_island_sequentially(text, ctx, island_size - 1, needs_mask)?;
 
-        // Then apply this stage if needed
-        if needs[current_index + island_size - 1] {
+        // Check the bit for THIS stage
+        let bit_index = island_size - 1;
+        if (needs_mask & (1 << bit_index)) != 0 {
             text = self.stage.apply(text, ctx)?;
         }
 
@@ -492,45 +476,38 @@ where
     }
 
     #[inline]
-    fn process_static<'a>(&self, text: &'a str, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
+    fn process_static_fused<'a>(
+        &self,
+        text: &'a str,
+        ctx: &Context,
+    ) -> Result<Cow<'a, str>, StageError> {
         let chain_len = self.fusable_chain_len();
 
         if chain_len >= 2 {
-            // STEP 1: Process everything BEFORE this island
             let base_text = self.process_before_island(text, ctx, chain_len)?;
+            let needs_mask = self.collect_island_needs(&base_text, ctx, chain_len)?;
 
-            // STEP 2: Collect which stages need to apply
-            let needs = self.collect_island_needs(&base_text, ctx, chain_len)?;
-            let active_count = needs.iter().filter(|&&x| x).count();
+            // Use CPU intrinsic to count set bits
+            let active_count = needs_mask.count_ones();
 
-            // OPTIMIZATION 1: No stages need work → zero-copy! 🚀
             if active_count == 0 {
                 return Ok(base_text);
             }
 
-            // OPTIMIZATION 2: Only 1 stage needs work → use apply() directly! 🎯
             if active_count == 1 {
-                // No benefit to fusion with single stage
-                // Just apply that one stage using regular apply() path
-                return self.apply_island_sequentially(base_text, ctx, chain_len, &needs, 0);
+                return self.apply_island_sequentially(base_text, ctx, chain_len, needs_mask);
             }
 
-            // OPTIMIZATION 3: 2+ stages need work → use fusion for single allocation! ⚡
+            // ... proceed to Iterator Fusion
             let capacity = self.island_capacity(base_text.len(), chain_len);
             let mut result = String::with_capacity(capacity);
-
-            let iter = self.build_island_iter(base_text.chars(), ctx);
-            result.extend(iter);
-
-            if result == base_text.as_ref() {
-                return Ok(base_text);
-            }
+            result.extend(self.build_island_iter(base_text.chars(), ctx));
 
             return Ok(Cow::Owned(result));
         }
 
-        // Single stage or barrier - use apply() path
-        let prev_result = self.previous.process_static(text, ctx)?;
+        // Single stage or barrier fallback
+        let prev_result = self.previous.process_static_fused(text, ctx)?;
         if !self.stage.needs_apply(&prev_result, ctx)? {
             return Ok(prev_result);
         }
