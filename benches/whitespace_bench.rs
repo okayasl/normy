@@ -217,7 +217,7 @@ criterion_group! {
         .sample_size(500)
         .noise_threshold(0.02)
         .significance_level(0.05);
-    targets = bench_fusion_vs_apply
+    targets = bench_fusion_vs_apply,bench_whitespace_variants
 }
 
 criterion_main!(benches);

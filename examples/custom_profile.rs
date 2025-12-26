@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, iter::FusedIterator};
 
 use normy::{
     CaseFold, ENG, JPN, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation,
@@ -13,7 +13,7 @@ use normy::{
             search, social_media, web_scraping,
         },
     },
-    stage::{Stage, StageError},
+    stage::{Stage, StageError, StaticFusableStage, StaticIdentityAdapter},
 };
 
 // ————————————————————————————————
@@ -44,6 +44,27 @@ impl Stage for StripEmoji {
     }
     fn apply<'a>(&self, text: Cow<'a, str>, _: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(Cow::Owned(text.chars().filter(|&c| !is_emoji(c)).collect()))
+    }
+}
+
+impl StaticFusableStage for StripEmoji {
+    type Adapter<'a, I>
+        = StaticIdentityAdapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    // Trigger the fallback to the optimized apply() method
+    #[inline(always)]
+    fn supports_static_fusion(&self) -> bool {
+        false
+    }
+
+    #[inline(always)]
+    fn static_fused_adapter<'a, I>(&self, input: I, _ctx: &'a Context) -> Self::Adapter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        StaticIdentityAdapter::new(input)
     }
 }
 

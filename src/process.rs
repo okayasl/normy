@@ -1,20 +1,48 @@
-//! Process abstraction
-//! ChainedProcess is monomorphised – the compiler knows the concrete
-//! type of every stage. The Rust compiler inlines every `Iterator::next` and fuses the
-//! whole chain into one machine-code loop – zero heap, zero bounds checks.
-//! DynamicProcess  is the dynamic fallback.
 use crate::{
     context::Context,
-    stage::{Stage, StageError},
+    stage::{Stage, StageError, StaticFusableStage},
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, iter::FusedIterator, sync::Arc};
 
 pub trait Process {
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
 }
 
+pub trait BuildIter: Process {
+    type Iter<'a, I>: FusedIterator<Item = char> + 'a
+    where
+        I: FusedIterator<Item = char> + 'a,
+        Self: 'a;
+
+    /// Check if any stage in this chain needs to apply
+    /// All stages check against original input (safe because safe_skip=true for all)
+    fn any_needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError>;
+
+    fn build_iter<'a, I>(&'a self, input: I, ctx: &'a Context) -> Self::Iter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a;
+
+    fn process_fused<'a>(
+        &'a self, // <--- Add 'a here
+        text: Cow<'a, str>,
+        ctx: &Context,
+    ) -> Result<Cow<'a, str>, StageError> {
+        // Check if any stage needs work
+        if !self.any_needs_apply(&text, ctx)? {
+            // Zero-copy! No stages need to do anything
+            return Ok(text);
+        }
+
+        // At least one stage needs work → run fusion
+        let mut result = String::with_capacity(text.len());
+        result.extend(self.build_iter(text.chars(), ctx));
+        Ok(Cow::Owned(result))
+    }
+}
+
 pub struct EmptyProcess;
+
 impl Process for EmptyProcess {
     #[inline(always)]
     fn process<'a>(&self, text: Cow<'a, str>, _ctx: &Context) -> Result<Cow<'a, str>, StageError> {
@@ -22,85 +50,76 @@ impl Process for EmptyProcess {
     }
 }
 
-// Add to stage.rs or a new island_metadata.rs
-/// Pre-computed island metadata (calculated once at build time)
-///
-/// This eliminates runtime recursion for island analysis!
-#[derive(Debug, Clone, Copy)]
-pub struct IslandInfo {
-    /// Length of fusable island ending at this stage
-    /// - 0 = barrier stage (not fusable)
-    /// - 1 = single fusable stage (use apply, not fusion)
-    /// - 2+ = fusable island (use fusion for single allocation)
-    pub island_len: usize,
+impl BuildIter for EmptyProcess {
+    type Iter<'a, I>
+        = I
+    where
+        I: FusedIterator<Item = char> + 'a;
 
-    /// Pre-computed capacity multiplier for entire island
-    /// Example: NFC (×1.0) → Lower (×1.1) → Fold (×1.2) = 1.32 total
-    /// Usage: output_capacity = input_len × capacity_multiplier
-    pub capacity_multiplier: f64,
+    #[inline(always)]
+    fn build_iter<'a, I>(&'a self, input: I, _ctx: &'a Context) -> Self::Iter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+    {
+        input
+    }
 
-    /// Whether ALL stages in this island have safe_skip_approximation=true
-    /// If true: all stages can check needs_apply on original input
-    /// If false: some stages need transformed input to check accurately
-    pub all_safe_skip: bool,
-}
-
-impl Default for IslandInfo {
-    fn default() -> Self {
-        Self {
-            island_len: 0,
-            capacity_multiplier: 1.0,
-            all_safe_skip: true,
-        }
+    #[inline(always)]
+    fn any_needs_apply(&self, _text: &str, _ctx: &Context) -> Result<bool, StageError> {
+        Ok(false) // No stages → nothing needs to apply
     }
 }
 
-impl IslandInfo {
-    /// Create info for a new island starting with this stage
-    pub fn new_island(stage_capacity_factor: f64, stage_safe_skip: bool) -> Self {
-        Self {
-            island_len: 1,
-            capacity_multiplier: stage_capacity_factor,
-            all_safe_skip: stage_safe_skip,
-        }
-    }
-
-    /// Extend existing island with this stage
-    pub fn extend_island(
-        prev: IslandInfo,
-        stage_capacity_factor: f64,
-        stage_safe_skip: bool,
-    ) -> Self {
-        Self {
-            island_len: prev.island_len + 1,
-            capacity_multiplier: prev.capacity_multiplier * stage_capacity_factor,
-            all_safe_skip: prev.all_safe_skip && stage_safe_skip,
-        }
-    }
-
-    /// Reset island (barrier stage)
-    pub fn reset() -> Self {
-        Self::default()
-    }
-}
-
-pub struct ChainedProcess<S: Stage, P: Process> {
+pub struct ChainedProcess<S, P> {
     pub stage: S,
     pub previous: P,
-
-    /// Pre-computed island metadata - calculated once at build time!
-    /// This eliminates recursive calls at runtime for massive performance gain.
-    pub island_info: IslandInfo,
 }
 
+// 1. General implementation: Always works for any Stage and Process
 impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
-    #[inline(always)]
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let current: Cow<'_, str> = self.previous.process(text, ctx)?;
+        let current = self.previous.process(text, ctx)?;
         if !self.stage.needs_apply(&current, ctx)? {
             return Ok(current);
         }
         self.stage.apply(current, ctx)
+    }
+}
+
+// Fused implementation: ONLY exists if S is StaticFusable and P is BuildIter
+impl<S, P> BuildIter for ChainedProcess<S, P>
+where
+    S: Stage + StaticFusableStage,
+    P: BuildIter,
+{
+    type Iter<'a, I>
+        = S::Adapter<'a, P::Iter<'a, I>>
+    where
+        I: FusedIterator<Item = char> + 'a,
+        Self: 'a,
+        S: 'a,
+        P: 'a;
+
+    #[inline]
+    fn build_iter<'a, I>(&'a self, input: I, ctx: &'a Context) -> Self::Iter<'a, I>
+    where
+        I: FusedIterator<Item = char> + 'a,
+        S: 'a,
+        P: 'a,
+    {
+        let prev_iter = self.previous.build_iter(input, ctx);
+        self.stage.static_fused_adapter(prev_iter, ctx)
+    }
+
+    #[inline(always)]
+    fn any_needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
+        // Check previous stages first
+        if self.previous.any_needs_apply(text, ctx)? {
+            return Ok(true);
+        }
+
+        // Check this stage (safe because safe_skip_approximation=true)
+        self.stage.needs_apply(text, ctx)
     }
 }
 
@@ -114,6 +133,7 @@ impl DynamicProcess {
     pub fn new() -> Self {
         Self::default()
     }
+
     #[inline(always)]
     pub fn push<T: Stage + Send + Sync + 'static>(mut self, stage: T) -> Self {
         self.stages.push(Arc::new(stage));

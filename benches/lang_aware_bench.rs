@@ -128,7 +128,7 @@ fn bench_stage_focused<S, C>(
                 |t| {
                     let stage = constructor();
                     let normy = Normy::builder().lang(lang).add_stage(stage).build();
-                    black_box(normy.normalize(t).unwrap())
+                    black_box(normy.normalize(t).unwrap().into_owned())
                 },
                 BatchSize::SmallInput,
             )
@@ -188,7 +188,7 @@ fn bench_stage_focused<S, C>(
                     |t| {
                         let stage = constructor();
                         let normy = Normy::builder().lang(lang).add_stage(stage).build();
-                        black_box(normy.normalize(t).unwrap())
+                        black_box(normy.normalize(t).unwrap().into_owned())
                     },
                     BatchSize::SmallInput,
                 )

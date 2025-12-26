@@ -5,6 +5,7 @@
 #![deny(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
+// #![allow(unused_imports)]
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rand::random;
@@ -141,8 +142,13 @@ fn bench_normy_deu(
 ) {
     let mut zero_copy_hits = 0usize;
     let mut total = 0usize;
+    let fusion_status = if NORMY_DEU_PIPELINE.uses_fusion() {
+        "FUSION"
+    } else {
+        "APPLY"
+    };
 
-    group.bench_function(BenchmarkId::new("Normy (DEU CaseFold)", scenario), |b| {
+    group.bench_function(BenchmarkId::new("Normy DEU (normalize)", scenario), |b| {
         b.iter(|| {
             total += 1;
             let result = NORMY_DEU_PIPELINE.normalize(black_box(corpus)).unwrap();
@@ -158,11 +164,13 @@ fn bench_normy_deu(
     } else {
         0.0
     };
-    println!("  Normy DEU - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
+    println!(
+        "  Normy DEU [{fusion_status}] - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
+    );
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn bench_normy_fused_deu(
+fn bench_normy_apply_only_deu(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     scenario: &str,
     corpus: &str,
@@ -170,21 +178,18 @@ fn bench_normy_fused_deu(
     let mut zero_copy_hits = 0usize;
     let mut total = 0usize;
 
-    group.bench_function(
-        BenchmarkId::new("Normy Fused (DEU CaseFold)", scenario),
-        |b| {
-            b.iter(|| {
-                total += 1;
-                let result = NORMY_DEU_PIPELINE
-                    .normalize_fused(black_box(corpus))
-                    .unwrap();
-                if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
-                    zero_copy_hits += 1;
-                }
-                black_box(result);
-            });
-        },
-    );
+    group.bench_function(BenchmarkId::new("Normy DEU (apply_only)", scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_DEU_PIPELINE
+                .normalize_apply_only(black_box(corpus))
+                .unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        });
+    });
 
     let pct = if total > 0 {
         (zero_copy_hits as f64 / total as f64) * 100.0
@@ -192,42 +197,7 @@ fn bench_normy_fused_deu(
         0.0
     };
     println!(
-        "  Normy Fused DEU - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
-    );
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn bench_normy_static_fused_deu(
-    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    scenario: &str,
-    corpus: &str,
-) {
-    let mut zero_copy_hits = 0usize;
-    let mut total = 0usize;
-
-    group.bench_function(
-        BenchmarkId::new("Normy Static Fused (DEU CaseFold)", scenario),
-        |b| {
-            b.iter(|| {
-                total += 1;
-                let result = NORMY_DEU_PIPELINE
-                    .normalize_static_fused(black_box(corpus))
-                    .unwrap();
-                if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
-                    zero_copy_hits += 1;
-                }
-                black_box(result);
-            });
-        },
-    );
-
-    let pct = if total > 0 {
-        (zero_copy_hits as f64 / total as f64) * 100.0
-    } else {
-        0.0
-    };
-    println!(
-        "  Normy Static Fused DEU - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
+        "  Normy DEU [APPLY] - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
     );
 }
 
@@ -242,7 +212,7 @@ fn bench_unidecode_deu(
             black_box(result);
         });
     });
-    println!("  unidecode   - {scenario:25}: always allocates (0% zero-copy)");
+    println!("  unidecode          - {scenario:25}: always allocates (0% zero-copy)");
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -253,53 +223,22 @@ fn bench_normy_fra(
 ) {
     let mut zero_copy_hits = 0usize;
     let mut total = 0usize;
-
-    group.bench_function(
-        BenchmarkId::new("Normy (FRA LowerCase+Transliterate)", scenario),
-        |b| {
-            b.iter(|| {
-                total += 1;
-                let result = NORMY_FRA_PIPELINE.normalize(black_box(corpus)).unwrap();
-                if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
-                    zero_copy_hits += 1;
-                }
-                black_box(result);
-            });
-        },
-    );
-
-    let pct = if total > 0 {
-        (zero_copy_hits as f64 / total as f64) * 100.0
+    let fusion_status = if NORMY_FRA_PIPELINE.uses_fusion() {
+        "FUSION"
     } else {
-        0.0
+        "APPLY"
     };
-    println!("  Normy FRA - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
-}
 
-#[allow(clippy::cast_precision_loss)]
-fn bench_normy_fused_fra(
-    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    scenario: &str,
-    corpus: &str,
-) {
-    let mut zero_copy_hits = 0usize;
-    let mut total = 0usize;
-
-    group.bench_function(
-        BenchmarkId::new("Normy Fused (FRA LowerCase+Transliterate)", scenario),
-        |b| {
-            b.iter(|| {
-                total += 1;
-                let result = NORMY_FRA_PIPELINE
-                    .normalize_fused(black_box(corpus))
-                    .unwrap();
-                if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
-                    zero_copy_hits += 1;
-                }
-                black_box(result);
-            });
-        },
-    );
+    group.bench_function(BenchmarkId::new("Normy FRA (normalize)", scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_FRA_PIPELINE.normalize(black_box(corpus)).unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        });
+    });
 
     let pct = if total > 0 {
         (zero_copy_hits as f64 / total as f64) * 100.0
@@ -307,12 +246,12 @@ fn bench_normy_fused_fra(
         0.0
     };
     println!(
-        "  Normy Fused FRA - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
+        "  Normy FRA [{fusion_status}] - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
     );
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn bench_normy_static_fused_fra(
+fn bench_normy_apply_only_fra(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     scenario: &str,
     corpus: &str,
@@ -320,21 +259,18 @@ fn bench_normy_static_fused_fra(
     let mut zero_copy_hits = 0usize;
     let mut total = 0usize;
 
-    group.bench_function(
-        BenchmarkId::new("Normy Static Fused (FRA LowerCase+Transliterate)", scenario),
-        |b| {
-            b.iter(|| {
-                total += 1;
-                let result = NORMY_FRA_PIPELINE
-                    .normalize_static_fused(black_box(corpus))
-                    .unwrap();
-                if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
-                    zero_copy_hits += 1;
-                }
-                black_box(result);
-            });
-        },
-    );
+    group.bench_function(BenchmarkId::new("Normy FRA (apply_only)", scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_FRA_PIPELINE
+                .normalize_apply_only(black_box(corpus))
+                .unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        });
+    });
 
     let pct = if total > 0 {
         (zero_copy_hits as f64 / total as f64) * 100.0
@@ -342,7 +278,7 @@ fn bench_normy_static_fused_fra(
         0.0
     };
     println!(
-        "  Normy Static Fused FRA - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
+        "  Normy FRA [APPLY]  - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)"
     );
 }
 
@@ -361,7 +297,7 @@ fn bench_tokenizers_fra(
             });
         },
     );
-    println!("  tokenizers  - {scenario:25}: always allocates (0% zero-copy)");
+    println!("  tokenizers         - {scenario:25}: always allocates (0% zero-copy)");
 }
 
 // ── Main benchmark ──
@@ -379,9 +315,8 @@ fn bench_german_normalizers(c: &mut Criterion) {
     for (scenario, corpus) in scenarios {
         println!("\n[German: {scenario}]");
         bench_normy_deu(&mut group, scenario, corpus);
+        bench_normy_apply_only_deu(&mut group, scenario, corpus);
         bench_unidecode_deu(&mut group, scenario, corpus);
-        bench_normy_fused_deu(&mut group, scenario, corpus);
-        bench_normy_static_fused_deu(&mut group, scenario, corpus);
     }
 
     group.finish();
@@ -401,9 +336,8 @@ fn bench_french_normalizers(c: &mut Criterion) {
     for (scenario, corpus) in scenarios {
         println!("\n[French: {scenario}]");
         bench_normy_fra(&mut group, scenario, corpus);
+        bench_normy_apply_only_fra(&mut group, scenario, corpus);
         bench_tokenizers_fra(&mut group, scenario, corpus);
-        bench_normy_fused_fra(&mut group, scenario, corpus);
-        bench_normy_static_fused_fra(&mut group, scenario, corpus);
     }
 
     group.finish();
@@ -414,6 +348,7 @@ criterion_main!(benches);
 
 // ── TESTS: Verify semantic equivalence BEFORE benchmarking ──
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
     use crate::{
         CORPUS_FRENCH, CORPUS_GERMAN, CORPUS_NORMALIZED, HF_NORMALIZER, NORMY_DEU_PIPELINE,
@@ -426,9 +361,17 @@ mod tests {
     #[test]
     fn test_german_vs_unidecode_semantic_equivalence() {
         for input in german_pool() {
+            let normy_apply_only_result = NORMY_DEU_PIPELINE.normalize_apply_only(input).unwrap();
             let normy_result = NORMY_DEU_PIPELINE.normalize(input).unwrap();
-            let normy_fused_result = NORMY_DEU_PIPELINE.normalize_fused(input).unwrap();
             let unidecode_result = unidecode(input).to_lowercase();
+
+            assert_eq!(
+                normy_apply_only_result.as_ref(),
+                unidecode_result,
+                "\n❌ SEMANTIC MISMATCH on German input: {input:?}\n\
+                 Normy apply only (DEU):  {normy_apply_only_result:?}\n\
+                 unidecode:    {unidecode_result:?}\n"
+            );
 
             assert_eq!(
                 normy_result.as_ref(),
@@ -437,39 +380,31 @@ mod tests {
                  Normy (DEU):  {normy_result:?}\n\
                  unidecode:    {unidecode_result:?}\n"
             );
-
-            assert_eq!(
-                normy_fused_result.as_ref(),
-                unidecode_result,
-                "\n❌ SEMANTIC MISMATCH on German input: {input:?}\n\
-                 Normy Fused (DEU):  {normy_fused_result:?}\n\
-                 unidecode:    {unidecode_result:?}\n"
-            );
         }
     }
 
     #[test]
     fn test_french_vs_tokenizers_semantic_equivalence() {
         for input in french_pool() {
+            let normy_apply_only_result = NORMY_FRA_PIPELINE.normalize_apply_only(input).unwrap();
             let normy_result = NORMY_FRA_PIPELINE.normalize(input).unwrap();
-            let normy_fused_result = NORMY_FRA_PIPELINE.normalize_fused(input).unwrap();
 
             let mut ns = NormalizedString::from(*input);
             HF_NORMALIZER.normalize(&mut ns).unwrap();
             let hf_result = ns.get();
 
             assert_eq!(
+                normy_apply_only_result.as_ref(),
+                hf_result,
+                "\n❌ SEMANTIC MISMATCH on French input: {input:?}\n\
+                 Normy Apply only (FRA):  {normy_apply_only_result:?}\n\
+                 tokenizers:   {hf_result:?}\n"
+            );
+            assert_eq!(
                 normy_result.as_ref(),
                 hf_result,
                 "\n❌ SEMANTIC MISMATCH on French input: {input:?}\n\
                  Normy (FRA):  {normy_result:?}\n\
-                 tokenizers:   {hf_result:?}\n"
-            );
-            assert_eq!(
-                normy_fused_result.as_ref(),
-                hf_result,
-                "\n❌ SEMANTIC MISMATCH on French input: {input:?}\n\
-                 Normy Fused (FRA):  {normy_fused_result:?}\n\
                  tokenizers:   {hf_result:?}\n"
             );
         }

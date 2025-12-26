@@ -32,7 +32,7 @@ mod integration_tests {
             .build();
 
         let input = " İSTANBUL  ";
-        let result = normy.normalize_fused(input).unwrap();
+        let result = normy.normalize(input).unwrap();
         assert_eq!(result, "istanbul");
     }
 
@@ -41,7 +41,7 @@ mod integration_tests {
         let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
 
         let input = " Fußball Maßstab Straße ";
-        let result = normy.normalize_fused(input).unwrap();
+        let result = normy.normalize(input).unwrap();
         assert_eq!(result, " fussball massstab strasse ");
     }
 
@@ -114,19 +114,16 @@ mod integration_tests {
             .build();
 
         // Text contains U+0670 (superscript alif) – not in the static list.
-        let out = normy.normalize_fused("الْكِتَابُٰ").unwrap();
+        let out = normy.normalize("الْكِتَابُٰ").unwrap();
         // Expected: الكتاب (all diacritics stripped)
         assert_eq!(out, "الكتاب"); // ← FAILS – the superscript alif remains
     }
 
     #[test]
     fn dutch_case_fold_is_canonical() {
-        let out = Normy::builder()
-            .lang(NLD)
-            .add_stage(CaseFold)
-            .build()
-            .normalize("IJsselmeer")
-            .unwrap();
+        let normy = Normy::builder().lang(NLD).add_stage(CaseFold).build();
+
+        let out = normy.normalize("IJsselmeer").unwrap();
         assert_eq!(out, "ijsselmeer"); // ← CORRECT
     }
 
@@ -162,11 +159,8 @@ mod integration_tests {
     #[test]
     fn test_remove_control_chars() {
         let text = "Hello\x07\x1Bworld\x7F";
-        let normalized = Normy::builder()
-            .add_stage(StripControlChars)
-            .build()
-            .normalize(text)
-            .unwrap();
+        let normy = Normy::builder().add_stage(StripControlChars).build();
+        let normalized = normy.normalize(text).unwrap();
         assert_eq!(normalized, "Helloworld");
     }
 

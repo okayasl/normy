@@ -17,6 +17,7 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use icu_normalizer::ComposingNormalizerBorrowed;
+use normy::process::BuildIter;
 use rand::{Rng, SeedableRng, random, rngs::StdRng};
 use regex::Regex;
 use std::hint::black_box;
@@ -30,7 +31,7 @@ use tokenizers::{
 use normy::{
     CaseFold, DEU, ENG, LowerCase, NFC, NFKC, NORMALIZE_WHITESPACE_FULL, Normy, NormyBuilder,
     RemoveDiacritics, SegmentWords, StripHtml, TRIM_WHITESPACE, TUR, Transliterate, UnifyWidth,
-    lang::Lang, process::Process,
+    lang::Lang,
 };
 use unicode_normalization::UnicodeNormalization;
 
@@ -190,7 +191,7 @@ fn truncate_to_char_boundary(s: &mut String, max_len: usize) {
 }
 
 // ── Pipelines ──
-fn full_pipeline(lang: Lang) -> Normy<impl Process> {
+fn full_pipeline(lang: Lang) -> Normy<impl BuildIter> {
     NormyBuilder::default()
         .lang(lang)
         .add_stage(NFC)
@@ -203,7 +204,7 @@ fn full_pipeline(lang: Lang) -> Normy<impl Process> {
         .build()
 }
 
-fn display_pipeline(lang: Lang) -> Normy<impl Process> {
+fn display_pipeline(lang: Lang) -> Normy<impl BuildIter> {
     NormyBuilder::default()
         .lang(lang)
         .add_stage(NFC)
@@ -214,20 +215,20 @@ fn display_pipeline(lang: Lang) -> Normy<impl Process> {
         .build()
 }
 
-fn normy_nfc_only(lang: Lang) -> Normy<impl Process> {
+fn normy_nfc_only(lang: Lang) -> Normy<impl BuildIter> {
     NormyBuilder::default().lang(lang).add_stage(NFC).build()
 }
 
-fn normy_nfkc_only(lang: Lang) -> Normy<impl Process> {
+fn normy_nfkc_only(lang: Lang) -> Normy<impl BuildIter> {
     NormyBuilder::default().lang(lang).add_stage(NFKC).build()
 }
 
 // Incremental pipeline stages for bottleneck analysis
-fn pipeline_nfc_only(lang: Lang) -> Normy<impl Process> {
+fn pipeline_nfc_only(lang: Lang) -> Normy<impl BuildIter> {
     NormyBuilder::default().lang(lang).add_stage(NFC).build()
 }
 
-fn pipeline_nfc_lowercase(lang: Lang) -> Normy<impl Process> {
+fn pipeline_nfc_lowercase(lang: Lang) -> Normy<impl BuildIter> {
     NormyBuilder::default()
         .lang(lang)
         .add_stage(NFC)
@@ -235,7 +236,7 @@ fn pipeline_nfc_lowercase(lang: Lang) -> Normy<impl Process> {
         .build()
 }
 
-fn pipeline_nfc_lowercase_casefold(lang: Lang) -> Normy<impl Process> {
+fn pipeline_nfc_lowercase_casefold(lang: Lang) -> Normy<impl BuildIter> {
     NormyBuilder::default()
         .lang(lang)
         .add_stage(NFC)

@@ -1,12 +1,9 @@
-use std::{borrow::Cow, hint::black_box, time::Duration};
+use std::{hint::black_box, time::Duration};
 
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
-    ARA, COLLAPSE_WHITESPACE, COLLAPSE_WHITESPACE_UNICODE, CaseFold, DEU, ELL, ENG, FRA, HEB, HIN,
-    JPN, KOR, LIT, LowerCase, NFC, NFD, NFKC, NFKD, NLD, NORMALIZE_WHITESPACE_FULL,
-    NormalizePunctuation, Normy, POL, RUS, RemoveDiacritics, SPA, SegmentWords, StripControlChars,
-    StripHtml, THA, TRIM_WHITESPACE, TRIM_WHITESPACE_UNICODE, TUR, Transliterate, UnifyWidth, VIE,
-    ZHO,
+    ARA, CaseFold, DEU, ENG, FRA, HIN, JPN, KOR, LIT, LowerCase, NLD, RUS, RemoveDiacritics,
+    SegmentWords, TUR, Transliterate, VIE, ZHO,
     context::Context,
     lang::Lang,
     stage::{Stage, StaticFusableStage},
@@ -209,19 +206,6 @@ fn process_matrix(c: &mut Criterion) {
     bench_processes!(
         c,
         [
-            // UnifyWidth,
-            // NFC,
-            // NFD,
-            // NFKC,
-            // NFKD,
-            // NormalizePunctuation,
-            // StripControlChars,
-            // StripHtml,
-            // NORMALIZE_WHITESPACE_FULL,
-            // COLLAPSE_WHITESPACE,
-            // COLLAPSE_WHITESPACE_UNICODE,
-            // TRIM_WHITESPACE,
-            // TRIM_WHITESPACE_UNICODE,
             LowerCase,
             CaseFold,
             RemoveDiacritics,

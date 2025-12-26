@@ -91,12 +91,6 @@ impl StaticFusableStage for BertCompatChineseChars {
     }
 }
 
-// ──────────────────────────────────────────────────────────────
-// Normy pipeline — 100% bit-identical to HF BertNormalizer
-// ──────────────────────────────────────────────────────────────
-// ──────────────────────────────────────────────────────────────
-// Concrete pipeline type – no `impl Trait` in static!
-// ──────────────────────────────────────────────────────────────
 type NormyBertLikePipeline = Normy<
     normy::process::ChainedProcess<
         LowerCase,
@@ -142,41 +136,11 @@ static NORMY_BERT: LazyLock<NormyBertLikePipeline> = LazyLock::new(|| {
         .build()
 });
 
-// fn normy_bert_pipeline() -> Normy<impl Process + ProcessFused> {
-//     Normy::builder()
-//         .lang(ZHO)
-//         .modify_lang(|entry| {
-//             // Enable Latin accent stripping (same list used by BERT)
-//             entry.set_spacing_diacritics(&[
-//                 '\u{0300}', '\u{0301}', '\u{0302}', '\u{0308}', '\u{030A}', '\u{030B}', '\u{030C}',
-//                 '\u{030F}', '\u{0311}', '\u{0327}', '\u{0328}', '\u{0338}',
-//             ]);
-//         })
-//         .add_stage(StripControlChars)
-//         .add_stage(StripFormatControls)
-//         .add_stage(COLLAPSE_WHITESPACE_UNICODE) // handles Unicode → ASCII space
-//         .add_stage(BertCompatChineseChars)
-//         .add_stage(NFD)
-//         .add_stage(RemoveDiacritics)
-//         .add_stage(LowerCase)
-//         .build()
-// }
-
 // ──────────────────────────────────────────────────────────────
 // HuggingFace BertNormalizer
 // ──────────────────────────────────────────────────────────────
 static HF_BERT: LazyLock<BertNormalizer> =
     LazyLock::new(|| BertNormalizer::new(true, true, Some(true), true));
-
-fn needs_transform_pool() -> &'static [&'static str; 5] {
-    (&[
-        "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}résumé",
-        "你好世界",
-        "NAÏVE déjà-vu",
-        "Hello world\u{3000}",
-        "Ｈｅｌｌｏ　世界　café",
-    ]) as _
-}
 
 // ──────────────────────────────────────────────────────────────
 // Realistic corpora
@@ -305,7 +269,7 @@ fn bench_normy_fused(
     group.bench_function(BenchmarkId::new("Normy Fused (zero-copy)", scenario), |b| {
         b.iter(|| {
             total += 1;
-            let result = NORMY_BERT.normalize_fused(black_box(corpus)).unwrap();
+            let result = NORMY_BERT.normalize(black_box(corpus)).unwrap();
             if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
                 zero_copy_hits += 1;
             }
@@ -340,6 +304,7 @@ criterion_group!(benches, bench_bert_normalizers);
 criterion_main!(benches);
 
 #[cfg(test)]
+#[allow(dead_code, unused_imports)]
 mod tests {
     #[cfg(test)]
     use std::borrow::Cow;
@@ -348,11 +313,21 @@ mod tests {
     use tokenizers::{NormalizedString, Normalizer};
 
     #[cfg(test)]
-    use crate::{HF_BERT, needs_transform_pool};
+    use crate::{HF_BERT, NORMY_BERT};
+
+    fn needs_transform_pool() -> &'static [&'static str; 5] {
+        (&[
+            "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}résumé",
+            "你好世界",
+            "NAÏVE déjà-vu",
+            "Hello world\u{3000}",
+            "Ｈｅｌｌｏ　世界　café",
+        ]) as _
+    }
 
     #[test]
     fn bert_normalizer_semantic_equivalence() {
-        let normy = &*NORMY_BERT();
+        let normy = &*NORMY_BERT;
         let hf = &*HF_BERT;
 
         let pool = needs_transform_pool();
@@ -364,13 +339,13 @@ mod tests {
             let hf_output: String = hf_ns.get().into();
 
             // --- Normy ---
-            let normy_result = normy.normalize(input).expect("Normy normalize failed");
+            let normy_result = normy
+                .normalize_apply_only(input)
+                .expect("Normy normalize apply only failed");
             let normy_output: String = normy_result.clone().into_owned();
 
             // --- Normy ---
-            let normy_fusable_result = normy
-                .normalize_fused(input)
-                .expect("Normy normalize fused failed");
+            let normy_fusable_result = normy.normalize(input).expect("Normy normalize failed");
             let normy_fusable_output: String = normy_fusable_result.clone().into_owned();
 
             // Semantic equivalence
@@ -426,23 +401,3 @@ mod tests {
         }
     }
 }
-
-// // Test cases covering every code path in BertNormalizer
-// let cases = &[
-//     // 1. Full-width + CJK + control chars + accents + mixed whitespace
-//     "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}\u{00A0}\u{2028}résumé",
-//     // 2. Pure CJK
-//     "你好世界",
-//     // 3. Already normalized (critical for zero-copy test)
-//     "hello world",
-//     // 4. Controls only
-//     "\u{0001}\u{0002}hello\u{001F}world",
-//     // 5. Unicode whitespace only
-//     "hello\u{00A0}\u{1680}\u{2003}world\u{3000}",
-//     // 6. Accents + lowercase edge cases
-//     "NAÏVE ÉLÉPHANT naïve déjà-vu",
-//     // 7. Mixed script (important: no false segmentation)
-//     "Hello世界naïveCafé",
-//     // 8. Empty string
-//     "",
-// ];

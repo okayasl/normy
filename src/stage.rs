@@ -78,10 +78,6 @@ pub trait Stage: Send + Sync {
     }
 }
 
-// ============================================================================
-// FusableStage Traits
-// ============================================================================
-
 /// A stage that can wrap an iterator input and produce an iterator output
 pub trait FusableStage: Stage {
     /// Dynamic iterator adapter
@@ -132,33 +128,3 @@ impl<'a, I: Iterator<Item = char>> Iterator for StaticIdentityAdapter<'a, I> {
 }
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for StaticIdentityAdapter<'a, I> {}
-
-/// Helper to extract stage metadata without trait bound constraints
-pub struct StageMetadata {
-    pub supports_fusion: bool,
-    pub capacity_factor: f64,
-    pub safe_skip: bool,
-}
-
-impl StageMetadata {
-    /// Extract metadata from any stage
-    pub fn from_stage<S: Stage>(stage: &S) -> Self {
-        let supports_fusion = stage.as_fusable().is_some();
-
-        // Get capacity factor: how much does this stage grow/shrink output?
-        // Default is 1.0, but stages can override expected_capacity
-        let capacity_factor = {
-            let sample_len = 100;
-            let expected = stage.expected_capacity(sample_len);
-            expected as f64 / sample_len as f64
-        };
-
-        let safe_skip = stage.safe_skip_approximation();
-
-        Self {
-            supports_fusion,
-            capacity_factor,
-            safe_skip,
-        }
-    }
-}

@@ -35,6 +35,16 @@ tokenizers = "0.22.2"
 regex = "1.12.2"
 
 [[bench]]
+name = "calb"
+path = "benches/comparison_accent_lowercase_bench.rs"
+harness = false
+
+[[bench]]
+name = "cbpb"
+path = "benches/comparison_bert_pipeline_bench.rs"
+harness = false
+
+[[bench]]
 name = "nb"
 path = "benches/normy_bench.rs"
 harness = false
@@ -47,16 +57,6 @@ harness = false
 [[bench]]
 name = "cnb"
 path = "benches/comparison_normalization_bench.rs"
-harness = false
-
-[[bench]]
-name = "cbpb"
-path = "benches/comparison_bert_pipeline_bench.rs"
-harness = false
-
-[[bench]]
-name = "calb"
-path = "benches/comparison_accent_lowercase_bench.rs"
 harness = false
 
 [[bench]]

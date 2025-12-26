@@ -201,7 +201,7 @@ where
         // Prepare normalized (unchanged) sample outside measurements
         let stage = constructor();
         let normy = Normy::builder().lang(lang).add_stage(stage).build();
-        let normalized = normy.normalize(text).unwrap();
+        let normalized = normy.normalize(text).unwrap().into_owned();
         auto_unchanged.push((normalized, lang));
         let mut zero_copy_hits = 0usize;
         let mut total = 0usize;

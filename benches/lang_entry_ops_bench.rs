@@ -605,6 +605,6 @@ criterion_group!(
         .sample_size(500)
         .noise_threshold(0.015)
         .significance_level(0.05);
-    targets = bench_spacing_diacritic_lookups, bench_precomposed_to_base_lookups, bench_transliterate_lookups
+    targets = bench_spacing_diacritic_lookups, bench_precomposed_to_base_lookups, bench_transliterate_lookups, bench_text_operations, bench_char_lookups, bench_hot_loop_simulation
 );
 criterion_main!(benches);
