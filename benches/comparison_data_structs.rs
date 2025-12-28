@@ -299,15 +299,3 @@ criterion_group!(
     bench_very_large
 );
 criterion_main!(benches);
-
-// ============================================================================
-// Cargo.toml dependencies needed:
-// ============================================================================
-// [dev-dependencies]
-// criterion = "0.5"
-// phf = { version = "0.11", features = ["macros"] }
-// lazy_static = "1.4"
-//
-// [[bench]]
-// name = "lang_lookup"
-// harness = false

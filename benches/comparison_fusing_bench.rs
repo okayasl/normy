@@ -380,29 +380,3 @@ criterion_group!(
     targets = normalize_vs_apply_benches
 );
 criterion_main!(benches);
-
-/*
-Expected Results:
-
-For FUSABLE pipelines (single_fusable, multi_fusable, nfc_fusable):
-  - normalize() uses fusion (process_fused)
-  - normalize_apply_only() uses apply path
-  - normalize() should be 20-40% FASTER than normalize_apply_only()
-  - Both should have identical zero-copy behavior
-
-For MIXED/COMPLEX pipelines (has barriers like StripHtml):
-  - normalize() uses apply path (all_fusable=false)
-  - normalize_apply_only() uses apply path
-  - SAME performance (both use same code path)
-  - Should see: "normalize/raw ≈ normalize_apply_only/raw"
-
-For NON-FUSABLE pipelines:
-  - normalize() uses apply path (only option)
-  - normalize_apply_only() uses apply path
-  - IDENTICAL performance
-
-This benchmark shows:
-1. When fusion helps (pure fusable pipelines)
-2. When fusion is disabled (barriers present)
-3. Overhead of smart routing (should be negligible)
-*/

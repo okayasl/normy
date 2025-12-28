@@ -2,7 +2,7 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use std::iter::FusedIterator;
@@ -68,19 +68,6 @@ macro_rules! impl_normalization_stage {
             ) -> Result<Cow<'a, str>, StageError> {
                 Ok($norm.normalize(text.as_ref()).into_owned().into())
             }
-
-            #[inline]
-            fn safe_skip_approximation(&self) -> bool {
-                // UNSAFE when chained with different normalization forms!
-                // See impl_composing_stage for explanation.
-                false
-            }
-
-            #[inline]
-            fn as_fusable(&self) -> Option<&dyn FusableStage> {
-                Some(self)
-                //None
-            }
         }
 
         impl StaticFusableStage for $stage {
@@ -107,20 +94,6 @@ macro_rules! impl_normalization_stage {
                     iter: $norm.normalize_iter(input),
                     _marker: std::marker::PhantomData,
                 }
-            }
-        }
-
-        impl FusableStage for $stage {
-            fn dyn_fused_adapter<'a>(
-                &self,
-                input: Box<dyn FusedIterator<Item = char> + 'a>,
-                _ctx: &'a Context,
-            ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-                // Wrap ICU4X's iterator with our FusedIterator wrapper
-                Box::new($adapter {
-                    iter: $norm.normalize_iter(input),
-                    _marker: std::marker::PhantomData,
-                })
             }
         }
     };
@@ -242,31 +215,26 @@ mod tests {
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
-    /// Helper to verify that apply() and fusable iterator produce identical results
-    fn assert_apply_equals_fusable(stage: &dyn Stage, text: &str, ctx: &Context) -> TestResult {
-        // Get result from apply method
+    fn assert_apply_equals_static_fused<S: Stage + StaticFusableStage>(
+        stage: &S,
+        text: &str,
+        ctx: &Context,
+    ) -> TestResult {
+        assert!(stage.supports_static_fusion());
+
         let apply_result = stage.apply(Cow::Borrowed(text), ctx)?;
 
-        // Get result from fusable iterator path
-        if let Some(fusable) = stage.as_fusable() {
-            let iter: Box<dyn FusedIterator<Item = char>> = Box::new(text.chars());
-            let fused_iter = fusable.dyn_fused_adapter(iter, ctx);
-            let fusable_result: String = fused_iter.collect();
+        let fused_iter = stage.static_fused_adapter(text.chars(), ctx);
+        let fused_result: String = fused_iter.collect();
 
-            assert_eq!(
-                apply_result.as_ref(),
-                fusable_result.as_str(),
-                "Stage {} produced different results: apply='{}' vs fusable='{}'",
-                stage.name(),
-                apply_result,
-                fusable_result
-            );
-        } else {
-            panic!(
-                "Stage {} should be fusable but as_fusable() returned None",
-                stage.name()
-            );
-        }
+        assert_eq!(
+            apply_result.as_ref(),
+            fused_result,
+            "Stage {} mismatch: apply='{}' vs static_fused='{}'",
+            stage.name(),
+            apply_result,
+            fused_result
+        );
 
         Ok(())
     }
@@ -276,15 +244,15 @@ mod tests {
         let c = Context::default();
         let text = "cafe\u{0301}";
 
-        // Test NFC
+        // NFC
         let nfc = NFC.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfc, "café");
-        assert_apply_equals_fusable(&NFC, text, &c)?;
+        assert_apply_equals_static_fused(&NFC, text, &c)?;
 
-        // Test NFD
+        // NFD
         let nfd = NFD.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfd, "cafe\u{0301}");
-        assert_apply_equals_fusable(&NFD, text, &c)?;
+        assert_apply_equals_static_fused(&NFD, text, &c)?;
 
         Ok(())
     }
@@ -294,15 +262,15 @@ mod tests {
         let c = Context::default();
         let text = "ﬀﬁ ½ ①";
 
-        // Test NFKC
+        // NFKC
         let nfkc = NFKC.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfkc, "fffi 1⁄2 1");
-        assert_apply_equals_fusable(&NFKC, text, &c)?;
+        assert_apply_equals_static_fused(&NFKC, text, &c)?;
 
-        // Test NFKD
+        // NFKD
         let nfkd = NFKD.apply(Cow::Borrowed(text), &c)?;
         assert_eq!(nfkd, "fffi 1⁄2 1");
-        assert_apply_equals_fusable(&NFKD, text, &c)?;
+        assert_apply_equals_static_fused(&NFKD, text, &c)?;
 
         Ok(())
     }
@@ -312,20 +280,37 @@ mod tests {
         let c = Context::default();
         let text = "café naïve ﬁ";
 
-        let stages: Vec<Box<dyn Stage>> =
-            vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
+        // NFC
+        let once = NFC.apply(Cow::Borrowed(text), &c)?;
+        let twice = NFC.apply(once.clone(), &c)?;
+        assert_eq!(once, twice, "NFC not idempotent");
+        assert!(!NFC.needs_apply(&once, &c)?);
+        assert_apply_equals_static_fused(&NFC, text, &c)?;
+        assert_apply_equals_static_fused(&NFC, &once, &c)?;
 
-        for stage in stages.iter() {
-            // Test apply idempotency
-            let once = stage.apply(Cow::Borrowed(text), &c)?;
-            let twice = stage.apply(once.clone(), &c)?;
-            assert_eq!(once, twice, "Stage {} not idempotent", stage.name());
-            assert!(!stage.needs_apply(&once, &c)?);
+        // NFD
+        let once = NFD.apply(Cow::Borrowed(text), &c)?;
+        let twice = NFD.apply(once.clone(), &c)?;
+        assert_eq!(once, twice, "NFD not idempotent");
+        assert!(!NFD.needs_apply(&once, &c)?);
+        assert_apply_equals_static_fused(&NFD, text, &c)?;
+        assert_apply_equals_static_fused(&NFD, &once, &c)?;
 
-            // Verify apply equals fusable for both original and normalized text
-            assert_apply_equals_fusable(stage.as_ref(), text, &c)?;
-            assert_apply_equals_fusable(stage.as_ref(), &once, &c)?;
-        }
+        // NFKC
+        let once = NFKC.apply(Cow::Borrowed(text), &c)?;
+        let twice = NFKC.apply(once.clone(), &c)?;
+        assert_eq!(once, twice, "NFKC not idempotent");
+        assert!(!NFKC.needs_apply(&once, &c)?);
+        assert_apply_equals_static_fused(&NFKC, text, &c)?;
+        assert_apply_equals_static_fused(&NFKC, &once, &c)?;
+
+        // NFKD
+        let once = NFKD.apply(Cow::Borrowed(text), &c)?;
+        let twice = NFKD.apply(once.clone(), &c)?;
+        assert_eq!(once, twice, "NFKD not idempotent");
+        assert!(!NFKD.needs_apply(&once, &c)?);
+        assert_apply_equals_static_fused(&NFKD, text, &c)?;
+        assert_apply_equals_static_fused(&NFKD, &once, &c)?;
 
         Ok(())
     }
@@ -335,34 +320,27 @@ mod tests {
         let c = Context::default();
         let original = "El Niño café naïve";
 
-        // Test with apply
         let nfd = NFD.apply(Cow::Borrowed(original), &c)?;
         let back_to_nfc = NFC.apply(nfd, &c)?;
         assert_eq!(back_to_nfc, original);
 
-        // Verify fusable produces same results
-        assert_apply_equals_fusable(&NFD, original, &c)?;
-        assert_apply_equals_fusable(&NFC, &back_to_nfc, &c)?;
+        assert_apply_equals_static_fused(&NFD, original, &c)?;
+        assert_apply_equals_static_fused(&NFC, &back_to_nfc, &c)?;
 
         Ok(())
     }
 
     #[test]
     fn test_multilingual_nfkc() -> TestResult {
-        let stage = NFKC;
         let c = Context::default();
         let input = "Hello, 世界! ﬁﬀ caféﬀﬃﬃ";
 
-        let result = stage.apply(Cow::Borrowed(input), &c)?;
-        // ligatures expanded, accents composed, full-width preserved
+        let result = NFKC.apply(Cow::Borrowed(input), &c)?;
         assert_eq!(result, "Hello, 世界! fiff caféffffiffi");
+        assert!(!NFKC.needs_apply(&result, &c)?);
 
-        // Already normalized
-        assert!(!stage.needs_apply(&result, &c)?);
-
-        // Verify fusable produces same results
-        assert_apply_equals_fusable(&stage, input, &c)?;
-        assert_apply_equals_fusable(&stage, &result, &c)?;
+        assert_apply_equals_static_fused(&NFKC, input, &c)?;
+        assert_apply_equals_static_fused(&NFKC, &result, &c)?;
 
         Ok(())
     }
@@ -370,19 +348,15 @@ mod tests {
     #[test]
     fn test_search_vs_display_pipeline() -> TestResult {
         let c = Context::default();
-        let query = "café naïve ff"; // decomposed + ligatures
-        let stage_search = NFKC;
-        let normalized_query = stage_search.apply(Cow::Borrowed(query), &c)?;
-
+        let query = "café naïve ff";
         let display_text = "café naïve ff";
-        let stage_display = NFKC;
-        let normalized_display = stage_display.apply(Cow::Borrowed(display_text), &c)?;
 
+        let normalized_query = NFKC.apply(Cow::Borrowed(query), &c)?;
+        let normalized_display = NFKC.apply(Cow::Borrowed(display_text), &c)?;
         assert_eq!(normalized_query, normalized_display);
 
-        // Verify fusable produces same results
-        assert_apply_equals_fusable(&stage_search, query, &c)?;
-        assert_apply_equals_fusable(&stage_display, display_text, &c)?;
+        assert_apply_equals_static_fused(&NFKC, query, &c)?;
+        assert_apply_equals_static_fused(&NFKC, display_text, &c)?;
 
         Ok(())
     }
@@ -393,17 +367,29 @@ mod tests {
         let empty = "";
         let ascii = "hello world";
 
-        let stages: Vec<Box<dyn Stage>> =
-            vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
+        // NFC
+        assert_eq!(NFC.apply(Cow::Borrowed(empty), &c)?, "");
+        assert_eq!(NFC.apply(Cow::Borrowed(ascii), &c)?, ascii);
+        assert_apply_equals_static_fused(&NFC, empty, &c)?;
+        assert_apply_equals_static_fused(&NFC, ascii, &c)?;
 
-        for stage in stages.iter() {
-            assert_eq!(stage.apply(Cow::Borrowed(empty), &c)?, "");
-            assert_eq!(stage.apply(Cow::Borrowed(ascii), &c)?, ascii);
+        // NFD
+        assert_eq!(NFD.apply(Cow::Borrowed(empty), &c)?, "");
+        assert_eq!(NFD.apply(Cow::Borrowed(ascii), &c)?, ascii);
+        assert_apply_equals_static_fused(&NFD, empty, &c)?;
+        assert_apply_equals_static_fused(&NFD, ascii, &c)?;
 
-            // Verify fusable produces same results
-            assert_apply_equals_fusable(stage.as_ref(), empty, &c)?;
-            assert_apply_equals_fusable(stage.as_ref(), ascii, &c)?;
-        }
+        // NFKC
+        assert_eq!(NFKC.apply(Cow::Borrowed(empty), &c)?, "");
+        assert_eq!(NFKC.apply(Cow::Borrowed(ascii), &c)?, ascii);
+        assert_apply_equals_static_fused(&NFKC, empty, &c)?;
+        assert_apply_equals_static_fused(&NFKC, ascii, &c)?;
+
+        // NFKD
+        assert_eq!(NFKD.apply(Cow::Borrowed(empty), &c)?, "");
+        assert_eq!(NFKD.apply(Cow::Borrowed(ascii), &c)?, ascii);
+        assert_apply_equals_static_fused(&NFKD, empty, &c)?;
+        assert_apply_equals_static_fused(&NFKD, ascii, &c)?;
 
         Ok(())
     }
@@ -413,26 +399,16 @@ mod tests {
         let c = Context::default();
         let text = "café ﬁ";
 
-        // Test chaining multiple fusable stages
-        // Chain: text -> NFD -> NFKC
-        let nfd_fusable = NFD.as_fusable().unwrap();
-        let nfkc_fusable = NFKC.as_fusable().unwrap();
+        // Static chain: NFD → NFKC
+        let nfd_iter = NFD.static_fused_adapter(text.chars(), &c);
+        let nfkc_iter = NFKC.static_fused_adapter(nfd_iter, &c);
+        let fused_result: String = nfkc_iter.collect();
 
-        // Build fused chain
-        let iter1: Box<dyn FusedIterator<Item = char>> = Box::new(text.chars());
-        let iter2 = nfd_fusable.dyn_fused_adapter(iter1, &c);
-        let iter3 = nfkc_fusable.dyn_fused_adapter(iter2, &c);
-        let fused_result: String = iter3.collect();
-
-        // Compare with sequential apply
+        // Sequential apply
         let step1 = NFD.apply(Cow::Borrowed(text), &c)?;
         let step2 = NFKC.apply(step1, &c)?;
 
-        assert_eq!(
-            fused_result,
-            step2.as_ref(),
-            "Fused chain should produce same result as sequential apply"
-        );
+        assert_eq!(fused_result, step2.as_ref());
 
         Ok(())
     }
@@ -440,8 +416,6 @@ mod tests {
     #[test]
     fn test_fusable_with_special_chars() -> TestResult {
         let c = Context::default();
-
-        // Test various Unicode categories
         let test_cases = vec![
             ("", "empty string"),
             ("a", "simple ASCII"),
@@ -455,14 +429,22 @@ mod tests {
             ("\u{200B}\u{200C}\u{200D}", "zero-width characters"),
         ];
 
-        let stages: Vec<Box<dyn Stage>> =
-            vec![Box::new(NFC), Box::new(NFD), Box::new(NFKC), Box::new(NFKD)];
-
         for (text, desc) in test_cases {
-            for stage in stages.iter() {
-                assert_apply_equals_fusable(stage.as_ref(), text, &c)
-                    .map_err(|e| format!("Failed for {}: {}", desc, e))?;
-            }
+            // NFC
+            assert_apply_equals_static_fused(&NFC, text, &c)
+                .map_err(|e| format!("NFC failed for {}: {}", desc, e))?;
+
+            // NFD
+            assert_apply_equals_static_fused(&NFD, text, &c)
+                .map_err(|e| format!("NFD failed for {}: {}", desc, e))?;
+
+            // NFKC
+            assert_apply_equals_static_fused(&NFKC, text, &c)
+                .map_err(|e| format!("NFKC failed for {}: {}", desc, e))?;
+
+            // NFKD
+            assert_apply_equals_static_fused(&NFKD, text, &c)
+                .map_err(|e| format!("NFKD failed for {}: {}", desc, e))?;
         }
 
         Ok(())

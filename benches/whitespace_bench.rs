@@ -177,25 +177,6 @@ fn bench_fusion_vs_apply(c: &mut Criterion) {
                     BatchSize::SmallInput,
                 );
             });
-
-            // 3. Benchmark: Via stage.try_iter().collect()
-            // Measures the Iterator-based path (e.g., WhitespaceCollapseIter) followed by collection
-            let id_bind = BenchmarkId::new(format!("{name}/DYNAMIC_FUSED"), format!("{input:.80}"));
-            group.bench_function(id_bind, |b| {
-                b.iter_batched(
-                    || input,
-                    |text| {
-                        let adapter = stage
-                            .as_fusable()
-                            .unwrap()
-                            .dyn_fused_adapter(Box::new(text.chars()), &ctx);
-                        // Call bind and collect into a String
-                        let result: String = adapter.collect();
-                        black_box(result.len())
-                    },
-                    BatchSize::SmallInput,
-                );
-            });
         }
     };
     // ─────────────────────────────────────────────────────────────────────────

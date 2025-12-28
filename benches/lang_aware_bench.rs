@@ -160,20 +160,6 @@ fn bench_stage_focused<S, C>(
             });
         }
 
-        if let Some(dynamic_stage) = stage.as_fusable() {
-            group.bench_function(BenchmarkId::new("dynamic_fusion", &id), |b| {
-                b.iter_batched(
-                    constructor,
-                    |_| {
-                        let ctx = Context::new(lang);
-                        let iter = dynamic_stage.dyn_fused_adapter(Box::new(text.chars()), &ctx);
-                        black_box(iter.collect::<String>())
-                    },
-                    BatchSize::SmallInput,
-                )
-            });
-        }
-
         // ====================================================================
         // Unchanged Input Benchmarks (if different from changed)
         // ====================================================================
@@ -214,21 +200,6 @@ fn bench_stage_focused<S, C>(
                         |stage| {
                             let ctx = Context::new(lang);
                             let iter = stage.static_fused_adapter(normalized.chars(), &ctx);
-                            black_box(iter.collect::<String>())
-                        },
-                        BatchSize::SmallInput,
-                    )
-                });
-            }
-
-            if let Some(dynamic_stage) = stage.as_fusable() {
-                group.bench_function(BenchmarkId::new("dynamic_fusion", &unchanged_id), |b| {
-                    b.iter_batched(
-                        constructor,
-                        |_| {
-                            let ctx = Context::new(lang);
-                            let iter =
-                                dynamic_stage.dyn_fused_adapter(Box::new(text.chars()), &ctx);
                             black_box(iter.collect::<String>())
                         },
                         BatchSize::SmallInput,

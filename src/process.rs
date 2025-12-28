@@ -16,7 +16,8 @@ pub trait BuildIter: Process {
         Self: 'a;
 
     /// Check if any stage in this chain needs to apply
-    /// All stages check against original input (safe because safe_skip=true for all)
+    /// All stages check against original input
+    /// If one needs to work all works
     fn any_needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError>;
 
     fn build_iter<'a, I>(&'a self, input: I, ctx: &'a Context) -> Self::Iter<'a, I>
@@ -24,17 +25,13 @@ pub trait BuildIter: Process {
         I: FusedIterator<Item = char> + 'a;
 
     fn process_fused<'a>(
-        &'a self, // <--- Add 'a here
+        &'a self,
         text: Cow<'a, str>,
         ctx: &Context,
     ) -> Result<Cow<'a, str>, StageError> {
-        // Check if any stage needs work
         if !self.any_needs_apply(&text, ctx)? {
-            // Zero-copy! No stages need to do anything
             return Ok(text);
         }
-
-        // At least one stage needs work → run fusion
         let mut result = String::with_capacity(text.len());
         result.extend(self.build_iter(text.chars(), ctx));
         Ok(Cow::Owned(result))
@@ -66,7 +63,7 @@ impl BuildIter for EmptyProcess {
 
     #[inline(always)]
     fn any_needs_apply(&self, _text: &str, _ctx: &Context) -> Result<bool, StageError> {
-        Ok(false) // No stages → nothing needs to apply
+        Ok(false)
     }
 }
 
@@ -149,10 +146,9 @@ impl Process for DynamicProcess {
         ctx: &Context,
     ) -> Result<Cow<'a, str>, StageError> {
         for stage in &self.stages {
-            if !stage.needs_apply(&text, ctx)? {
-                continue;
+            if stage.needs_apply(&text, ctx)? {
+                text = stage.apply(text, ctx)?;
             }
-            text = stage.apply(text, ctx)?;
         }
         Ok(text)
     }

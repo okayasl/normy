@@ -2,7 +2,7 @@ use crate::{
     ARA, CES, FRA, POL, SLK, VIE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
@@ -83,20 +83,6 @@ impl Stage for RemoveDiacritics {
         }
         Ok(Cow::Owned(out))
     }
-
-    /// RemoveDiacritics is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation since it only performs 1:1 mappings or removals.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// RemoveDiacritics is always fusable since it only performs 1:1 character mappings
-    /// or character removal (spacing diacritics). No multi-character expansions.
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
 }
 
 impl StaticFusableStage for RemoveDiacritics {
@@ -159,23 +145,6 @@ impl<'a, I: Iterator<Item = char>> Iterator for RemoveDiacriticsAdapter<'a, I> {
 }
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for RemoveDiacriticsAdapter<'a, I> {}
-
-// ============================================================================
-// FusableStage Implementation - Dynamic Iterator Fusion
-// ============================================================================
-
-impl FusableStage for RemoveDiacritics {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(RemoveDiacriticsAdapter {
-            input,
-            lang: &ctx.lang_entry,
-        })
-    }
-}
 
 impl StageTestConfig for RemoveDiacritics {
     fn one_to_one_languages() -> &'static [Lang] {

@@ -1,12 +1,6 @@
-// benches/comparison_accent_lowercase_bench.rs
-// Benchmark comparing SEMANTICALLY EQUIVALENT normalizers:
-// 1. German (DEU): Normy CaseFold vs unidecode+lowercase (both do ß→ss)
-// 2. French (FRA): Normy LowerCase+Transliterate vs tokenizers StripAccents+Lowercase
 #![deny(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]
-// #![allow(unused_imports)]
-
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use rand::random;
 use rand::{Rng, SeedableRng, rngs::StdRng};

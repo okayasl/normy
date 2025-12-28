@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::{contains_format_controls, is_format_control},
 };
@@ -47,19 +47,6 @@ impl Stage for StripFormatControls {
         }
         Ok(Cow::Owned(out))
     }
-
-    /// StripFormatControls is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation since it only removes characters.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// StripFormatControls is always fusable. Only performs character removal (filtering).
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
 }
 
 impl StaticFusableStage for StripFormatControls {
@@ -103,16 +90,6 @@ impl<I: Iterator<Item = char>> Iterator for StripFormatControlsAdapter<I> {
 }
 
 impl<I: FusedIterator<Item = char>> FusedIterator for StripFormatControlsAdapter<I> {}
-
-impl FusableStage for StripFormatControls {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(StripFormatControlsAdapter { input })
-    }
-}
 
 impl StageTestConfig for StripFormatControls {
     fn one_to_one_languages() -> &'static [Lang] {

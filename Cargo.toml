@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    ".",                 # Assumes your main `normy` crate is in the root directory
+    ".",
     "normy-lang-macros",
 ]
 
@@ -10,7 +10,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-# 💡 NEW: Dependency on the procedural macro crate
 normy-lang-macros = { path = "./normy-lang-macros" }
 thiserror = "2.0.17"
 rand = "0.9.2"
@@ -77,6 +76,11 @@ harness = false
 [[bench]]
 name = "lab"
 path = "benches/lang_aware_bench.rs"
+harness = false
+
+[[bench]]
+name = "lagb"
+path = "benches/lang_agnostic_bench.rs"
 harness = false
 
 [[bench]]

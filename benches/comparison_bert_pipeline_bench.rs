@@ -7,7 +7,7 @@ use normy::COLLAPSE_WHITESPACE_UNICODE;
 use normy::context::Context;
 use normy::stage::normalization::NfdStage;
 use normy::stage::normalize_whitespace::NormalizeWhitespace;
-use normy::stage::{StaticFusableStage, StaticIdentityAdapter};
+use normy::stage::{Stage, StageError, StaticFusableStage};
 use rand::random;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::iter::FusedIterator;
@@ -24,25 +24,19 @@ use normy::{LowerCase, NFD, Normy, RemoveDiacritics, StripControlChars, StripFor
 #[derive(Debug, Default, Clone, Copy)]
 pub struct BertCompatChineseChars;
 
-impl normy::stage::Stage for BertCompatChineseChars {
+impl Stage for BertCompatChineseChars {
     fn name(&self) -> &'static str {
         "bert_compat_chinese_chars"
     }
+
     #[inline(always)]
-    fn needs_apply(
-        &self,
-        text: &str,
-        _: &normy::context::Context,
-    ) -> Result<bool, normy::stage::StageError> {
+    fn needs_apply(&self, text: &str, _: &Context) -> Result<bool, StageError> {
         Ok(text.chars().any(is_chinese_char))
     }
+
     #[inline(always)]
-    fn apply<'a>(
-        &self,
-        text: Cow<'a, str>,
-        _: &normy::context::Context,
-    ) -> Result<Cow<'a, str>, normy::stage::StageError> {
-        let mut out = String::with_capacity(text.len() + 8);
+    fn apply<'a>(&self, text: Cow<'a, str>, _: &Context) -> Result<Cow<'a, str>, StageError> {
+        let mut out = String::with_capacity(text.len() + text.len() / 2);
         for c in text.chars() {
             if is_chinese_char(c) {
                 out.push(' ');
@@ -59,27 +53,106 @@ impl normy::stage::Stage for BertCompatChineseChars {
 fn is_chinese_char(c: char) -> bool {
     matches!(
         c as u32,
-        0x4E00..=0x9FFF |
-        0x3400..=0x4DBF |
-        0x20000..=0x2A6DF |
-        0x2A700..=0x2B73F |
-        0x2B740..=0x2B81F |
-        0x2B920..=0x2CEAF |
-        0xF900..=0xFAFF |
-        0x2F800..=0x2FA1F
+        0x4E00..=0x9FFF
+            | 0x3400..=0x4DBF
+            | 0x20000..=0x2A6DF
+            | 0x2A700..=0x2B73F
+            | 0x2B740..=0x2B81F
+            | 0x2B920..=0x2CEAF
+            | 0xF900..=0xFAFF
+            | 0x2F800..=0x2FA1F
     )
 }
 
+// ──────────────────────────────────────────────────────────────
+// Iterator Adapter
+// ──────────────────────────────────────────────────────────────
+
+pub struct BertCompatChineseCharsAdapter<'a, I> {
+    input: I,
+    state: BertChineseState,
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
+
+enum BertChineseState {
+    Normal,
+    EmitChar(char),
+    EmitSpaceAfter,
+}
+
+impl<'a, I> BertCompatChineseCharsAdapter<'a, I> {
+    #[inline(always)]
+    pub fn new(input: I) -> Self {
+        Self {
+            input,
+            state: BertChineseState::Normal,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<'a, I: Iterator<Item = char>> Iterator for BertCompatChineseCharsAdapter<'a, I> {
+    type Item = char;
+
+    #[inline]
+    fn next(&mut self) -> Option<char> {
+        match self.state {
+            BertChineseState::Normal => {
+                let c = self.input.next()?;
+                if is_chinese_char(c) {
+                    // Start the sequence: space, char, space
+                    self.state = BertChineseState::EmitChar(c);
+                    Some(' ')
+                } else {
+                    Some(c)
+                }
+            }
+            BertChineseState::EmitChar(c) => {
+                self.state = BertChineseState::EmitSpaceAfter;
+                Some(c)
+            }
+            BertChineseState::EmitSpaceAfter => {
+                self.state = BertChineseState::Normal;
+                Some(' ')
+            }
+        }
+    }
+
+    #[inline]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (input_lower, input_upper) = self.input.size_hint();
+
+        let buffered = match self.state {
+            BertChineseState::Normal => 0,
+            BertChineseState::EmitChar(_) => 2, // char + space remaining
+            BertChineseState::EmitSpaceAfter => 1, // space remaining
+        };
+
+        // Lower bound: assume no Chinese chars in remaining input
+        let lower = input_lower + buffered;
+
+        // Upper bound: assume all remaining chars are Chinese (3x expansion)
+        let upper = input_upper.map(|u| u * 3 + buffered);
+
+        (lower, upper)
+    }
+}
+
+impl<'a, I: FusedIterator<Item = char>> FusedIterator for BertCompatChineseCharsAdapter<'a, I> {}
+
+// ──────────────────────────────────────────────────────────────
+// StaticFusableStage Implementation
+// ──────────────────────────────────────────────────────────────
+
 impl StaticFusableStage for BertCompatChineseChars {
     type Adapter<'a, I>
-        = StaticIdentityAdapter<'a, I>
+        = BertCompatChineseCharsAdapter<'a, I>
     where
         I: FusedIterator<Item = char> + 'a;
 
-    // Trigger the fallback to the optimized apply() method
     #[inline(always)]
     fn supports_static_fusion(&self) -> bool {
-        false
+        true
     }
 
     #[inline(always)]
@@ -87,7 +160,7 @@ impl StaticFusableStage for BertCompatChineseChars {
     where
         I: FusedIterator<Item = char> + 'a,
     {
-        StaticIdentityAdapter::new(input)
+        BertCompatChineseCharsAdapter::new(input)
     }
 }
 
@@ -223,9 +296,9 @@ fn bench_bert_normalizers(c: &mut Criterion) {
         // ── HuggingFace (always allocates) ───────────────────────────────
         bench_hf_bert(&mut group, name, corpus);
 
-        println!("Running normy fused bench..");
-        // ── Normy Fused (zero-copy aware) ─────────────────────────────────────
-        bench_normy_fused(&mut group, name, corpus);
+        println!("Running normy apply only bench..");
+        // ── Normy Apply Only (zero-copy aware) ─────────────────────────────────────
+        bench_normy_apply_only(&mut group, name, corpus);
     }
 
     group.finish();
@@ -258,7 +331,7 @@ fn bench_normy(
     println!("   Normy  - {scenario}: ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
 }
 
-fn bench_normy_fused(
+fn bench_normy_apply_only(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     scenario: &str,
     corpus: &str,
@@ -266,10 +339,10 @@ fn bench_normy_fused(
     let mut zero_copy_hits = 0usize;
     let mut total = 0usize;
 
-    group.bench_function(BenchmarkId::new("Normy Fused (zero-copy)", scenario), |b| {
+    group.bench_function(BenchmarkId::new("Normy Apply Only (zero-copy)", scenario), |b| {
         b.iter(|| {
             total += 1;
-            let result = NORMY_BERT.normalize(black_box(corpus)).unwrap();
+            let result = NORMY_BERT.normalize_apply_only(black_box(corpus)).unwrap();
             if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
                 zero_copy_hits += 1;
             }
@@ -282,7 +355,7 @@ fn bench_normy_fused(
     } else {
         0.0
     };
-    println!("   Normy Fused  - {scenario}: ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
+    println!("   Normy Apply Only  - {scenario}: ZERO-COPY {zero_copy_hits}/{total} ({pct:.2}%)");
 }
 
 fn bench_hf_bert(

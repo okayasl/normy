@@ -2,7 +2,7 @@ use crate::{
     all_langs,
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::normalize_punctuation_char,
 };
@@ -55,20 +55,6 @@ impl Stage for NormalizePunctuation {
 
         Ok(Cow::Owned(out))
     }
-
-    /// NormalizePunctuation is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation since it only performs 1:1 mappings or removals.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// NormalizePunctuation is always fusable. Performs 1:1 character mappings
-    /// or character removal (when normalized to '\0').
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
 }
 
 impl StaticFusableStage for NormalizePunctuation {
@@ -116,20 +102,6 @@ impl<I: Iterator<Item = char>> Iterator for NormalizePunctuationAdapter<I> {
 }
 
 impl<I: FusedIterator<Item = char>> FusedIterator for NormalizePunctuationAdapter<I> {}
-
-// ============================================================================
-// FusableStage Implementation - Dynamic Iterator Fusion
-// ============================================================================
-
-impl FusableStage for NormalizePunctuation {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(NormalizePunctuationAdapter { input })
-    }
-}
 
 impl StageTestConfig for NormalizePunctuation {
     fn one_to_one_languages() -> &'static [Lang] {

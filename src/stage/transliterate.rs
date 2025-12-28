@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, FRA, ISL, NOR, SWE,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, FusedIterator, Stage, StageError, StaticFusableStage},
+    stage::{FusedIterator, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
@@ -60,26 +60,6 @@ impl Stage for Transliterate {
             }
         }
         Ok(Cow::Owned(out))
-    }
-
-    /// Transliterate is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation. Even with 1:N expansions, the check is valid.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// Transliterate is always fusable. Handles both 1:1 mappings (e.g., Ł→l)
-    /// and 1:N expansions (e.g., Œ→"oe") through a pending buffer mechanism.
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
-
-    #[inline]
-    fn expected_capacity(&self, input_len: usize) -> usize {
-        // Heuristic: (~12% buffer) handles most European transliterations without re-allocating.
-        input_len + (input_len >> 3)
     }
 }
 
@@ -163,24 +143,6 @@ impl<'a, I: Iterator<Item = char>> Iterator for TransliterateAdapter<'a, I> {
 }
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for TransliterateAdapter<'a, I> {}
-
-// ============================================================================
-// FusableStage Implementation - Dynamic Iterator Fusion
-// ============================================================================
-
-impl FusableStage for Transliterate {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(TransliterateAdapter {
-            input,
-            lang: &ctx.lang_entry,
-            pending: None,
-        })
-    }
-}
 
 impl StageTestConfig for Transliterate {
     fn one_to_one_languages() -> &'static [Lang] {

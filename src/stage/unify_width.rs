@@ -2,7 +2,7 @@ use crate::{
     JPN, KOR, ZHO,
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::{fullwidth_to_halfwidth, is_fullwidth},
 };
@@ -41,19 +41,6 @@ impl Stage for UnifyWidth {
             out.push(fullwidth_to_halfwidth(c));
         }
         Ok(Cow::Owned(out))
-    }
-
-    /// UnifyWidth is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation since it only performs 1:1 mappings.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// UnifyWidth is always fusable. Only performs 1:1 character mappings.
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
     }
 }
 
@@ -97,16 +84,6 @@ impl<I: Iterator<Item = char>> Iterator for UnifyWidthAdapter<I> {
 }
 
 impl<I: FusedIterator<Item = char>> FusedIterator for UnifyWidthAdapter<I> {}
-
-impl FusableStage for UnifyWidth {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(UnifyWidthAdapter { input })
-    }
-}
 
 impl StageTestConfig for UnifyWidth {
     fn one_to_one_languages() -> &'static [Lang] {

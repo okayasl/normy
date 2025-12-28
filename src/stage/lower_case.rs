@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
@@ -62,7 +62,7 @@ impl Stage for LowerCase {
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        let cap = self.expected_capacity(text.len());
+        let cap = (text.len() as f64 * 1.1) as usize;
         let mut out = String::with_capacity(cap);
 
         // Manual loop is often easier for the compiler to vectorize
@@ -72,27 +72,6 @@ impl Stage for LowerCase {
         }
 
         Ok(Cow::Owned(out))
-    }
-
-    /// LowerCase is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation since lowercase is strictly 1:1.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// LowerCase is always fusable since it only performs 1:1 character mappings.
-    /// Unlike CaseFold, there are no multi-character expansions or peek-ahead rules.
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
-    #[inline(always)]
-    fn expected_capacity(&self, input_len: usize) -> usize {
-        // While characters are 1:1, byte size can change.
-        // e.g., 'I' (1 byte) -> 'ı' (2 bytes) in Turkish.
-        // 1.1x is a safe buffer for these growth cases.
-        (input_len as f64 * 1.1) as usize
     }
 }
 
@@ -146,19 +125,6 @@ impl<'a, I: ExactSizeIterator + Iterator<Item = char>> ExactSizeIterator
     #[inline(always)]
     fn len(&self) -> usize {
         self.input.len()
-    }
-}
-
-impl FusableStage for LowerCase {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(LowercaseAdapter {
-            input,
-            lang: &ctx.lang_entry,
-        })
     }
 }
 

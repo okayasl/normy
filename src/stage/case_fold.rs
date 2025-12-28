@@ -2,7 +2,7 @@ use crate::{
     CAT, DAN, DEU, ELL, ENG, FRA, ISL, ITA, LIT, NLD, NOR, POR, SPA, SWE, TUR,
     context::Context,
     lang::{Lang, LangEntry},
-    stage::{FusableStage, FusedIterator, Stage, StageError, StaticFusableStage},
+    stage::{FusedIterator, Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
 };
 use std::borrow::Cow;
@@ -63,7 +63,7 @@ impl Stage for CaseFold {
         }
 
         // 2. Fast path: Manual loop (The "Manual Slow-Path" Optimization)
-        let cap = self.expected_capacity(text.len()); // Just math, no iteration
+        let cap = (text.len() as f64 * 1.1) as usize;
         let mut out = String::with_capacity(cap);
 
         for c in text.chars() {
@@ -81,30 +81,6 @@ impl Stage for CaseFold {
             out.extend(c.to_lowercase());
         }
         Ok(Cow::Owned(out))
-    }
-
-    /// CaseFold can participate in fusable segments when checking needs_apply
-    /// on the original text is sufficient.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// Returns self as FusableStage when the stage supports 1:1 character mapping
-    /// (no multi-character expansions, no peek-ahead).
-    ///
-    /// For languages with 1:N mappings (e.g., German ß→ss) or peek-ahead rules,
-    /// the fusion will fall back to the apply() method.
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
-
-    #[inline(always)]
-    fn expected_capacity(&self, input_len: usize) -> usize {
-        // Most languages shrink or stay the same in lowercase,
-        // but German/Greek can expand. 10% overhead is a safe buffer.
-        (input_len as f64 * 1.1) as usize
     }
 }
 
@@ -197,39 +173,6 @@ where
 }
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for CaseFoldAdapter<'a, I> {}
-
-// ============================================================================
-// FusableStage Implementation - Dynamic Iterator Fusion
-// ============================================================================
-
-impl FusableStage for CaseFold {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        // Always return an adapter that can handle both 1:1 and 1:N cases
-        // For peek-ahead languages, we still can't fuse (would require complex lookahead),
-        // but 1:N expansions can be handled with a pending buffer
-        if ctx.lang_entry.requires_peek_ahead() {
-            // Peek-ahead languages like Dutch cannot be fused in iterator chains
-            // The fusion system should detect this and fall back to apply()
-            // For now, we use a simple adapter that will produce incorrect results
-            // This should be caught by safe_skip_approximation check
-            Box::new(CaseFoldSimpleAdapter {
-                input,
-                lang: &ctx.lang_entry,
-            })
-        } else {
-            // Use the full adapter that handles 1:N expansions
-            Box::new(CaseFoldAdapter {
-                input,
-                lang: &ctx.lang_entry,
-                pending: None,
-            })
-        }
-    }
-}
 
 // ============================================================================
 // Iterator Adapters

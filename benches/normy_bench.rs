@@ -1,16 +1,3 @@
-// benches/normy_bench_improved.rs
-// Improved Criterion benchmark for Normy with:
-//  - Correct zero-copy expectations and test cases
-//  - Separate benchmarks for "needs transformation" vs "already normalized"
-//  - More realistic corpus with configurable normalization ratio
-//  - Per-stage pipeline benchmarks to identify bottlenecks
-//  - Better tracking and reporting of zero-copy behavior
-//
-// Notes for use:
-// - Add these dev-dependencies to Cargo.toml: criterion, rand, unicode-normalization, unidecode
-// - Ensure `normy` is available as a dependency (path or crate)
-// - Build and run with `cargo bench --bench normy_bench_improved`
-
 #![deny(unsafe_code)]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(clippy::must_use_candidate, clippy::missing_errors_doc)]

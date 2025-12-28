@@ -1,6 +1,6 @@
 use crate::{
     context::Context,
-    lang::{DEFAULT_LANG, Lang},
+    lang::{DEFAULT_LANG, Lang, LangEntry},
     process::{BuildIter, ChainedProcess, DynamicProcess, EmptyProcess, Process},
     profile::{Profile, ProfileError},
     stage::{Stage, StageError, StaticFusableStage},
@@ -27,11 +27,11 @@ fn assert_utf8(text: &str) {
 // ============================================================================
 // Normy - Smart routing based on runtime flag
 // ============================================================================
-
 pub struct Normy<P: Process> {
     ctx: Context,
     pipeline: P,
-    all_fusable: bool, // ← Computed once at build time
+    all_fusable: bool,
+    stage_count: usize,
 }
 
 // For fusable pipelines (ChainedProcess with BuildIter)
@@ -41,36 +41,31 @@ impl<P: BuildIter> Normy<P> {
     pub fn normalize<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]
         assert_utf8(text);
-
-        if self.all_fusable {
+        if self.all_fusable && self.stage_count > 1 {
             // Use fusion path
             self.pipeline
                 .process_fused(Cow::Borrowed(text), &self.ctx)
                 .map_err(Into::into)
         } else {
-            // Use apply path
+            // Use apply path (faster for single/zero stages)
             self.pipeline
                 .process(Cow::Borrowed(text), &self.ctx)
                 .map_err(Into::into)
         }
     }
-
     #[inline(always)]
     pub fn normalize_apply_only<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]
         assert_utf8(text);
-
         self.pipeline
             .process(Cow::Borrowed(text), &self.ctx)
             .map_err(Into::into)
     }
-
     /// Check if this pipeline uses fusion
     #[inline(always)]
     pub fn uses_fusion(&self) -> bool {
         self.all_fusable
     }
-
     #[inline(always)]
     pub fn normalize_with_profile<'a, Q: Process>(
         &self,
@@ -90,12 +85,10 @@ impl Normy<DynamicProcess> {
     pub fn normalize<'a>(&self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]
         assert_utf8(text);
-
         self.pipeline
             .process(Cow::Borrowed(text), &self.ctx)
             .map_err(Into::into)
     }
-
     #[inline(always)]
     pub fn normalize_with_profile<'a, Q: Process>(
         &self,
@@ -111,11 +104,11 @@ impl Normy<DynamicProcess> {
 // ============================================================================
 // Builder – tracks fusability while building
 // ============================================================================
-
 pub struct NormyBuilder<P: Process> {
     ctx: Context,
     current: P,
-    all_fusable: bool, // ← Starts true, becomes false if any non-fusable stage added
+    all_fusable: bool,
+    stage_count: usize,
 }
 
 impl Default for NormyBuilder<EmptyProcess> {
@@ -124,7 +117,8 @@ impl Default for NormyBuilder<EmptyProcess> {
         Self {
             ctx: Context::new(DEFAULT_LANG),
             current: EmptyProcess,
-            all_fusable: true, // ← Default true (no stages yet)
+            all_fusable: true,
+            stage_count: 0,
         }
     }
 }
@@ -135,22 +129,20 @@ impl<P: Process> NormyBuilder<P> {
         self.ctx = Context::new(lang);
         self
     }
-
     #[inline(always)]
     pub fn modify_lang(mut self, f: impl FnOnce(&mut crate::lang::LangEntry)) -> Self {
         self.ctx = Context::with_modified(self.ctx.lang, f);
         self
     }
-
     #[inline(always)]
     pub fn add_stage<S: Stage + StaticFusableStage + 'static>(
         mut self,
         stage: S,
     ) -> NormyBuilder<ChainedProcess<S, P>> {
         if !stage.supports_static_fusion() {
-            self.all_fusable = false; // ← Once false, stays false
+            self.all_fusable = false;
         }
-
+        self.stage_count += 1;
         NormyBuilder {
             ctx: self.ctx,
             current: ChainedProcess {
@@ -158,15 +150,16 @@ impl<P: Process> NormyBuilder<P> {
                 previous: self.current,
             },
             all_fusable: self.all_fusable,
+            stage_count: self.stage_count,
         }
     }
-
     #[inline(always)]
     pub fn build(self) -> Normy<P> {
         Normy {
             ctx: self.ctx,
             pipeline: self.current,
             all_fusable: self.all_fusable,
+            stage_count: self.stage_count,
         }
     }
 }
@@ -181,7 +174,6 @@ impl Normy<EmptyProcess> {
 // ============================================================================
 // Dynamic builder path
 // ============================================================================
-
 pub struct DynamicNormyBuilder {
     ctx: Context,
     stages: SmallVec<[Arc<dyn Stage + Send + Sync>; 12]>,
@@ -205,38 +197,35 @@ impl DynamicNormyBuilder {
         self.ctx = Context::new(lang);
         self
     }
-
     #[inline(always)]
-    pub fn modify_lang(mut self, f: impl FnOnce(&mut crate::lang::LangEntry)) -> Self {
+    pub fn modify_lang(mut self, f: impl FnOnce(&mut LangEntry)) -> Self {
         self.ctx = Context::with_modified(self.ctx.lang, f);
         self
     }
-
     #[inline(always)]
     pub fn add_stage<T: Stage + Send + Sync + 'static>(self, stage: T) -> Self {
         self.add_arc_stage(Arc::new(stage))
     }
-
     #[inline(always)]
     pub fn add_arc_stage(mut self, stage: Arc<dyn Stage + Send + Sync>) -> Self {
         self.stages.push(stage);
         self
     }
-
     #[inline(always)]
     pub fn add_boxed_stage(mut self, stage: Box<dyn Stage + Send + Sync>) -> Self {
         self.stages.push(stage.into());
         self
     }
-
     #[inline(always)]
     pub fn build(self) -> Normy<DynamicProcess> {
+        let stage_len = self.stages.len();
         Normy {
             ctx: self.ctx,
             pipeline: DynamicProcess {
                 stages: self.stages,
             },
             all_fusable: self.all_fusable,
+            stage_count: stage_len,
         }
     }
 }

@@ -149,17 +149,6 @@ pub fn fused_path_equivalent_to_apply<S: Stage + StaticFusableStage + StageTestC
              fused:   {via_fused:?}"
             );
         }
-        if let Some(fusable_stage) = stage.as_fusable() {
-            let dyn_adapter = fusable_stage.dyn_fused_adapter(Box::new(input.chars()), &ctx);
-            let via_dyn_fused: String = dyn_adapter.collect();
-            assert_eq!(
-                via_apply.as_ref(),
-                via_dyn_fused,
-                "dynamic fused adapter path ≠ apply() in {lang:?}\n\
-             apply(): {via_apply:?}\n\
-             fused:   {via_dyn_fused:?}"
-            );
-        }
     }
 }
 
@@ -184,17 +173,6 @@ pub fn stage_is_idempotent<S: Stage + StaticFusableStage + StageTestConfig>(stag
                 assert_eq!(
                     once, twice,
                     "static_fused_adapter() not idempotent in {lang:?} on `{input}`"
-                );
-            }
-
-            if let Some(fusable_stage) = stage.as_fusable() {
-                let once = fusable_stage.dyn_fused_adapter(Box::new(input.chars()), &ctx);
-                let twice = fusable_stage.dyn_fused_adapter(Box::new(input.chars()), &ctx);
-                let once: String = once.collect();
-                let twice: String = twice.collect();
-                assert_eq!(
-                    once, twice,
-                    "dyn_fused_adapter() not idempotent in {lang:?} on `{input}`"
                 );
             }
         }

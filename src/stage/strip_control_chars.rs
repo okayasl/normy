@@ -1,7 +1,7 @@
 use crate::{
     context::Context,
     lang::Lang,
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::is_control,
 };
@@ -50,19 +50,6 @@ impl Stage for StripControlChars {
         }
         Ok(Cow::Owned(out))
     }
-
-    /// StripControlChars is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation since it only removes characters.
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// StripControlChars is always fusable. Only performs character removal (filtering).
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
 }
 
 impl StaticFusableStage for StripControlChars {
@@ -107,16 +94,6 @@ impl<I: Iterator<Item = char>> Iterator for StripControlCharsAdapter<I> {
 }
 
 impl<I: FusedIterator<Item = char>> FusedIterator for StripControlCharsAdapter<I> {}
-
-impl FusableStage for StripControlChars {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        _ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(StripControlCharsAdapter { input })
-    }
-}
 
 impl StageTestConfig for StripControlChars {
     fn one_to_one_languages() -> &'static [Lang] {

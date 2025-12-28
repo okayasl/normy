@@ -99,27 +99,6 @@ where
                 },
             );
         }
-
-        if let Some(dynamic_fusable_stage) = stage.as_fusable() {
-            group.bench_function(
-                BenchmarkId::new(
-                    "dynamic_fusion_changed",
-                    format!("{}-{}", lang.code(), text),
-                ),
-                |b| {
-                    b.iter_batched(
-                        constructor,
-                        |_| {
-                            let ctx = Context::new(lang);
-                            let iter = dynamic_fusable_stage
-                                .dyn_fused_adapter(Box::new(text.chars()), &ctx);
-                            black_box(iter.collect::<String>());
-                        },
-                        BatchSize::SmallInput,
-                    )
-                },
-            );
-        }
     }
 
     // Unchanged benches
@@ -157,26 +136,6 @@ where
                             let static_iter = stage.static_fused_adapter(normalized.chars(), &ctx);
                             let s = static_iter.collect::<String>();
                             black_box(s)
-                        },
-                        BatchSize::SmallInput,
-                    )
-                },
-            );
-        }
-
-        if let Some(dynamic_fusable_stage) = stage.as_fusable() {
-            group.bench_function(
-                BenchmarkId::new(
-                    "dynamic_fusion_unchanged",
-                    format!("{}-{}", lang.code(), normalized),
-                ),
-                |b| {
-                    b.iter_batched(
-                        constructor,
-                        |_| {
-                            let iter = dynamic_fusable_stage
-                                .dyn_fused_adapter(Box::new(normalized.chars()), &ctx);
-                            black_box(iter.collect::<String>());
                         },
                         BatchSize::SmallInput,
                     )

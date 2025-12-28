@@ -4,7 +4,7 @@ use crate::{
     DEU, ENG, FRA, HIN, JPN, KOR, SPA, ZHO,
     context::Context,
     lang::{Lang, LangEntry, SegmentRule},
-    stage::{FusableStage, Stage, StageError, StaticFusableStage},
+    stage::{Stage, StageError, StaticFusableStage},
     testing::stage_contract::StageTestConfig,
     unicode::{
         CharClass::{self, Cjk, Hangul, Indic, NonCJKScript, Other, SEAsian, Western},
@@ -202,7 +202,7 @@ impl Stage for SegmentWords {
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let entry = ctx.lang_entry;
-        let mut out = String::with_capacity(self.expected_capacity(text.len()));
+        let mut out = String::with_capacity((text.len() * 12) >> 3);
 
         let mut prev_char: Option<char> = None;
         let mut prev_class: Option<CharClass> = None;
@@ -257,27 +257,6 @@ impl Stage for SegmentWords {
         }
 
         Ok(Cow::Owned(out))
-    }
-
-    /// SegmentWords is always fusable - checking needs_apply on the original text
-    /// is always a safe approximation since it only inserts characters (spaces/ZWSP).
-    #[inline]
-    fn safe_skip_approximation(&self) -> bool {
-        true
-    }
-
-    /// SegmentWords is always fusable since it only inserts delimiters (spaces or ZWSP)
-    /// between characters. No character transformations or multi-character expansions.
-    #[inline]
-    fn as_fusable(&self) -> Option<&dyn FusableStage> {
-        Some(self)
-    }
-
-    #[inline]
-    fn expected_capacity(&self, input_len: usize) -> usize {
-        // Heuristic: segmentation adds roughly 10-20% length for mixed scripts,
-        // but up to 100% for CJK unigrams.
-        (input_len * 12) >> 3 // ~1.5x to be safe
     }
 }
 
@@ -403,27 +382,6 @@ impl<'a, I: Iterator<Item = char>> Iterator for SegmentWordsAdapter<'a, I> {
 }
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for SegmentWordsAdapter<'a, I> {}
-
-// ============================================================================
-// FusableStage Implementation - Dynamic Iterator Fusion
-// ============================================================================
-
-impl FusableStage for SegmentWords {
-    fn dyn_fused_adapter<'a>(
-        &self,
-        input: Box<dyn FusedIterator<Item = char> + 'a>,
-        ctx: &'a Context,
-    ) -> Box<dyn FusedIterator<Item = char> + 'a> {
-        Box::new(SegmentWordsAdapter {
-            input,
-            lang: &ctx.lang_entry,
-            prev_char: None,
-            prev_class: None,
-            prev_is_virama: false,
-            pending_space: None,
-        })
-    }
-}
 
 #[inline(always)]
 fn check_boundary_with_classes(
