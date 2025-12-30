@@ -651,7 +651,6 @@ dependencies = [
  "icu_normalizer",
  "lazy_static",
  "memchr",
- "normy-lang-macros",
  "paste",
  "phf",
  "proptest",
@@ -664,15 +663,6 @@ dependencies = [
  "tokenizers",
  "unicode-normalization",
  "unidecode",
-]
-
-[[package]]
-name = "normy-lang-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]

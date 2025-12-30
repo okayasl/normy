@@ -7,46 +7,25 @@ use crate::{
 use memchr::memchr;
 use std::{borrow::Cow, iter::FusedIterator};
 
-/// Fast pre-scan: if no '<' appears, text is guaranteed to have no tags
-#[inline(always)]
-fn contains_html_tag(text: &str) -> bool {
-    memchr(b'<', text.as_bytes()).is_some()
-}
-
-/// Fast pre-scan: if no '&' appears, text has no entities
-#[inline(always)]
-fn contains_entities(text: &str) -> bool {
-    memchr(b'&', text.as_bytes()).is_some()
-}
-
 /// Strips HTML tags and decodes entities while preserving visible text.
 ///
-/// # White-Paper Guarantees (Universal Contracts)
-/// - **Zero-copy** when no `<` or `&` appears in input
-/// - **needs_apply_is_accurate**: predicts changes with 100% precision
-/// - **Idempotent**: applying twice yields same result as once
-/// - **Safe**: streaming, no buffer overflows, handles malformed HTML
-/// - **Fast pre-scan**: uses `memchr` — O(n) with 1–2 byte checks
-/// - **No false positives**: pure text (even with `>`, `"`, etc.) never triggers
+/// # Behavior
+/// - **Tags removed**: All HTML tags stripped
+/// - **Entities decoded**: `&amp;` → `&`, `&lt;` → `<`, etc.
+/// - **Content stripped**: `<script>`, `<style>`, `<noscript>`, `<svg>`, `<math>` and their content removed
+/// - **Block spacing**: Block tags (div, p, h1-h6) add spaces to prevent word concatenation
 ///
-/// # Content Stripping for NLP
-/// The following tags have their entire content (not just tags) removed:
-/// - `<script>` - JavaScript code
-/// - `<style>` - CSS styles
-/// - `<noscript>` - Fallback content (duplicate of main content)
-/// - `<svg>` - Vector graphics (not meaningful text for NLP)
-/// - `<math>` - MathML markup (preserves operators/numbers as fragments)
+/// # Performance
+/// - Zero-copy when no `<` or decodable `&` entities
+/// - Fast `memchr` scan for tags, full decode check for entities
+/// - Handles malformed HTML (unclosed tags, missing quotes, unclosed comments)
 ///
-/// # Block-Level Tag Handling
-/// Block-level tags (div, p, h1-h6, article, section, etc.) are replaced with spaces
-/// to prevent word concatenation. For example:
-/// - `<h1>Title</h1><p>Text</p>` → `"Title Text"` (not "TitleText")
-///
-/// # Malformed HTML Handling
-/// - **Unclosed tags** (e.g., `<div class="test`): Everything after `<` is consumed
-/// - **Missing quotes**: Consumed until tag end `>`
-/// - **Unclosed comments/CDATA**: Everything until EOF is consumed
-/// - **DOCTYPE declarations**: Stripped as special tags (explicit handling)
+/// # Example
+/// ```text
+/// "<h1>Title</h1><p>Text</p>" → "Title Text"
+/// "Price: &euro;99"          → "Price: €99"
+/// "<script>alert(1)</script>" → ""
+/// ```
 pub struct StripHtml;
 
 impl Stage for StripHtml {
@@ -283,22 +262,15 @@ impl Stage for StripHtml {
             }
         }
 
-        // Check if stripping changed anything and trim whitespace
-        let final_result = if result == decoded.as_ref() {
-            decoded
-        } else if result.is_empty() {
-            Cow::Owned(String::new())
-        } else {
-            // Trim leading and trailing whitespace from block-level tag spacing
-            let trimmed = result.trim().to_string();
-            if trimmed == decoded.as_ref() {
-                decoded
-            } else {
-                Cow::Owned(trimmed)
-            }
-        };
+        // Trim leading and trailing whitespace in-place
+        while result.ends_with(char::is_whitespace) {
+            result.pop();
+        }
+        while result.starts_with(char::is_whitespace) {
+            result.remove(0);
+        }
 
-        Ok(final_result)
+        Ok(Cow::Owned(result))
     }
 }
 
@@ -436,7 +408,18 @@ impl StaticFusableStage for StripHtml {
     }
 }
 
-// UNIVERSAL CONTRACT COMPLIANCE
+/// Fast pre-scan: if no '<' appears, text is guaranteed to have no tags
+#[inline(always)]
+fn contains_html_tag(text: &str) -> bool {
+    memchr(b'<', text.as_bytes()).is_some()
+}
+
+/// Fast pre-scan: if no '&' appears, text has no entities
+#[inline(always)]
+fn contains_entities(text: &str) -> bool {
+    memchr(b'&', text.as_bytes()).is_some()
+}
+
 impl StageTestConfig for StripHtml {
     fn one_to_one_languages() -> &'static [Lang] {
         &[]
@@ -447,12 +430,16 @@ impl StageTestConfig for StripHtml {
             "<p>Hello &amp; world</p>",
             "Price: &euro;99",
             "<script>alert(1)</script>",
-            "Normal text with > and & in prose &amp; such",
-            "<div class=\"test\">content</div>",
-            "&lt;escaped&gt;",
+            "<style>body{}</style>",
             "<noscript>fallback</noscript>",
-            "<svg><circle/></svg>",
+            "<svg><text>icon</text></svg>",
+            "<math><mi>x</mi></math>",
             "<!DOCTYPE html>",
+            "<?xml version=\"1.0\"?>",
+            "<div><p>nested</p></div>",
+            "<h1>Title</h1><p>Content</p>",
+            "&lt;script&gt;evil&lt;/script&gt;", // Encoded attack
+            "Text with > and &amp; in prose",
         ]
     }
 
@@ -462,15 +449,18 @@ impl StageTestConfig for StripHtml {
 
     fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
         &[
-            ("<p>Hello</p>", "Hello"), // Changed from " Hello "
+            ("<p>Hello</p>", "Hello"),
             ("&amp;", "&"),
             ("&lt;test&gt;", ""),
-            ("<b>bold</b>", "bold"),
             ("Price: &euro;99", "Price: €99"),
+            ("<script>code</script>text", "text"),
+            ("<style>css</style>text", "text"),
             ("<noscript>fallback</noscript>text", "text"),
             ("<svg><text>icon</text></svg>text", "text"),
-            ("<!DOCTYPE html><p>text</p>", "text"), // Changed from " text "
-            ("<h1>Title</h1><p>Text</p>", "Title Text"), // Changed from " Title  Text "
+            ("<math><mi>x</mi></math>text", "text"),
+            ("<!DOCTYPE html><p>text</p>", "text"),
+            ("<h1>Title</h1><p>Text</p>", "Title Text"),
+            ("&lt;script&gt;evil&lt;/script&gt;", ""), // Decoded then stripped
         ]
     }
 }
@@ -479,6 +469,7 @@ impl StageTestConfig for StripHtml {
 mod contract_tests {
     use super::*;
     use crate::assert_stage_contract;
+
     #[test]
     fn universal_contract_compliance() {
         assert_stage_contract!(StripHtml);

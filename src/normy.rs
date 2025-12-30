@@ -41,7 +41,7 @@ impl<P: BuildIter> Normy<P> {
     pub fn normalize<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]
         assert_utf8(text);
-        if self.all_fusable && self.stage_count > 1 {
+        if self.uses_fusion() {
             // Use fusion path
             self.pipeline
                 .process_fused(Cow::Borrowed(text), &self.ctx)
@@ -64,7 +64,7 @@ impl<P: BuildIter> Normy<P> {
     /// Check if this pipeline uses fusion
     #[inline(always)]
     pub fn uses_fusion(&self) -> bool {
-        self.all_fusable
+        self.all_fusable && self.stage_count > 1
     }
     #[inline(always)]
     pub fn normalize_with_profile<'a, Q: Process>(

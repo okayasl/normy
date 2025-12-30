@@ -456,40 +456,44 @@ pub fn needs_segmentation(text: &str, lang: &LangEntry) -> bool {
 
 impl StageTestConfig for SegmentWords {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // Inserts spaces/ZWSP
+        &[]
     }
 
     fn samples(lang: Lang) -> &'static [&'static str] {
         match lang {
             ENG => &["Hello world", "123 !@#", "", " "],
-            ZHO => &["你好世界", "Hello世界", "AI+区块链"],
-            JPN => &["こんにちは世界", "Rustは最高", "東京2025年"],
-            HIN => &["पत्नी", "विद्वत्", "Helloपत्नी"],
+            ZHO => &["你好世界", "Hello世界", "AI+区块链", "中华人民共和国"],
+            JPN => &["こんにちは世界", "Rustは最高", "東京2025年", "人工知能"],
+            KOR => &["안녕하세요세계", "Hello안녕하세요", "서울2025년"],
+            HIN => &["पत्नी", "विद्वत्", "विद्वत्त्व", "Helloपत्नी", "रामायण"],
             _ => &["Hello World 123", " déjà-vu ", "TEST", ""],
         }
     }
 
     fn should_pass_through(lang: Lang) -> &'static [&'static str] {
         match lang {
-            ENG | FRA | SPA | DEU => &["hello world", "test 123", ""], // Western text
-            ZHO | JPN | KOR | HIN => &[], // These always need segmentation
-            _ => &["hello world", ""],
+            ENG | FRA | SPA | DEU => &["hello world", "test 123", "", "clean text"],
+            _ => &[], // Segmenting languages have no true pass-through
         }
     }
 
     fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
         match lang {
             ZHO => &[
-                ("你好", "你 好"), // Unigram
+                ("你好", "你 好"),
                 ("世界", "世 界"),
                 ("Hello世界", "Hello 世 界"),
+                ("AI+区块链", "AI+ 区 块 链"),
             ],
             JPN => &[
-                ("Hello世界", "Hello 世界"), // Script transition
+                ("Hello世界", "Hello 世界"),
                 ("東京2025年", "東京 2025 年"),
+                ("Rustは最高", "Rust は最高"),
             ],
             HIN => &[
-                ("पत्नी", "पत्\u{200B}नी"), // ZWSP after virama
+                ("पत्नी", "पत्\u{200B}नी"),
+                ("विद्वत्", "विद्वत्"),             // Conjunct preserved
+                ("विद्वत्त्व", "विद्वत्\u{200B}त्व"), // Non-conjunct break
                 ("Helloपत्नी", "Hello पत्\u{200B}नी"),
             ],
             _ => &[],
@@ -497,9 +501,6 @@ impl StageTestConfig for SegmentWords {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Universal contract tests
-// ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod contract_tests {
     use super::*;

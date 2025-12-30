@@ -337,10 +337,11 @@ define_languages! {
         transliterate: [],
         precomposed_to_base: [],
         spacing_diacritics: [
-            '\u{064E}', // Fatha (~35% frequency)
+            '\u{064E}', // Fatha (~35%)
             '\u{0650}', // Kasra (~25%)
             '\u{064F}', // Damma (~20%)
             '\u{0652}', // Sukun (~10%)
+            '\u{0651}', // Shadda (~5%) — added for full tashkil removal
             '\u{064B}', // Tanwin Fath (~3%)
             '\u{064D}', // Tanwin Kasr (~2%)
             '\u{064C}', // Tanwin Damm (~2%)
@@ -644,16 +645,8 @@ define_languages! {
         segment_rules: [],
         unigram_cjk: false,
 
-    // Greek (ELL) Addition: Added Greek to requires_peek_ahead to mandate
-    // the necessary lookahead for handling the contextual final sigma (σ/ς).[1]
-    // Final sigma: Lowercase Σ → ς if no next char (word-end); else σ
-    // In map impl: if current=='Σ' && next.is_none() { Some("ς") } else { Some('σ') }
-    // But for PeekPair: Use a sentinel for EOF, or extend LangEntry to handle None explicitly.
-    // Quick fix: Add pair for 'Σ' with b='\0' (null char) as EOF sentinel → "ς"
-    // Better: In lang.rs PeekPair, add variant for EOF, but to keep current design:
-    // Handle in case_fold.rs: If requires_peek_ahead && next.is_none() && current=='Σ' { return Some('ς') }
-    // For now, populate minimally to trigger logic:
-    //    ('Σ', '\0' => "ς"),  // \0 as EOF sentinel; filter in impl
+    // No case_map needed: Unicode lowercase correctly handles final sigma (Σ → ς word-finally)
+    // No peek-ahead required: pure 1:1 mapping via char::to_lowercase()
     ELL, "ELL", "Greek",
         case: [],
         fold: [],

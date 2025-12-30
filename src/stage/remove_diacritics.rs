@@ -16,46 +16,16 @@ use std::iter::FusedIterator;
 ///
 /// # Mechanism
 ///
-/// 1. **Direct Mapping (Primary):** Checks the language's `strip_map` table. If a character
-///    is defined there (e.g., `é` -> `e` in French), it is replaced.
-/// 2. **Diacritic Filtering:** Checks the language's `diacritics` list. If a character is
-///    defined as a diacritic (e.g., Arabic Harakat), it is removed.
-/// 3. **Preservation:** Any character **not** defined in the language's specific rules
-///    is returned strictly as-is.
+/// 1. **Direct Mapping:** Uses language's `pre_composed_to_base_map` (e.g., `é` → `e` in French)
+/// 2. **Diacritic Removal:** Skips characters in `spacing_diacritics` (e.g., Arabic harakat)
+/// 3. **Preservation:** All other characters unchanged
 ///
 /// # Design Philosophy
 ///
-/// Most libraries conflate "remove accents" with "flatten everything to ASCII".
-/// Normy refuses that lie.
-///
-/// `RemoveDiacritics` gives you **exactly** what linguists and typographers expect for
-/// the specific language context:
-/// - **Locale-Strict:** Polish `RemoveDiacritics` will strip `ł` -> `l`, but it will
-///   preserve a Czech `ř` because `ř` is not a valid Polish variant.
-/// - **Typography-Safe:** Ligatures (`ﬁ`, `œ`), fractions (`½`), and superscripts (`²`)
-///   are preserved unless explicitly mapped by the language.
-/// - **Zero-Copy:** Returns `Cow::Borrowed` if no defined changes are needed.
-///
-/// # Key Characteristics
-///
-/// | Aspect | Behavior |
-/// |----------------------------|---------------------------------------------------|
-/// | **Strategy** | **Lookup Table** (String) / **NFD** (Iterator fallback) |
-/// | **Scope** | Strict Locale (Foreign accents are preserved) |
-/// | **Compatibility** | Preserves formatting (ligatures, fractions, etc.) |
-/// | **Performance** | O(1) per char (no decomposition overhead in `apply`) |
-/// | **Safety** | Zero-allocation path when text matches rules |
-///
-/// # When to Use
-///
-/// - **Phonetic Search:** When you need "café" to match "cafe" in French text.
-/// - **TTS Preprocessing:** Cleaning text for speech engines that stumble on accents.
-/// - **Typography-Preserving Slugs:** Generating readable URLs without losing meaning.
-///
-/// # When NOT to Use
-///
-/// - **Generic ASCII conversion:** If you want to force *any* input to ASCII (e.g., stripping Czech `ř` using a Polish context), use a generic NFKD + Strip approach instead.
-/// - **Search Normalization across mixed languages:** If you don't know the input language, this strictness might be too conservative.
+/// Strict locale behavior:
+/// - Polish strips `ł` → `l` but preserves Czech `ř`
+/// - Spanish preserves `ñ` (distinct letter)
+/// - Foreign scripts untouched
 pub struct RemoveDiacritics;
 
 impl Stage for RemoveDiacritics {
@@ -148,14 +118,14 @@ impl<'a, I: FusedIterator<Item = char>> FusedIterator for RemoveDiacriticsAdapte
 
 impl StageTestConfig for RemoveDiacritics {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // Not 1:1 — can remove combining marks (None return in map)
+        &[]
     }
 
     fn samples(lang: Lang) -> &'static [&'static str] {
         match lang {
             FRA => &["café", "naïve", "résumé", "Crème brûlée"],
-            VIE => &["Hà Nội", "Đạt", "đẹp quá"],
-            ARA => &["مَرْحَبًا", "كتاب"],
+            VIE => &["Hà Nội", "Đạt", "đẹp quá", "tôi tên là"],
+            ARA => &["مَرْحَبًا", "كتاب", "الْعَرَبِيَّةُ"],
             POL => &["Łódź", "żółć", "gęślą jaźń"],
             CES => &["Příliš žluťoučký", "děvče"],
             SLK => &["Ľúbica", "Ťahanovce"],
@@ -166,36 +136,41 @@ impl StageTestConfig for RemoveDiacritics {
     fn should_pass_through(lang: Lang) -> &'static [&'static str] {
         match lang {
             FRA | VIE | POL => &["hello", "world", "test123", ""],
-            ARA => &["كتاب", "hello", ""], // Clean Arabic + ASCII
-            CES | SLK => &["café", "hello", "world", ""],
+            ARA => &["كتاب", "hello", ""],
+            CES | SLK => &["hello", "world", "café", ""],
             _ => &["hello", "world", ""],
         }
     }
 
     fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
         match lang {
-            FRA => &[("café", "cafe"), ("naïve", "naive"), ("résumé", "resume")],
-            VIE => &[("Hà Nội", "Ha Noi"), ("Đạt", "Dat")],
-            POL => &[("Łódź", "Lodz"), ("żółć", "zolc"), ("gęślą", "gesla")],
-            ARA => &[("مَرْحَبًا", "مرحبا")],
+            FRA => &[
+                ("café", "cafe"),
+                ("naïve", "naive"),
+                ("résumé", "resume"),
+                ("Crème brûlée", "Creme brulee"),
+            ],
+            VIE => &[("Hà Nội", "Ha Noi"), ("Đạt", "Dat"), ("đẹp quá", "dep qua")],
+            ARA => &[("مَرْحَبًا", "مرحبا"), ("الْعَرَبِيَّةُ", "العربية")],
+            POL => &[
+                ("Łódź", "Lodz"),
+                ("żółć", "zolc"),
+                ("gęślą jaźń", "gesla jazn"),
+            ],
             CES => &[
                 ("děvče", "devce"),
-                ("Příliš", "Prílis"),
+                ("Příliš", "Prílis"), // Acute preserved — correct
                 ("žluťoučký", "zlutoucký"),
             ],
             SLK => &[
-                ("děvče", "děvce"),
-                ("Příliš", "Přílis"),
-                ("žluťoučký", "zlutoucký"),
+                ("Ľúbica", "Lúbica"), // Ľ→L, caron stripped; ú preserved
+                ("Ťahanovce", "Tahanovce"),
             ],
             _ => &[],
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Universal contract tests
-// ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod contract_tests {
     use super::*;
@@ -211,134 +186,150 @@ mod contract_tests {
 mod tests {
     use super::*;
     use crate::{
-        CAT, ITA, POR, SPA,
-        lang::data::{ARA, CES, DEU, ENG, FRA, HEB, NLD, POL, SLK, VIE},
+        HEB, ITA, POR, SPA,
+        context::Context,
+        lang::data::{ARA, CES, ENG, FRA, POL},
     };
-
-    // =========================================================================
-    // CORE FUNCTIONALITY TESTS
-    // =========================================================================
+    use std::borrow::Cow;
 
     #[test]
-    fn test_ascii_no_op() {
+    fn test_language_isolation_slavic() {
+        // Czech and Polish have different diacritic rules
+        // Each should only apply its own rules, preserving foreign characters
         let stage = RemoveDiacritics;
-        let c = Context::new(ENG);
+        let input = "Příliš žluťoučký kůň w Szczecinie mówi po polsku.";
 
-        // English has no strip/diacritic rules
-        assert!(!stage.needs_apply("hello world", &c).unwrap());
+        // Czech context: strips Czech diacritics but preserves Polish ones
+        let ces_ctx = Context::new(CES);
+        let ces_result = stage.apply(Cow::Borrowed(input), &ces_ctx).unwrap();
+        assert!(
+            ces_result.contains("Prílis"),
+            "Czech should strip ř→r but preserve í"
+        );
+        assert!(
+            ces_result.contains("mówi"),
+            "Czech should preserve Polish ó (not in Czech rules)"
+        );
 
-        let result = stage.apply(Cow::Borrowed("hello world"), &c).unwrap();
-        assert_eq!(result, "hello world");
+        // Polish context: strips Polish diacritics
+        let pol_ctx = Context::new(POL);
+        let pol_result = stage.apply(Cow::Borrowed(input), &pol_ctx).unwrap();
+        assert!(pol_result.contains("mowi"), "Polish should strip ó→o");
     }
 
     #[test]
-    fn test_empty_string() {
+    fn test_language_isolation_arabic_latin() {
+        // Arabic rules should strip Arabic diacritics but preserve Latin accents
         let stage = RemoveDiacritics;
-        let c = Context::new(FRA);
-        assert!(!stage.needs_apply("", &c).unwrap());
+        let ctx = Context::new(ARA);
 
-        let result = stage.apply(Cow::Borrowed(""), &c).unwrap();
-        assert_eq!(result, "");
+        let input = "café مَرْحَبًا résumé";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+
+        // Arabic harakat stripped
+        assert!(
+            result.contains("مرحبا"),
+            "Arabic diacritics should be stripped"
+        );
+
+        // Latin accents preserved (not in Arabic diacritic rules)
+        assert!(
+            result.contains("café"),
+            "Latin accents should be preserved in Arabic context"
+        );
+        assert!(
+            result.contains("résumé"),
+            "Latin accents should be preserved in Arabic context"
+        );
     }
 
     #[test]
-    fn test_no_diacritics_zero_copy() {
+    fn test_spanish_distinct_letter_preservation() {
         let stage = RemoveDiacritics;
-        let c = Context::new(FRA);
-        let input = "hello world";
+        let ctx = Context::new(SPA);
 
-        assert!(!stage.needs_apply(input, &c).unwrap());
-        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
-        assert_eq!(result, input);
-    }
+        // ñ is a DISTINCT LETTER in Spanish alphabet, not a diacritic
+        let input = "Niño";
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert_eq!(
+            result, "Niño",
+            "Spanish ñ should be preserved (distinct letter, not diacritic)"
+        );
 
-    #[test]
-    fn test_idempotency() {
-        let stage = RemoveDiacritics;
-        let c = Context::new(FRA);
-
-        let once = stage.apply(Cow::Borrowed("café"), &c).unwrap();
-        let twice = stage.apply(Cow::Borrowed(&once), &c).unwrap();
-        assert_eq!(once, "cafe");
-        assert_eq!(once, twice);
-    }
-
-    // =========================================================================
-    // LANGUAGES WITH ONLY SPACING DIACRITICS (diacritics field)
-    // =========================================================================
-
-    #[test]
-    fn test_arabic_harakat_removal() {
-        let stage = RemoveDiacritics;
-        let c = Context::new(ARA);
-
-        // Text with harakat (tashkīl)
-        let input = "مَرْحَبًا";
-        assert!(stage.needs_apply(input, &c).unwrap());
-        assert_eq!(stage.apply(Cow::Borrowed(input), &c).unwrap(), "مرحبا");
-
-        // Clean Arabic (no harakat)
-        let clean = "كتاب";
-        assert!(!stage.needs_apply(clean, &c).unwrap());
-        let result = stage.apply(Cow::Borrowed(clean), &c).unwrap();
-        assert_eq!(result, "كتاب");
+        // But actual diacritics are stripped
+        assert_eq!(
+            stage.apply(Cow::Borrowed("café"), &ctx).unwrap(),
+            "cafe",
+            "Spanish acute accents should be stripped"
+        );
+        assert_eq!(
+            stage.apply(Cow::Borrowed("Campeón"), &ctx).unwrap(),
+            "Campeon",
+            "Spanish accents should be stripped"
+        );
     }
 
     #[test]
     fn test_hebrew_nikkud_removal() {
         let stage = RemoveDiacritics;
-        let c = Context::new(HEB);
+        let ctx = Context::new(HEB);
 
+        // Hebrew with nikkud (vowel points)
         let input = "שָׁלוֹם"; // "Shalom" with nikkud
-        assert!(stage.needs_apply(input, &c).unwrap());
-        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
-        assert_eq!(result, "שלום");
+        assert!(
+            stage.needs_apply(input, &ctx).unwrap(),
+            "Hebrew with nikkud should trigger needs_apply"
+        );
+
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
+        assert_eq!(result, "שלום", "Hebrew nikkud should be removed");
+
+        // Clean Hebrew (no nikkud)
+        let clean = "שלום";
+        assert!(
+            !stage.needs_apply(clean, &ctx).unwrap(),
+            "Clean Hebrew should not trigger needs_apply"
+        );
     }
 
     #[test]
     fn test_mixed_scripts_arabic() {
+        // Validates that Latin text passes through unchanged in Arabic context
         let stage = RemoveDiacritics;
-        let c = Context::new(ARA);
+        let ctx = Context::new(ARA);
 
         let input = "Hello مَرْحَبًا World";
-        assert!(stage.needs_apply(input, &c).unwrap());
-        let result = stage.apply(Cow::Borrowed(input), &c).unwrap();
-        assert_eq!(result, "Hello مرحبا World");
-    }
-
-    // =========================================================================
-    // ROMANCE LANGUAGES (strip_map field for precomposed letters)
-    // =========================================================================
-
-    #[test]
-    fn test_french_accent_removal() {
-        let stage = RemoveDiacritics;
-        let c = Context::new(FRA);
-
-        assert_eq!(stage.apply(Cow::Borrowed("café"), &c).unwrap(), "cafe");
-        assert_eq!(stage.apply(Cow::Borrowed("naïve"), &c).unwrap(), "naive");
-        assert_eq!(stage.apply(Cow::Borrowed("résumé"), &c).unwrap(), "resume");
-        assert_eq!(
-            stage.apply(Cow::Borrowed("Crème brûlée"), &c).unwrap(),
-            "Creme brulee"
-        );
-    }
-
-    #[test]
-    fn test_spanish_accents() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(SPA);
-
-        assert_eq!(stage.apply(Cow::Borrowed("café"), &ctx).unwrap(), "cafe");
-        assert_eq!(
-            stage.apply(Cow::Borrowed("Campeón"), &ctx).unwrap(),
-            "Campeon"
-        );
-
-        // Note: ñ is preserved (it's a distinct letter in Spanish alphabet, not a diacritic)
-        let input = "Niño";
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        assert_eq!(result, "Niño");
+
+        assert_eq!(
+            result, "Hello مرحبا World",
+            "Latin text should pass through, Arabic diacritics stripped"
+        );
+    }
+
+    #[test]
+    fn test_languages_without_rules_skip() {
+        let stage = RemoveDiacritics;
+
+        // English, German, Dutch have no diacritic removal rules
+        for &lang in &[ENG, crate::DEU, crate::NLD] {
+            let ctx = Context::new(lang);
+
+            // Should not have rules
+            assert!(
+                !ctx.lang_entry
+                    .has_pre_composed_to_base_map_or_spacing_diacritics(),
+                "{:?} should not have diacritic rules",
+                lang
+            );
+
+            // Should not apply even to accented text
+            assert!(
+                !stage.needs_apply("test café résumé", &ctx).unwrap(),
+                "{:?} should skip diacritic removal",
+                lang
+            );
+        }
     }
 
     #[test]
@@ -348,7 +339,12 @@ mod tests {
 
         let input = "São Luís amanhã maçã";
         let expected = "Sao Luis amanha maca";
-        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            expected,
+            "Portuguese diacritics should be fully stripped"
+        );
     }
 
     #[test]
@@ -358,184 +354,39 @@ mod tests {
 
         let input = "perché caffè città";
         let expected = "perche caffe citta";
-        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
+
+        assert_eq!(
+            stage.apply(Cow::Borrowed(input), &ctx).unwrap(),
+            expected,
+            "Italian grave and acute accents should be stripped"
+        );
     }
 
     #[test]
-    fn test_catalan_accents() {
+    fn test_empty_string() {
         let stage = RemoveDiacritics;
-        let ctx = Context::new(CAT);
+        let ctx = Context::new(FRA);
 
-        let input = "café òpera";
-        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-
-        // Catalan strips some accents but preserves quality distinctions
-        assert!(result.contains("cafe") || result == input);
-    }
-
-    // =========================================================================
-    // SLAVIC LANGUAGES (strip_map field for carons, ogoneks, etc.)
-    // =========================================================================
-
-    #[test]
-    fn test_czech_diacritics() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(CES);
-
-        let input = "Příliš žluťoučký kůň úpěl ďábelské ódy";
-        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-
-        // Czech strips háček, kroužek but preserves acute length markers
-        assert!(result.contains("Prílis")); // ř→r, but í preserved
-        assert!(result.contains("zlutoucký")); // ž→z, ť→t, ů→u
-    }
-
-    #[test]
-    fn test_slovak_diacritics() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(SLK);
-
-        let input = "Ľúbica a Ďurko";
-        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-
-        // Slovak strips carons but preserves acute
-        assert!(result.contains("Lúbica")); // Ľ→L
-        assert!(result.contains("Durko")); // Ď→D
-    }
-
-    #[test]
-    fn test_polish_all_diacritics() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(POL);
-
-        let input = "Łódź żółć gęślą jaźń";
-        let expected = "Lodz zolc gesla jazn";
-        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
-    }
-
-    // =========================================================================
-    // VIETNAMESE (comprehensive strip_map for all tone-marked vowels)
-    // =========================================================================
-
-    #[test]
-    fn test_vietnamese_tone_marks() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(VIE);
-
-        let input = "Hà Nội đẹp quá! Tôi tên là Đạt.";
-        let expected = "Ha Noi dep qua! Toi ten la Dat.";
-        assert_eq!(stage.apply(Cow::Borrowed(input), &ctx).unwrap(), expected);
-    }
-
-    #[test]
-    fn test_vietnamese_zero_copy() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(VIE);
-
-        let input = "toi ten la Nam";
-        assert!(!stage.needs_apply(input, &ctx).unwrap());
-    }
-
-    // =========================================================================
-    // LANGUAGES WITHOUT RULES (should be no-op)
-    // =========================================================================
-
-    #[test]
-    fn remove_diacritics_skips_no_rules_non_ascii() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(ENG);
-        let input = "café";
-        assert!(!stage.needs_apply(input, &ctx).unwrap());
-        // Pipeline would skip apply entirely
-    }
-
-    #[test]
-    fn test_languages_without_rules() {
-        let stage = RemoveDiacritics;
-
-        for lang in [ENG, DEU, NLD] {
-            let c = Context::new(lang);
-            assert!(
-                !c.lang_entry
-                    .has_pre_composed_to_base_map_or_spacing_diacritics()
-            );
-            assert!(!stage.needs_apply("test café", &c).unwrap());
-        }
-    }
-
-    // =========================================================================
-    // CHAR MAPPER TESTS
-    // =========================================================================
-
-    // #[test]
-    // fn test_char_mapper_eligibility() {
-    //     let stage = RemoveDiacritics;
-
-    //     // Languages with rules: eligible
-    //     assert!(stage.as_char_mapper(&Context::new(ARA)).is_some());
-    //     assert!(stage.as_char_mapper(&Context::new(FRA)).is_some());
-    //     assert!(stage.as_char_mapper(&Context::new(VIE)).is_some());
-    //     assert!(stage.as_char_mapper(&Context::new(POL)).is_some());
-
-    //     // Languages without rules: not eligible
-    //     assert!(stage.as_char_mapper(&Context::new(ENG)).is_none());
-    //     assert!(stage.as_char_mapper(&Context::new(DEU)).is_none());
-    //     assert!(stage.as_char_mapper(&Context::new(NLD)).is_none());
-    // }
-
-    // =========================================================================
-    // EDGE CASES & SPECIAL SCENARIOS
-    // =========================================================================
-
-    #[test]
-    fn test_mixed_slavic_sentence() {
-        let stage = RemoveDiacritics;
-        let input = "Příliš žluťoučký kůň w Szczecinie mówi po polsku.";
-
-        // Czech: strips Czech diacritics but preserves foreign ones
-        let ces = stage
-            .apply(Cow::Borrowed(input), &Context::new(CES))
-            .unwrap();
-        assert!(ces.contains("Prílis")); // ř→r but í preserved
-        assert!(ces.contains("mówi")); // Polish ó preserved
-
-        // Polish: strips Polish diacritics
-        let pol = stage
-            .apply(Cow::Borrowed(input), &Context::new(POL))
-            .unwrap();
-        assert!(pol.contains("mowi")); // ó→o
-    }
-
-    #[test]
-    fn test_arabic_preserves_latin() {
-        let stage = RemoveDiacritics;
-        let ctx = Context::new(ARA);
-
-        // Latin accents NOT in Arabic's diacritics list
-        let latin_acute = "café مَرْحَبًا";
-        let result = stage.apply(Cow::Borrowed(latin_acute), &ctx).unwrap();
-
-        // Should strip Arabic harakat but preserve Latin é
-        assert!(result.contains("café"));
-        assert!(result.contains("مرحبا"));
+        assert!(!stage.needs_apply("", &ctx).unwrap());
+        assert_eq!(stage.apply(Cow::Borrowed(""), &ctx).unwrap(), "");
     }
 
     #[test]
     fn test_needs_apply_accuracy() {
         let stage = RemoveDiacritics;
 
-        // French
-        let ctx = Context::new(FRA);
-        assert!(stage.needs_apply("café", &ctx).unwrap());
-        assert!(!stage.needs_apply("hello", &ctx).unwrap());
+        // French: should detect accents
+        let fra = Context::new(FRA);
+        assert!(stage.needs_apply("café", &fra).unwrap());
+        assert!(!stage.needs_apply("hello", &fra).unwrap());
 
-        // Arabic
-        let ctx = Context::new(ARA);
-        assert!(stage.needs_apply("مَرْحَبًا", &ctx).unwrap());
-        assert!(!stage.needs_apply("كتاب", &ctx).unwrap());
+        // Arabic: should detect harakat
+        let ara = Context::new(ARA);
+        assert!(stage.needs_apply("مَرْحَبًا", &ara).unwrap());
+        assert!(!stage.needs_apply("كتاب", &ara).unwrap());
 
-        // English (no rules)
-        let ctx = Context::new(ENG);
-        assert!(!stage.needs_apply("café", &ctx).unwrap());
+        // English: no rules, never applies
+        let eng = Context::new(ENG);
+        assert!(!stage.needs_apply("café", &eng).unwrap());
     }
 }

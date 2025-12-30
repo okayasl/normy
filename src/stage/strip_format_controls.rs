@@ -10,19 +10,14 @@ use std::iter::FusedIterator;
 
 /// Remove all Unicode format control characters (General Category `Cf`)
 ///
-/// Strips invisible presentation controls that affect rendering but not content:
-/// - Zero-width spaces (ZWSP, ZWNJ, ZWJ)
-/// - Bidirectional overrides (LRM, RLM, LRE, PDF, etc.)
+/// Strips invisible presentation controls:
+/// - Zero-width spaces/joiners (ZWSP, ZWJ, ZWNJ)
+/// - Bidirectional marks/overrides (LRM, RLM, LRE, etc.)
 /// - Byte Order Mark (BOM U+FEFF)
-/// - Tag characters, interlinear annotation, etc.
+/// - Word joiner, invisible operators
 ///
-/// ### Critical for:
-/// - Search indexing (prevents hidden text attacks)
-/// - ML training data cleaning
-/// - API input normalization
-/// - Tokenization consistency
-///
-/// Zero-copy when clean. Fully fused pipeline. Language-agnostic. Idempotent.
+/// Critical for search security and tokenization consistency.
+/// Zero-copy when clean. Fully fusable.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StripFormatControls;
 
@@ -98,10 +93,12 @@ impl StageTestConfig for StripFormatControls {
 
     fn samples(_lang: Lang) -> &'static [&'static str] {
         &[
-            "hello\u{200B}world",
-            "\u{FEFF}bommed",
-            "Arabic\u{200F}text",
-            "a\u{2066}b\u{2069}c",
+            "hello\u{200B}world",       // ZWSP
+            "\u{FEFF}bommed",           // BOM
+            "Arabic\u{200F}text",       // RLM
+            "a\u{2066}b\u{2069}c",      // LRI/PDI
+            "text\u{200D}join\u{200C}", // ZWJ/ZWNJ
+            "word\u{2060}joiner",       // Word joiner
             "clean text",
         ]
     }
@@ -112,9 +109,11 @@ impl StageTestConfig for StripFormatControls {
 
     fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
         &[
-            ("hello\u{200B}world", "helloworld"), // Remove ZWSP
-            ("\u{FEFF}text", "text"),             // Remove BOM
-            ("a\u{200E}b", "ab"),                 // Remove LRM
+            ("hello\u{200B}world", "helloworld"),
+            ("\u{FEFF}text", "text"),
+            ("a\u{200E}b", "ab"),
+            ("join\u{200D}me", "joinme"),
+            ("no\u{2060}break", "nobreak"),
         ]
     }
 }
@@ -123,6 +122,7 @@ impl StageTestConfig for StripFormatControls {
 mod contract_tests {
     use super::*;
     use crate::assert_stage_contract;
+
     #[test]
     fn universal_contract_compliance() {
         assert_stage_contract!(StripFormatControls);
@@ -135,78 +135,33 @@ mod tests {
     use crate::lang::data::ENG;
 
     #[test]
-    fn test_zero_width_space() {
+    fn test_non_latin_scripts() {
+        // Ensure format control stripping works with non-ASCII text
         let stage = StripFormatControls;
         let ctx = Context::new(ENG);
 
-        let text = "hello\u{200B}world";
-        assert!(stage.needs_apply(text, &ctx).unwrap());
+        // Arabic with RLM
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("مرحبا\u{200F} hello"), &ctx)
+                .unwrap(),
+            "مرحبا hello"
+        );
 
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "helloworld");
-    }
+        // Chinese with ZWSP
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("你好\u{200B}世界"), &ctx)
+                .unwrap(),
+            "你好世界"
+        );
 
-    #[test]
-    fn test_bidi_marks() {
-        let stage = StripFormatControls;
-        let ctx = Context::new(ENG);
-
-        // LRM + RLM
-        let text = "hello\u{200E}world\u{200F}";
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "helloworld");
-    }
-
-    #[test]
-    fn test_bom() {
-        let stage = StripFormatControls;
-        let ctx = Context::new(ENG);
-
-        let text = "\u{FEFF}hello"; // BOM at start
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "hello");
-    }
-
-    #[test]
-    fn test_multiple_controls() {
-        let stage = StripFormatControls;
-        let ctx = Context::new(ENG);
-
-        let text = "\u{200B}\u{200C}\u{200D}text\u{202A}\u{202C}";
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "text");
-    }
-
-    #[test]
-    fn test_no_controls_zero_copy() {
-        let stage = StripFormatControls;
-        let ctx = Context::new(ENG);
-
-        let text = "hello world";
-        assert!(!stage.needs_apply(text, &ctx).unwrap());
-    }
-
-    #[test]
-    fn test_real_world_arabic() {
-        let stage = StripFormatControls;
-        let ctx = Context::new(ENG);
-
-        // Arabic text with RLM
-        let text = "مرحبا\u{200F} hello";
-        let result = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        assert_eq!(result, "مرحبا hello");
-    }
-
-    #[test]
-    fn test_idempotency() {
-        let stage = StripFormatControls;
-        let ctx = Context::new(ENG);
-
-        let text = "hello\u{200B}world";
-        let first = stage.apply(Cow::Borrowed(text), &ctx).unwrap();
-        let second = stage.apply(Cow::Borrowed(&first), &ctx).unwrap();
-
-        assert_eq!(first, "helloworld");
-        assert_eq!(first, second);
+        // Mixed scripts with BOM
+        assert_eq!(
+            stage
+                .apply(Cow::Borrowed("\u{FEFF}Привет مرحبا"), &ctx)
+                .unwrap(),
+            "Привет مرحبا"
+        );
     }
 }

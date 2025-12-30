@@ -1,16 +1,9 @@
-[workspace]
-members = [
-    ".",
-    "normy-lang-macros",
-]
-
 [package]
 name = "normy"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-normy-lang-macros = { path = "./normy-lang-macros" }
 thiserror = "2.0.17"
 rand = "0.9.2"
 memchr = "2.7.6"
@@ -18,7 +11,6 @@ html-escape = "0.2.13"
 paste = "1.0.15"
 phf = { version = "0.13.1", features = ["macros"] }
 pulldown-cmark = { version = "0.13", default-features = false }
-unicode-normalization = "0.1.25"
 simdutf8 = { version = "0.1.5", optional = true }
 smallvec = "1.15.1"
 icu_normalizer = { version = "2.1.1", default-features = false, features = [
@@ -26,6 +18,7 @@ icu_normalizer = { version = "2.1.1", default-features = false, features = [
 ] }
 
 [dev-dependencies]
+unicode-normalization = "0.1.25"
 lazy_static = "1.5.0"
 proptest = "1.9.0"
 criterion = { version = "0.7.0", features = ["html_reports", "plotters"] }
@@ -67,11 +60,6 @@ harness = false
 name = "cfb"
 path = "benches/comparison_fusing_bench.rs"
 harness = true
-
-[[bench]]
-name = "lb"
-path = "benches/lang_bench.rs"
-harness = false
 
 [[bench]]
 name = "lab"

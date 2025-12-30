@@ -42,7 +42,7 @@ pub trait StageTestConfig: Stage + Sized {
 ///
 /// ### The Seven Universal Contracts:
 /// 1. `zero_copy_when_no_changes` → no allocation when input == output
-/// 2. `static_and_dynamic_iter_paths_equivalent_to_apply` → try_iter and try_dynamic_iter produce identical results to apply()
+/// 2. `fused_path_equivalent_to_apply` → static fused path produce identical results to apply()
 /// 3. `stage_is_idempotent` → applying twice yields same result as once
 /// 4. `needs_apply_is_accurate` → correctly predicts whether apply() would change text
 /// 5. `handles_empty_string_and_ascii` → graceful on edge cases

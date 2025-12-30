@@ -10,22 +10,12 @@ use std::iter::FusedIterator;
 
 /// Remove all Unicode control characters (General Category `Cc`)
 ///
-/// This stage strips **C0 and C1 control characters** (`U+0000`–`U+001F`, `U+007F`–`U+009F`)
-/// which are never visible and often represent corruption, logging artifacts,
-/// or malicious injection in text streams.
+/// This stage strips C0 (U+0000–U+001F) and C1 (U+007F–U+009F) control characters,
+/// which are invisible and often indicate corruption or injection.
 ///
-/// ### Use Cases
-/// - Cleaning scraped web text
-/// - Sanitizing user input from legacy systems
-/// - Removing terminal control sequences (BEL, ESC, etc.)
-/// - Preparing logs for indexing
-///
-/// ### Important Notes
-/// - **Format controls (Cf)** like ZWSP, ZWJ, RLM are **not** removed → use `StripFormatControls`
-/// - **Zero-copy** when no control characters present
-/// - **CharMapper path** → fully fused, zero-allocation pipeline capable
-///
-/// This stage is **language-agnostic** and **idempotent**.
+/// - Format controls (Cf) like ZWSP/ZWJ are preserved → use `StripFormatControls`
+/// - Zero-copy when no Cc present
+/// - Fully fusable filter
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StripControlChars;
 
@@ -97,15 +87,14 @@ impl<I: FusedIterator<Item = char>> FusedIterator for StripControlCharsAdapter<I
 
 impl StageTestConfig for StripControlChars {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // 1→0 mapping (filter)
+        &[]
     }
 
     fn samples(_lang: Lang) -> &'static [&'static str] {
         &[
             "hello\u{0001}world\u{007F}",
             "clean text only",
-            "\u{001F}start",
-            "end\u{009F}",
+            "\u{001F}start\u{0085}middle\u{009F}end",
             "",
         ]
     }
@@ -119,6 +108,7 @@ impl StageTestConfig for StripControlChars {
             ("hello\u{0001}world", "helloworld"),
             ("\u{001F}start", "start"),
             ("end\u{009F}", "end"),
+            ("a\u{007F}b\u{0085}c", "abc"),
         ]
     }
 }
@@ -127,6 +117,7 @@ impl StageTestConfig for StripControlChars {
 mod contract_tests {
     use super::*;
     use crate::assert_stage_contract;
+
     #[test]
     fn universal_contract_compliance() {
         assert_stage_contract!(StripControlChars);
@@ -135,49 +126,25 @@ mod contract_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::context::Context;
+    use crate::unicode::is_control;
 
     #[test]
-    fn test_is_control() {
-        assert!(is_control('\u{0000}'));
-        assert!(is_control('\u{001F}'));
-        assert!(is_control('\u{007F}'));
-        assert!(is_control('\u{009F}'));
+    fn test_cc_vs_cf_boundary() {
+        // Documents that StripControlChars (Cc) and StripFormatControls (Cf) don't overlap
+
+        // Cc - Control characters (stripped by this stage)
+        assert!(is_control('\u{0000}')); // NUL
+        assert!(is_control('\u{001F}')); // C0 controls
+        assert!(is_control('\u{007F}')); // DEL
+        assert!(is_control('\u{009F}')); // C1 controls
+
+        // Not Cc - Should NOT be stripped by this stage
         assert!(!is_control('A'));
         assert!(!is_control(' '));
-        assert!(!is_control('\u{200B}')); // zero-width space is not Cc
-    }
 
-    #[test]
-    fn test_needs_apply_detects_control_chars() {
-        let stage = StripControlChars;
-        let ctx = Context::default();
-
-        assert!(stage.needs_apply("hello\u{0001}world", &ctx).unwrap());
-        assert!(!stage.needs_apply("hello world", &ctx).unwrap());
-    }
-
-    #[test]
-    fn test_apply_removes_control_chars() {
-        let stage = StripControlChars;
-        let ctx = Context::default();
-
-        let input = "hello\u{0001}\u{007F}world";
-        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        assert_eq!(result, "helloworld");
-    }
-
-    #[test]
-    fn test_idempotency() {
-        let stage = StripControlChars;
-        let ctx = Context::default();
-
-        let input = "hello\u{0001}\u{007F}world";
-        let first = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        let second = stage.apply(first.clone(), &ctx).unwrap();
-
-        assert_eq!(first, "helloworld");
-        assert_eq!(first, second);
+        // CRITICAL: Format controls (Cf) are NOT control chars (Cc)
+        assert!(!is_control('\u{200B}')); // ZWSP - handled by StripFormatControls
+        assert!(!is_control('\u{200E}')); // LRM - handled by StripFormatControls
+        assert!(!is_control('\u{FEFF}')); // BOM - handled by StripFormatControls
     }
 }

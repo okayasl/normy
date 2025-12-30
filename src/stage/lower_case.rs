@@ -148,9 +148,9 @@ impl StageTestConfig for LowerCase {
 
     fn should_pass_through(lang: Lang) -> &'static [&'static str] {
         match lang {
-            TUR => &["istanbul", "ısı", "i"],
-            DEU => &["straße", "fuß"],
-            NLD => &["ijssel"],
+            TUR => &["istanbul", "ısparta", "i", "ı"],
+            DEU => &["groß", "straße", "fuß"],
+            NLD => &["ijssel", "ĳssel"],
             ELL => &["σοφοσ", "οδοσ"],
             LIT => &["jis", "jį"],
             _ => &["hello", "world", "test123", ""],
@@ -159,111 +159,43 @@ impl StageTestConfig for LowerCase {
 
     fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
         match lang {
-            TUR => &[("İ", "i"), ("I", "ı"), ("İSTANBUL", "istanbul")],
-            DEU => &[("ẞ", "ß"), ("GROẞ", "groß")],
-            NLD => &[
-                // Dutch IJ digraph: LowerCase does NOT treat it as a unit → this is intentional
-                ("IJssel", "ijssel"), // ← correct for LowerCase
-                ("Ĳssel", "ĳssel"),
+            TUR => &[
+                ("İ", "i"),
+                ("I", "ı"),
+                ("İSTANBUL", "istanbul"),
+                ("ISPARTA", "ısparta"),
             ],
-            ELL => &[("ΣΟΦΟΣ", "σοφοσ")],
+            DEU => &[("ẞ", "ß"), ("GROẞ", "groß"), ("STRAẞE", "straße")],
+            NLD => &[("IJssel", "ijssel"), ("Ĳssel", "ĳssel")],
+            ELL => &[("ΣΟΦΟΣ", "σοφοσ"), ("ΟΔΟΣ", "οδοσ")],
             LIT => &[("JIS", "jis")],
             _ => &[("HELLO", "hello")],
         }
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Universal contract tests
-// ─────────────────────────────────────────────────────────────────────────────
+// Universal contract compliance
 #[cfg(test)]
 mod contract_tests {
     use super::*;
     use crate::assert_stage_contract;
+
     #[test]
     fn universal_contract_compliance() {
         assert_stage_contract!(LowerCase);
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// One Language Per Test — The Normy Way
-// ─────────────────────────────────────────────────────────────────────────────
+// Optional: Keep only to illustrate philosophical difference
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        CaseFold,
-        lang::data::{DEU, ELL, NLD, TUR},
-    };
-
-    #[test]
-    fn lowercase_turkish_dotted_i() {
-        let ctx = Context::new(TUR);
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("İSTANBUL"), &ctx).unwrap(),
-            "istanbul"
-        );
-    }
-
-    #[test]
-    fn lowercase_turkish_dotless_i() {
-        let ctx = Context::new(TUR);
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("ISPARTA"), &ctx).unwrap(),
-            "ısparta"
-        );
-    }
-
-    #[test]
-    fn lowercase_german_eszett_preserved() {
-        let ctx = Context::new(DEU);
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("GROẞ"), &ctx).unwrap(),
-            "groß"
-        );
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("STRAẞE"), &ctx).unwrap(),
-            "straße"
-        );
-    }
-
-    #[test]
-    fn lowercase_dutch_ij_no_digraph() {
-        let ctx = Context::new(NLD);
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("IJssel"), &ctx).unwrap(),
-            "ijssel"
-        );
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("Ĳssel"), &ctx).unwrap(),
-            "ĳssel"
-        );
-    }
-
-    #[test]
-    fn lowercase_greek_final_sigma_applied() {
-        let ctx = Context::new(ELL);
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("ΣΟΦΟΣ"), &ctx).unwrap(),
-            "σοφοσ"
-        );
-        assert_eq!(
-            LowerCase.apply(Cow::Borrowed("ΟΔΟΣ"), &ctx).unwrap(),
-            "οδοσ"
-        );
-    }
-
-    #[test]
-    fn lowercase_lithuanian_contextual_i() {
-        let ctx = Context::new(LIT);
-        assert_eq!(LowerCase.apply(Cow::Borrowed("JIS"), &ctx).unwrap(), "jis");
-    }
+    use crate::CaseFold;
 
     #[test]
     fn lowercase_vs_case_fold_behavior() {
-        let ctx_de = Context::new(DEU);
-        let ctx_nl = Context::new(NLD);
+        let ctx_de = Context::new(crate::lang::data::DEU);
+        let ctx_nl = Context::new(crate::lang::data::NLD);
 
         // German: LowerCase preserves ß, CaseFold expands
         assert_eq!(
@@ -275,7 +207,7 @@ mod tests {
             "gross"
         );
 
-        // Dutch: LowerCase no digraph, CaseFold has digraph
+        // Dutch: LowerCase treats IJ per-character, CaseFold treats as digraph
         assert_eq!(
             LowerCase.apply(Cow::Borrowed("IJssel"), &ctx_nl).unwrap(),
             "ijssel"

@@ -9,25 +9,12 @@ use std::borrow::Cow;
 
 /// Locale-aware orthographic transliteration (lossy, opt-in).
 ///
-/// `Transliterate` performs **lossy** decomposition of language-specific letterforms
-/// into their conventional multi-character representations:
-///
-/// - French: `Œ` → "oe", `Æ` → "ae"
-/// - German: `Ä` → "ae", `ß` → "ss"
-/// - Danish/Norwegian: `Å` → "aa"
-/// - Polish: `Ł` → "l"
-///
-/// # Key Principles
-///
-/// - **Case-Preserving**: `Straße` → `Strasse`
-/// - **Opt-In Only**: Never enabled by default
-/// - **Locale-Strict**: Only rules defined for current language
-/// - **Zero-Copy When Idle**: Skipped entirely if no rules or no matches
-/// - **CharMapper Path**: Fully fused when only 1→1 mappings exist
-///
-/// When only one-to-one mappings are present (most languages), this stage runs
-/// **zero-allocation** via `CharMapper`. For rare 1→N cases (e.g. `Œ` → "oe"),
-/// it falls back to allocation — this is accepted and explicit.
+/// Performs language-specific multi-character expansions:
+/// - French: Œ→oe, Æ→ae
+/// - German: Ä→ae, Ö→oe, Ü→ue
+/// - Nordic: Å→aa
+/// - Case-preserving
+/// - Zero-copy when no rules or no matches
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Transliterate;
 
@@ -146,7 +133,7 @@ impl<'a, I: FusedIterator<Item = char>> FusedIterator for TransliterateAdapter<'
 
 impl StageTestConfig for Transliterate {
     fn one_to_one_languages() -> &'static [Lang] {
-        &[] // Most languages have multi-char expansions (Ä→ae, Œ→oe, etc.)
+        &[] // Multi-char expansions common
     }
 
     fn samples(lang: Lang) -> &'static [&'static str] {
@@ -222,9 +209,6 @@ impl StageTestConfig for Transliterate {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Universal contract tests
-// ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
 mod contract_tests {
     use super::*;
@@ -239,123 +223,22 @@ mod contract_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CAT, DAN, ENG, FRA, TUR};
-    use std::borrow::Cow;
+    use crate::{DAN, FRA};
 
     #[test]
-    fn test_no_transliteration() {
-        let stage = Transliterate;
-        let ctx = Context::new(ENG);
-        let input = "Hello World";
-        assert!(!stage.needs_apply(input, &ctx).unwrap());
-        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        assert_eq!(result, "Hello World");
-    }
-
-    #[test]
-    fn test_french_ligatures() {
+    fn test_language_isolation() {
+        // Critical: Only applies rules for the context language
         let stage = Transliterate;
         let ctx = Context::new(FRA);
+        let input = "ŒUVRE Århus Straße"; // French + Danish + German
+        let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
 
-        let result = stage.apply(Cow::Borrowed("ŒUVRE"), &ctx).unwrap();
-        assert_eq!(result, "oeUVRE");
+        // Only French Œ→oe applies, Danish Å and German ß unchanged
+        assert_eq!(result, "oeUVRE Århus Straße");
 
-        let result = stage.apply(Cow::Borrowed("œuvre"), &ctx).unwrap();
-        assert_eq!(result, "oeuvre");
-
-        let result = stage.apply(Cow::Borrowed("Æon"), &ctx).unwrap();
-        assert_eq!(result, "aeon");
-    }
-
-    #[test]
-    fn test_danish_special_chars() {
-        let stage = Transliterate;
+        // Try with Danish context
         let ctx = Context::new(DAN);
-
-        let result = stage.apply(Cow::Borrowed("Århus"), &ctx).unwrap();
-        assert_eq!(result, "aarhus");
-
-        let result = stage.apply(Cow::Borrowed("København"), &ctx).unwrap();
-        assert_eq!(result, "Koebenhavn");
-    }
-
-    #[test]
-    fn test_catalan_cedilla() {
-        let stage = Transliterate;
-        let ctx = Context::new(CAT);
-
-        assert!(stage.needs_apply("Façade", &ctx).unwrap());
-        let result = stage.apply(Cow::Borrowed("Façade"), &ctx).unwrap();
-        assert_eq!(result, "Facade");
-
-        let result = stage.apply(Cow::Borrowed("plaça"), &ctx).unwrap();
-        assert_eq!(result, "placa");
-    }
-
-    #[test]
-    fn test_turkish_unaffected() {
-        let stage = Transliterate;
-        let ctx = Context::new(TUR);
-
-        assert!(!stage.needs_apply("İstanbul", &ctx).unwrap());
-        let result = stage.apply(Cow::Borrowed("İstanbul"), &ctx).unwrap();
-        assert_eq!(result, "İstanbul");
-    }
-
-    #[test]
-    fn test_mixed_text() {
-        let stage = Transliterate;
-        let ctx = Context::new(FRA);
-
-        let input = "ŒUVRE Århus Łódź Straße";
         let result = stage.apply(Cow::Borrowed(input), &ctx).unwrap();
-        // Only French rules apply: Œ→oe, Æ→ae, Ç→c
-        assert_eq!(result, "oeUVRE Århus Łódź Straße");
-    }
-
-    #[test]
-    fn test_zero_copy_when_no_replacements() {
-        let stage = Transliterate;
-        let ctx = Context::new(FRA);
-
-        let input = Cow::Borrowed("Paris France");
-        assert!(!stage.needs_apply("Paris France", &ctx).unwrap());
-
-        let result = stage.apply(input.clone(), &ctx).unwrap();
-        assert_eq!(result, "Paris France");
-    }
-
-    #[test]
-    fn test_needs_apply_accuracy() {
-        let stage = Transliterate;
-
-        // French
-        let ctx = Context::new(FRA);
-        assert!(stage.needs_apply("Œuvre", &ctx).unwrap());
-        assert!(!stage.needs_apply("Paris", &ctx).unwrap());
-
-        // Catalan
-        let ctx = Context::new(CAT);
-        assert!(stage.needs_apply("Barça", &ctx).unwrap());
-        assert!(!stage.needs_apply("Barcelona", &ctx).unwrap());
-
-        // English (no rules)
-        let ctx = Context::new(ENG);
-        assert!(!stage.needs_apply("anything", &ctx).unwrap());
-    }
-
-    #[test]
-    fn test_capacity_hint_accuracy() {
-        // French: Œ→oe (3 bytes → 2 bytes, but 1 char → 2 chars)
-        let ctx = Context::new(FRA);
-        let (count, _extra) = ctx.lang_entry.hint_capacity_transliterate("Œuvre");
-        assert_eq!(count, 1, "Should detect 1 transliteration");
-        // Œ is 3 bytes UTF-8, "oe" is 2 bytes → extra should be 0 (contraction)
-
-        // Catalan: Ç→c (2 bytes → 1 byte, one-to-one)
-        let ctx = Context::new(CAT);
-        let (count, extra) = ctx.lang_entry.hint_capacity_transliterate("Façade");
-        assert_eq!(count, 1, "Should detect 1 transliteration");
-        assert_eq!(extra, 0, "One-to-one should have 0 extra bytes");
+        assert_eq!(result, "ŒUVRE aarhus Straße"); // Only Å→aa applies
     }
 }

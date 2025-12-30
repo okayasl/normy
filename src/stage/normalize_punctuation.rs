@@ -105,108 +105,37 @@ impl<I: FusedIterator<Item = char>> FusedIterator for NormalizePunctuationAdapte
 
 impl StageTestConfig for NormalizePunctuation {
     fn one_to_one_languages() -> &'static [Lang] {
-        all_langs() // Language-independent
+        all_langs()
     }
 
     fn samples(_lang: Lang) -> &'static [&'static str] {
-        &["Hello \"World\" 123", " déjà-vu… ", "TEST—", "", "\"'–…\""]
+        &["Hello \"World\" 123", " déjà-vu… ", "TEST—", "", "\"'–…•‹›"]
     }
 
     fn should_pass_through(_lang: Lang) -> &'static [&'static str] {
-        &[
-            "hello world", // No fancy punctuation
-            "test-123",    // ASCII hyphen
-            "it's okay",   // ASCII apostrophe
-            "",
-        ]
+        &["hello world", "test-123", "it's okay", ""]
     }
 
     fn should_transform(_lang: Lang) -> &'static [(&'static str, &'static str)] {
         &[
-            ("\"Hello\"", "\"Hello\""), // Smart quotes → ASCII
-            ("'world'", "'world'"),     // Smart single quotes
-            ("—dash—", "-dash-"),       // Em dash → hyphen
-            ("…", "."),                 // Ellipsis
+            ("“Hello”", "\"Hello\""),
+            ("‘world’", "'world'"),
+            ("—dash—", "-dash-"),
+            ("…", "."),
+            ("• bullet", "* bullet"),
+            ("‹angle›", "<angle>"),
         ]
     }
 }
 
+// Single source of truth
 #[cfg(test)]
 mod contract_tests {
     use super::*;
-    use crate::{ENG, assert_stage_contract};
+    use crate::assert_stage_contract;
+
     #[test]
     fn universal_contract_compliance() {
         assert_stage_contract!(NormalizePunctuation);
-    }
-
-    #[test]
-    fn test_apply_mixed_punctuation() {
-        let stage = NormalizePunctuation;
-        let result = stage
-            .apply(Cow::Borrowed("“Hello”—‘world’…•‹›"), &Context::new(ENG))
-            .unwrap();
-        assert_eq!(result, "\"Hello\"-'world'.*<>");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lang::data::ENG;
-
-    #[test]
-    fn test_needs_apply_detects_fancy_quotes() {
-        let stage = NormalizePunctuation;
-        assert!(
-            stage
-                .needs_apply("hello “world”", &Context::new(ENG))
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn test_needs_apply_false_for_ascii() {
-        let stage = NormalizePunctuation;
-        assert!(
-            !stage
-                .needs_apply("hello world", &Context::new(ENG))
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn test_apply_quotes() {
-        let stage = NormalizePunctuation;
-        let result = stage
-            .apply(Cow::Borrowed("“Hello” ‘world’"), &Context::new(ENG))
-            .unwrap();
-        assert_eq!(result, "\"Hello\" 'world'");
-    }
-
-    #[test]
-    fn test_apply_dashes() {
-        let stage = NormalizePunctuation;
-        let result = stage
-            .apply(Cow::Borrowed("foo – bar — baz"), &Context::new(ENG))
-            .unwrap();
-        assert_eq!(result, "foo - bar - baz");
-    }
-
-    #[test]
-    fn test_apply_ellipsis() {
-        let stage = NormalizePunctuation;
-        let result = stage
-            .apply(Cow::Borrowed("Wait… really?"), &Context::new(ENG))
-            .unwrap();
-        assert_eq!(result, "Wait. really?");
-    }
-
-    #[test]
-    fn test_normalize_punctuation() {
-        let stage = NormalizePunctuation;
-        let text = Cow::Borrowed("“Hello” – said ‘John’…");
-        let result = stage.apply(text.clone(), &Context::new(ENG)).unwrap();
-        assert_eq!(result, "\"Hello\" - said 'John'.");
     }
 }
