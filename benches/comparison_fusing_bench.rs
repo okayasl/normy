@@ -6,7 +6,7 @@ use normy::{
     NormalizePunctuation, Normy, RemoveDiacritics, StripControlChars, StripHtml, StripMarkdown,
     TUR, UnifyWidth, VIE,
     lang::Lang,
-    process::{BuildIter, Process},
+    process::{FusablePipeline, Process},
 };
 
 // Samples with diverse content
@@ -78,11 +78,11 @@ const SAMPLES: &[(&str, Lang)] = &[
 ];
 
 // Pipeline builders
-fn build_single_fusable(lang: Lang) -> Normy<impl BuildIter> {
+fn build_single_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
     Normy::builder().lang(lang).add_stage(LowerCase).build()
 }
 
-fn build_multi_fusable(lang: Lang) -> Normy<impl BuildIter> {
+fn build_multi_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
     Normy::builder()
         .lang(lang)
         .add_stage(LowerCase)
@@ -91,7 +91,7 @@ fn build_multi_fusable(lang: Lang) -> Normy<impl BuildIter> {
         .build()
 }
 
-fn build_nfc_fusable(lang: Lang) -> Normy<impl BuildIter> {
+fn build_nfc_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
     Normy::builder()
         .lang(lang)
         .add_stage(NFC)
@@ -100,7 +100,7 @@ fn build_nfc_fusable(lang: Lang) -> Normy<impl BuildIter> {
         .build()
 }
 
-fn build_mixed_pipeline(lang: Lang) -> Normy<impl BuildIter> {
+fn build_mixed_pipeline(lang: Lang) -> Normy<impl FusablePipeline> {
     Normy::builder()
         .lang(lang)
         .add_stage(StripHtml)
@@ -110,7 +110,7 @@ fn build_mixed_pipeline(lang: Lang) -> Normy<impl BuildIter> {
         .build()
 }
 
-fn build_complex_pipeline(lang: Lang) -> Normy<impl BuildIter> {
+fn build_complex_pipeline(lang: Lang) -> Normy<impl FusablePipeline> {
     Normy::builder()
         .lang(lang)
         .add_stage(StripHtml)
@@ -126,7 +126,7 @@ fn build_complex_pipeline(lang: Lang) -> Normy<impl BuildIter> {
         .build()
 }
 
-fn build_non_fusable(lang: Lang) -> Normy<impl BuildIter> {
+fn build_non_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
     Normy::builder()
         .lang(lang)
         .add_stage(StripHtml)
@@ -140,7 +140,7 @@ fn check_zero_copy<'a>(input: &'a str, result: Cow<'a, str>) -> bool {
 }
 
 // Correctness verification
-fn verify_outputs_match<P: Process + BuildIter>(
+fn verify_outputs_match<P: Process + FusablePipeline>(
     pipeline: &Normy<P>,
     text: &str,
 ) -> Result<(), String> {

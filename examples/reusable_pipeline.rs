@@ -1,18 +1,11 @@
 use std::{borrow::Cow, iter::FusedIterator};
 
 use normy::{
-    CaseFold, ENG, JPN, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation,
-    NormyBuilder, RemoveDiacritics, StripControlChars, StripFormatControls, StripHtml,
-    StripMarkdown, TUR, UnifyWidth, ZHO,
+    CaseFold, ENG, JPN, LowerCase, NFKC, NORMALIZE_WHITESPACE_FULL, NormalizePunctuation, Normy,
+    NormyBuilder, RemoveDiacritics, SegmentWords, StripControlChars, StripFormatControls,
+    StripHtml, StripMarkdown, TUR, UnifyWidth, ZHO,
     context::Context,
-    process::Process,
-    profile::{
-        Profile,
-        preset::{
-            ascii_fast, cjk_search, machine_translation, markdown_processing, maximum, minimum,
-            search, social_media, web_scraping,
-        },
-    },
+    process::FusablePipeline,
     stage::{Stage, StageError, StaticFusableStage, StaticIdentityAdapter},
 };
 
@@ -39,9 +32,11 @@ impl Stage for StripEmoji {
     fn name(&self) -> &'static str {
         "strip_emoji"
     }
+
     fn needs_apply(&self, text: &str, _: &Context) -> Result<bool, StageError> {
         Ok(text.chars().any(is_emoji))
     }
+
     fn apply<'a>(&self, text: Cow<'a, str>, _: &Context) -> Result<Cow<'a, str>, StageError> {
         Ok(Cow::Owned(text.chars().filter(|&c| !is_emoji(c)).collect()))
     }
@@ -68,8 +63,88 @@ impl StaticFusableStage for StripEmoji {
     }
 }
 
-pub fn custom_social_media() -> Profile<impl Process> {
-    Profile::builder("social_media")
+// ————————————————————————————————
+// 2. REUSABLE PIPELINE FUNCTIONS (inlined, zero-cost)
+// ————————————————————————————————
+fn ascii_fast() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder().add_stage(NORMALIZE_WHITESPACE_FULL)
+}
+
+fn machine_translation() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
+        .add_stage(NFKC)
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
+        .add_stage(NormalizePunctuation)
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
+}
+
+fn markdown_processing() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
+        .add_stage(NFKC)
+        .add_stage(StripMarkdown)
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
+}
+
+fn web_scraping() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
+        .add_stage(NFKC)
+        .add_stage(StripHtml)
+        .add_stage(StripControlChars)
+        .add_stage(StripFormatControls)
+        .add_stage(UnifyWidth)
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
+}
+
+fn search() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
+        .add_stage(NFKC)
+        .add_stage(LowerCase)
+        .add_stage(CaseFold)
+        .add_stage(RemoveDiacritics)
+        .add_stage(StripHtml)
+        .add_stage(StripMarkdown)
+        .add_stage(StripFormatControls)
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
+        .add_stage(SegmentWords)
+}
+
+fn cjk_search() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
+        .add_stage(NFKC)
+        .add_stage(UnifyWidth)
+        .add_stage(StripFormatControls)
+        .add_stage(StripControlChars)
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
+        .add_stage(SegmentWords)
+}
+
+fn minimum() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
+        .add_stage(NFKC)
+        .add_stage(StripControlChars)
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
+}
+
+fn maximum() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
+        .add_stage(NFKC)
+        .add_stage(LowerCase)
+        .add_stage(CaseFold)
+        .add_stage(RemoveDiacritics)
+        .add_stage(StripHtml)
+        .add_stage(StripMarkdown)
+        .add_stage(StripFormatControls)
+        .add_stage(StripControlChars)
+        .add_stage(UnifyWidth)
+        .add_stage(NORMALIZE_WHITESPACE_FULL)
+        .add_stage(SegmentWords)
+}
+
+fn social_media() -> NormyBuilder<impl FusablePipeline> {
+    Normy::builder()
         .add_stage(NFKC)
         .add_stage(StripHtml)
         .add_stage(StripMarkdown)
@@ -79,47 +154,47 @@ pub fn custom_social_media() -> Profile<impl Process> {
         .add_stage(UnifyWidth)
         .add_stage(StripControlChars)
         .add_stage(StripFormatControls)
-        .add_stage(StripEmoji)
         .add_stage(NormalizePunctuation)
         .add_stage(NORMALIZE_WHITESPACE_FULL)
-        .build()
+}
+
+fn custom_social_media() -> NormyBuilder<impl FusablePipeline> {
+    social_media().add_stage(StripEmoji)
 }
 
 fn main() {
-    println!("=== NORMY PROFILE EXAMPLES ===\n");
+    println!("=== NORMY PIPELINE EXAMPLES ===\n");
 
-    // Setup normalizers for different languages
-    let tr = NormyBuilder::default().lang(TUR).build();
-    let en = NormyBuilder::default().lang(ENG).build();
-    let zh = NormyBuilder::default().lang(ZHO).build();
-    let ja = NormyBuilder::default().lang(JPN).build();
+    // Build language-specific normalizers upfront
+    let tr = search().lang(TUR).build();
+    let en = search().lang(ENG).build();
+    let zh = search().lang(ZHO).build();
+    let ja = cjk_search().lang(JPN).build();
 
     // ========================================
     // 1. ASCII_FAST - Ultra-fast for clean text
     // ========================================
-    println!("1. ASCII_FAST Profile");
+    println!("1. ASCII_FAST Pipeline");
     println!("   Use case: Pre-validated input, performance-critical paths\n");
 
+    let ascii_fast_en = ascii_fast().lang(ENG).build();
     let text = "Hello    World\t\n  Fast   Processing";
     println!("   Input:  '{}'", text);
-    println!(
-        "   Output: '{}'\n",
-        en.normalize_with_profile(&ascii_fast(), text).unwrap()
-    );
+    println!("   Output: '{}'\n", ascii_fast_en.normalize(text).unwrap());
     // → "Hello World Fast Processing"
 
     // ========================================
     // 2. MACHINE_TRANSLATION - Preserve semantics
     // ========================================
-    println!("2. MACHINE_TRANSLATION Profile");
+    println!("2. MACHINE_TRANSLATION Pipeline");
     println!("   Use case: MT preprocessing, preserving linguistic features\n");
 
+    let machine_translation_en = machine_translation().lang(ENG).build();
     let text = "Café naïve — \"smart quotes\" & dashes…";
     println!("   Input:  {}", text);
     println!(
         "   Output: {}\n",
-        en.normalize_with_profile(&machine_translation(), text)
-            .unwrap()
+        machine_translation_en.normalize(text).unwrap()
     );
     // → "Café naïve - \"smart quotes\" & dashes..."
     // Note: Preserves diacritics, normalizes punctuation
@@ -127,9 +202,10 @@ fn main() {
     // ========================================
     // 3. MARKDOWN_PROCESSING - Clean docs
     // ========================================
-    println!("3. MARKDOWN_PROCESSING Profile");
+    println!("3. MARKDOWN_PROCESSING Pipeline");
     println!("   Use case: SSGs, documentation, README parsing\n");
 
+    let markdown_processing_en = markdown_processing().lang(ENG).build();
     let text = r#"
 # Heading
 **Bold** and *italic* text
@@ -140,17 +216,17 @@ fn main() {
     println!("   Input:\n{}", text);
     println!(
         "   Output: {}\n",
-        en.normalize_with_profile(&markdown_processing(), text)
-            .unwrap()
+        markdown_processing_en.normalize(text).unwrap()
     );
     // → "Heading Bold and italic text List item Link code and blocks"
 
     // ========================================
     // 4. WEB_SCRAPING - Extract clean text
     // ========================================
-    println!("4. WEB_SCRAPING Profile");
+    println!("4. WEB_SCRAPING Pipeline");
     println!("   Use case: Content extraction, web crawlers\n");
 
+    let web_scraping_en = web_scraping().lang(ENG).build();
     let text = r#"
 <div class="article">
     <h1>Title</h1>
@@ -159,95 +235,79 @@ fn main() {
 </div>
 "#;
     println!("   Input: {}", text.trim());
-    println!(
-        "   Output: {}\n",
-        en.normalize_with_profile(&web_scraping(), text).unwrap()
-    );
+    println!("   Output: {}\n", web_scraping_en.normalize(text).unwrap());
     // → "Title Café in Tokyo"
     // Note: Strips HTML, normalizes fullwidth spaces
 
     // ========================================
     // 5. SEARCH - The gold standard
     // ========================================
-    println!("5. SEARCH Profile");
+    println!("5. SEARCH Pipeline");
     println!("   Use case: Search engines, autocomplete, fuzzy matching\n");
 
     let text = "café naïve résumé İstanbul 東京";
     println!("   Input: {}\n", text);
 
-    println!(
-        "   → Turkish user: {}",
-        tr.normalize_with_profile(&search(), text).unwrap()
-    );
+    println!("   → Turkish user: {}", tr.normalize(text).unwrap());
     // → "cafe naive resume istanbul 東京"
 
-    println!(
-        "   → English user: {}",
-        en.normalize_with_profile(&search(), text).unwrap()
-    );
+    println!("   → English user: {}", en.normalize(text).unwrap());
     // → "cafe naive resume istanbul 東京"
 
-    println!(
-        "   → Chinese user: {}",
-        zh.normalize_with_profile(&search(), text).unwrap()
-    );
+    println!("   → Chinese user: {}", zh.normalize(text).unwrap());
     // → "cafe naive resume istanbul 東 京" (CJK unigram)
     println!();
 
     // ========================================
     // 6. CJK_SEARCH - Optimized for Asian text
     // ========================================
-    println!("6. CJK_SEARCH Profile");
+    println!("6. CJK_SEARCH Pipeline");
     println!("   Use case: Chinese/Japanese/Korean search systems\n");
 
     let text = "東京タワー　ＴＯＫＹＯ　123"; // Mixed fullwidth
     println!("   Input:  {}", text);
-    println!(
-        "   Output: {}\n",
-        ja.normalize_with_profile(&cjk_search(), text).unwrap()
-    );
+    println!("   Output: {}\n", ja.normalize(text).unwrap());
     // → "東 京 タ ワ ー TOKYO 123"
     // Note: Fullwidth → ASCII, CJK unigram segmentation
 
     // ========================================
     // 7. MINIMUM - Preserve everything
     // ========================================
-    println!("7. MINIMUM Profile");
+    println!("7. MINIMUM Pipeline");
     println!("   Use case: NER, POS tagging, grammar checking\n");
 
+    let minimum_en = minimum().lang(ENG).build();
     let text = "Dr. Smith's COVID-19 test was NEGATIVE!!!";
     println!("   Input:  {}", text);
-    println!(
-        "   Output: {}\n",
-        en.normalize_with_profile(&minimum(), text).unwrap()
-    );
+    println!("   Output: {}\n", minimum_en.normalize(text).unwrap());
     // → "Dr. Smith's COVID-19 test was NEGATIVE!!!"
     // Note: Only whitespace normalized, everything else preserved
 
     // ========================================
     // 8. MAXIMUM - Nuclear cleaning
     // ========================================
-    println!("8. MAXIMUM Profile");
+    println!("8. MAXIMUM Pipeline");
     println!("   Use case: Deduplication, fuzzy matching, log cleaning\n");
 
+    let maximum_en = maximum().lang(ENG).build();
     let text = r#"
 <HTML>Café  "Naïve"   İstanbul　東京タワー
 **Bold** [Link](url) 
 UPPERCASE lowercase MixedCase
 "#;
     println!("   Input: {}", text.trim());
-    println!(
-        "   Output: {}\n",
-        en.normalize_with_profile(&maximum(), text).unwrap()
-    );
+    println!("   Output: {}\n", maximum_en.normalize(text).unwrap());
     // → "cafe naive istanbul 東 京 タ ワ ー bold link uppercase lowercase mixedcase"
     // Note: Everything normalized aggressively
 
     // ========================================
     // 9. SOCIAL_MEDIA - Handle noisy UGC
     // ========================================
-    println!("9. SOCIAL_MEDIA Profile");
+    println!("9. SOCIAL_MEDIA Pipeline");
     println!("   Use case: Twitter, Reddit, forum posts\n");
+
+    let social_media_en = social_media().lang(ENG).build();
+    let custom_social_media_en = custom_social_media().lang(ENG).build();
 
     let text = r#"
 OMG!!! Check this café  ☕️
@@ -257,66 +317,61 @@ Visit: https://example.com
 "#;
     println!("   Input: {}", text.trim());
     println!(
-        "Preset(without StripEmoji stage)   Output: {}\n",
-        en.normalize_with_profile(&social_media(), text).unwrap()
+        "Pipeline (without StripEmoji stage)   Output: {}\n",
+        social_media_en.normalize(text).unwrap()
     );
     // → "omg!!! check this cafe ☕️ so excited about #ai2024 visit: https://example.com"
     // Note: Aggressive cleaning while preserving emoji
+
     println!(
         "Custom (with custom StripEmoji stage)   Output: {}\n",
-        en.normalize_with_profile(&custom_social_media(), text)
-            .unwrap()
+        custom_social_media_en.normalize(text).unwrap()
     );
     // → "omg!!! check this cafe so excited about #ai2024 visit: https://example.com"
     // Note: Aggressive cleaning and striping emoji
 
     // ========================================
-    // COMPARISON: Same text, different profiles
+    // COMPARISON: Same text, different pipelines
     // ========================================
-    println!("\n=== PROFILE COMPARISON ===");
+    println!("\n=== PIPELINE COMPARISON ===");
     let sample = "Café \"Naïve\" İstanbul ❤️ 東京 <b>Bold</b>";
     println!("Input: {}\n", sample);
 
     println!(
         "ascii_fast:          {}",
-        en.normalize_with_profile(&ascii_fast(), sample).unwrap()
+        ascii_fast_en.normalize(sample).unwrap()
     );
 
     println!(
         "minimum:             {}",
-        en.normalize_with_profile(&minimum(), sample).unwrap()
+        minimum_en.normalize(sample).unwrap()
     );
 
     println!(
         "machine_translation: {}",
-        en.normalize_with_profile(&machine_translation(), sample)
-            .unwrap()
+        machine_translation_en.normalize(sample).unwrap()
     );
 
     println!(
         "web_scraping:        {}",
-        en.normalize_with_profile(&web_scraping(), sample).unwrap()
+        web_scraping_en.normalize(sample).unwrap()
     );
 
-    println!(
-        "search:              {}",
-        en.normalize_with_profile(&search(), sample).unwrap()
-    );
+    println!("search:              {}", en.normalize(sample).unwrap());
 
     println!(
         "social_media:        {}",
-        en.normalize_with_profile(&social_media(), sample).unwrap()
+        social_media_en.normalize(sample).unwrap()
     );
 
     println!(
         "custom_social_media: {}",
-        en.normalize_with_profile(&custom_social_media(), sample)
-            .unwrap()
+        custom_social_media_en.normalize(sample).unwrap()
     );
 
     println!(
         "maximum:             {}",
-        en.normalize_with_profile(&maximum(), sample).unwrap()
+        maximum_en.normalize(sample).unwrap()
     );
 
     // ========================================
@@ -327,87 +382,93 @@ Visit: https://example.com
     let turkish_text = "İSTANBUL istanbul İzmir";
     println!("\nTurkish dotted-i handling:");
     println!("Input: {}", turkish_text);
-    println!(
-        "  Turkish locale: {}",
-        tr.normalize_with_profile(&search(), turkish_text).unwrap()
-    );
+    println!("  Turkish locale: {}", tr.normalize(turkish_text).unwrap());
     // → "istanbul istanbul izmir" (correct Turkish lowercasing)
-    println!(
-        "  English locale: {}",
-        en.normalize_with_profile(&search(), turkish_text).unwrap()
-    );
+    println!("  English locale: {}", en.normalize(turkish_text).unwrap());
     // → "i̇stanbul istanbul i̇zmir" (incorrect, shows why language matters)
 
     let french_text = "Où est l'hôtel à Zürich?";
     println!("\nFrench diacritics:");
     println!("Input: {}", french_text);
+    let search_en = search().lang(ENG).build();
     println!(
         "  With RemoveDiacritics: {}",
-        en.normalize_with_profile(&search(), french_text).unwrap()
+        search_en.normalize(french_text).unwrap()
     );
     // → "ou est l'hotel a zurich?"
+    let minimum_en_fr = minimum().lang(ENG).build();
     println!(
         "  Without (minimum):     {}",
-        en.normalize_with_profile(&minimum(), french_text).unwrap()
+        minimum_en_fr.normalize(french_text).unwrap()
     );
     // → "Où est l'hôtel à Zürich?"
 
     let cjk_text = "東京都渋谷区";
     println!("\nCJK segmentation:");
     println!("Input: {}", cjk_text);
+    let cjk_search_zh = cjk_search().lang(ZHO).build();
     println!(
         "  With UnigramCJK: {}",
-        zh.normalize_with_profile(&cjk_search(), cjk_text).unwrap()
+        cjk_search_zh.normalize(cjk_text).unwrap()
     );
     // → "東 京 都 渋 谷 区" (character-level tokens)
+    let minimum_zh = minimum().lang(ZHO).build();
     println!(
         "  Without:         {}",
-        zh.normalize_with_profile(&minimum(), cjk_text).unwrap()
+        minimum_zh.normalize(cjk_text).unwrap()
     );
     // → "東京都渋谷区" (no segmentation)
 
     println!("\n=== FINAL COMPARISON TABLE ===");
     let input = "Café naïve İstanbul ❤️ 東京 <b>Bold</b> １２３";
+
+    let ascii_fast_final = ascii_fast().lang(ENG).build();
+    let minimum_final = minimum().lang(ENG).build();
+    let machine_translation_final = machine_translation().lang(ENG).build();
+    let web_scraping_final = web_scraping().lang(ENG).build();
+    let search_final = search().lang(ENG).build();
+    let social_media_final = social_media().lang(ENG).build();
+    let custom_social_media_final = custom_social_media().lang(ENG).build();
+    let maximum_final = maximum().lang(ENG).build();
+
     println!(
         "{:20} → {}",
         "ascii_fast",
-        en.normalize_with_profile(&ascii_fast(), input).unwrap()
+        ascii_fast_final.normalize(input).unwrap()
     );
     println!(
         "{:20} → {}",
         "minimum",
-        en.normalize_with_profile(&minimum(), input).unwrap()
+        minimum_final.normalize(input).unwrap()
     );
     println!(
         "{:20} → {}",
         "machine_translation",
-        en.normalize_with_profile(&machine_translation(), input)
-            .unwrap()
+        machine_translation_final.normalize(input).unwrap()
     );
     println!(
         "{:20} → {}",
         "web_scraping",
-        en.normalize_with_profile(&web_scraping(), input).unwrap()
+        web_scraping_final.normalize(input).unwrap()
     );
     println!(
         "{:20} → {}",
         "search",
-        en.normalize_with_profile(&search(), input).unwrap()
+        search_final.normalize(input).unwrap()
     );
     println!(
         "{:20} → {}",
         "social_media",
-        en.normalize_with_profile(&social_media(), input).unwrap()
+        social_media_final.normalize(input).unwrap()
     );
     println!(
         "{:20} → {}",
         "custom_social_media",
-        en.normalize_with_profile(&custom_social_media(), input)
-            .unwrap()
+        custom_social_media_final.normalize(input).unwrap()
     );
     println!(
         "{:20} → {}",
         "maximum",
-        en.normalize_with_profile(&maximum(), input).unwrap()
+        maximum_final.normalize(input).unwrap()
     );
 }

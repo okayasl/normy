@@ -5,7 +5,6 @@
 pub mod context;
 pub mod lang;
 pub mod process;
-pub mod profile;
 pub mod stage;
 pub mod testing;
 

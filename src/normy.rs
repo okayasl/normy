@@ -1,8 +1,7 @@
 use crate::{
     context::Context,
     lang::{DEFAULT_LANG, Lang, LangEntry},
-    process::{BuildIter, ChainedProcess, DynamicProcess, EmptyProcess, Process},
-    profile::{Profile, ProfileError},
+    process::{ChainedProcess, DynamicProcess, EmptyProcess, FusablePipeline, Process},
     stage::{Stage, StageError, StaticFusableStage},
 };
 use smallvec::SmallVec;
@@ -13,8 +12,6 @@ use thiserror::Error;
 pub enum NormyError {
     #[error(transparent)]
     Stage(#[from] StageError),
-    #[error(transparent)]
-    Profile(#[from] ProfileError),
 }
 
 /// # Safety: `text` **must** be valid UTF-8.
@@ -34,8 +31,15 @@ pub struct Normy<P: Process> {
     stage_count: usize,
 }
 
+impl<P: Process> Normy<P> {
+    #[inline(always)]
+    pub fn uses_fusion(&self) -> bool {
+        self.all_fusable && self.stage_count > 1
+    }
+}
+
 // For fusable pipelines (ChainedProcess with BuildIter)
-impl<P: BuildIter> Normy<P> {
+impl<P: FusablePipeline> Normy<P> {
     /// Normalize text - automatically routes to fusion or apply path
     #[inline(always)]
     pub fn normalize<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
@@ -61,21 +65,6 @@ impl<P: BuildIter> Normy<P> {
             .process(Cow::Borrowed(text), &self.ctx)
             .map_err(Into::into)
     }
-    /// Check if this pipeline uses fusion
-    #[inline(always)]
-    pub fn uses_fusion(&self) -> bool {
-        self.all_fusable && self.stage_count > 1
-    }
-    #[inline(always)]
-    pub fn normalize_with_profile<'a, Q: Process>(
-        &self,
-        profile: &Profile<Q>,
-        text: &'a str,
-    ) -> Result<Cow<'a, str>, NormyError> {
-        profile
-            .run(Cow::Borrowed(text), &self.ctx)
-            .map_err(Into::into)
-    }
 }
 
 // For non-fusable pipelines (DynamicProcess, etc.)
@@ -87,16 +76,6 @@ impl Normy<DynamicProcess> {
         assert_utf8(text);
         self.pipeline
             .process(Cow::Borrowed(text), &self.ctx)
-            .map_err(Into::into)
-    }
-    #[inline(always)]
-    pub fn normalize_with_profile<'a, Q: Process>(
-        &self,
-        profile: &Profile<Q>,
-        text: &'a str,
-    ) -> Result<Cow<'a, str>, NormyError> {
-        profile
-            .run(Cow::Borrowed(text), &self.ctx)
             .map_err(Into::into)
     }
 }

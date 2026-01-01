@@ -9,7 +9,7 @@ pub trait Process {
     fn process<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError>;
 }
 
-pub trait BuildIter: Process {
+pub trait FusablePipeline: Process {
     type Iter<'a, I>: FusedIterator<Item = char> + 'a
     where
         I: FusedIterator<Item = char> + 'a,
@@ -20,7 +20,7 @@ pub trait BuildIter: Process {
     /// If one needs to work all works
     fn any_needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError>;
 
-    fn build_iter<'a, I>(&'a self, input: I, ctx: &'a Context) -> Self::Iter<'a, I>
+    fn fused_iter<'a, I>(&'a self, input: I, ctx: &'a Context) -> Self::Iter<'a, I>
     where
         I: FusedIterator<Item = char> + 'a;
 
@@ -33,7 +33,7 @@ pub trait BuildIter: Process {
             return Ok(text);
         }
         let mut result = String::with_capacity(text.len());
-        result.extend(self.build_iter(text.chars(), ctx));
+        result.extend(self.fused_iter(text.chars(), ctx));
         Ok(Cow::Owned(result))
     }
 }
@@ -47,14 +47,14 @@ impl Process for EmptyProcess {
     }
 }
 
-impl BuildIter for EmptyProcess {
+impl FusablePipeline for EmptyProcess {
     type Iter<'a, I>
         = I
     where
         I: FusedIterator<Item = char> + 'a;
 
     #[inline(always)]
-    fn build_iter<'a, I>(&'a self, input: I, _ctx: &'a Context) -> Self::Iter<'a, I>
+    fn fused_iter<'a, I>(&'a self, input: I, _ctx: &'a Context) -> Self::Iter<'a, I>
     where
         I: FusedIterator<Item = char> + 'a,
     {
@@ -84,10 +84,10 @@ impl<S: Stage, P: Process> Process for ChainedProcess<S, P> {
 }
 
 // Fused implementation: ONLY exists if S is StaticFusable and P is BuildIter
-impl<S, P> BuildIter for ChainedProcess<S, P>
+impl<S, P> FusablePipeline for ChainedProcess<S, P>
 where
     S: Stage + StaticFusableStage,
-    P: BuildIter,
+    P: FusablePipeline,
 {
     type Iter<'a, I>
         = S::Adapter<'a, P::Iter<'a, I>>
@@ -98,13 +98,13 @@ where
         P: 'a;
 
     #[inline]
-    fn build_iter<'a, I>(&'a self, input: I, ctx: &'a Context) -> Self::Iter<'a, I>
+    fn fused_iter<'a, I>(&'a self, input: I, ctx: &'a Context) -> Self::Iter<'a, I>
     where
         I: FusedIterator<Item = char> + 'a,
         S: 'a,
         P: 'a,
     {
-        let prev_iter = self.previous.build_iter(input, ctx);
+        let prev_iter = self.previous.fused_iter(input, ctx);
         self.stage.static_fused_adapter(prev_iter, ctx)
     }
 
