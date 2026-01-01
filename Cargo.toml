@@ -34,22 +34,7 @@ harness = false
 [[bench]]
 name = "cbpb"
 path = "benches/comparison_bert_pipeline_bench.rs"
-harness = false
-
-[[bench]]
-name = "nb"
-path = "benches/normy_bench.rs"
-harness = false
-
-[[bench]]
-name = "sb"
-path = "benches/stage_bench.rs"
-harness = false
-
-[[bench]]
-name = "cnb"
-path = "benches/comparison_normalization_bench.rs"
-harness = false
+harness = true
 
 [[bench]]
 name = "cds"
@@ -59,16 +44,26 @@ harness = false
 [[bench]]
 name = "cfb"
 path = "benches/comparison_fusing_bench.rs"
-harness = true
+harness = false
 
 [[bench]]
-name = "lab"
-path = "benches/lang_aware_bench.rs"
+name = "cnb"
+path = "benches/comparison_normalization_bench.rs"
 harness = false
+
+[[bench]]
+name = "ctb"
+path = "benches/comparison_tokenizers_bench.rs"
+harness = true
 
 [[bench]]
 name = "lagb"
 path = "benches/lang_agnostic_bench.rs"
+harness = false
+
+[[bench]]
+name = "lab"
+path = "benches/lang_aware_bench.rs"
 harness = false
 
 [[bench]]
@@ -77,13 +72,23 @@ path = "benches/lang_entry_ops_bench.rs"
 harness = false
 
 [[bench]]
-name = "wb"
-path = "benches/whitespace_bench.rs"
+name = "nb"
+path = "benches/normy_bench.rs"
 harness = false
 
 [[bench]]
 name = "pb"
 path = "benches/process_bench.rs"
+harness = false
+
+[[bench]]
+name = "sb"
+path = "benches/stage_bench.rs"
+harness = false
+
+[[bench]]
+name = "wb"
+path = "benches/whitespace_bench.rs"
 harness = false
 
 [features]
