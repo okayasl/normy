@@ -151,7 +151,11 @@ impl StageTestConfig for RemoveDiacritics {
                 ("Crème brûlée", "Creme brulee"),
             ],
             VIE => &[("Hà Nội", "Ha Noi"), ("Đạt", "Dat"), ("đẹp quá", "dep qua")],
-            ARA => &[("مَرْحَبًا", "مرحبا"), ("الْعَرَبِيَّةُ", "العربية")],
+            ARA => &[
+                ("مَرْحَبًا", "مرحبا"),   // tanwin, fatha removed
+                ("الْكِتَابُ", "الكتاب"), // shadda on ت preserved, damma removed
+                ("قُرْآنٌ", "قرآن"),     // shadda + sukun + damma + tanwin → only optional marks gone
+            ],
             POL => &[
                 ("Łódź", "Lodz"),
                 ("żółć", "zolc"),

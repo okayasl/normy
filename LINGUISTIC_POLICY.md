@@ -8,14 +8,14 @@
 
 ## Quick Reference: What Gets Modified
 
-| Operation | Languages | Lossy? | Default? | Example |
-|-----------|-----------|--------|----------|---------|
-| Case mapping | Turkish, Lithuanian, Catalan | No | Yes | İ→i (Turkish) |
-| Folding | German, Dutch | No* | Yes | ß→"ss" |
-| Strip accents | Romance, Slavic, Vietnamese | Yes | **No** | é→e |
-| Transliterate | German, Nordic, Russian | Yes | **No** | Ä→"ae" |
-| Segment | CJK, Indic, SEAsian | No | Yes | "你好"→"你 好" |
-| Remove marks | Arabic, Hebrew | Yes | **No** | fatḥa removed |
+| Operation     | Languages                    | Lossy? | Default? | Example        |
+| ------------- | ---------------------------- | ------ | -------- | -------------- |
+| Case mapping  | Turkish, Lithuanian, Catalan | No     | Yes      | İ→i (Turkish)  |
+| Folding       | German, Dutch                | No*    | Yes      | ß→"ss"         |
+| Strip accents | Romance, Slavic, Vietnamese  | Yes    | **No**   | é→e            |
+| Transliterate | German, Nordic, Russian      | Yes    | **No**   | Ä→"ae"         |
+| Segment       | CJK, Indic, SEAsian          | No     | Yes      | "你好"→"你 好" |
+| Remove marks  | Arabic, Hebrew               | Yes    | **No**   | fatḥa removed  |
 
 \* *Folding is technically lossy (ß→"ss" is not reversible) but linguistically valid for search.*
 \* *If a character is phonemically or orthographically meaningful in native text, it MUST NOT appear in precomposed_to_base. Inclusion signals accepted semantic loss.*
@@ -26,11 +26,11 @@
 
 Populate **only** when Unicode default case mapping is **linguistically incorrect**.
 
-| Language             | Include? | Examples                     | Reason |
-|----------------------|----------|------------------------------|--------|
-| Turkish, Azerbaijani | Yes      | İ→i, I→ı                     | Dotted/dotless I distinction |
-| Lithuanian           | Yes      | Preserves ogonek/accent contextually | Titlecase/lowercase differ |
-| All others           | No       | —                            | Unicode default is correct |
+| Language             | Include? | Examples                             | Reason                       |
+| -------------------- | -------- | ------------------------------------ | ---------------------------- |
+| Turkish, Azerbaijani | Yes      | İ→i, I→ı                             | Dotted/dotless I distinction |
+| Lithuanian           | Yes      | Preserves ogonek/accent contextually | Titlecase/lowercase differ   |
+| All others           | No       | —                                    | Unicode default is correct   |
 
 > **Titlecasing**: Normy does **not** perform titlecasing. This is intentionally left to Unicode default or user code.
 
@@ -40,11 +40,11 @@ Populate **only** when Unicode default case mapping is **linguistically incorrec
 
 Populate **only** for **official**, **native**, one-to-many equivalences used **within the language itself**.
 
-| Language | Mapping                          | Include? | Justification |
-|----------|----------------------------------|----------|-------------|
-| German   | ß→"ss", ẞ→"ss"                   | Yes      | Official spelling reform — applies to both lowercase and uppercase |
-| Dutch    | Ĳ→"ij", ĳ→"ij" (U+0132/U+0133 only) | Yes   | Ligature expands in native Dutch search |
-| All others | —                              | No       | Not linguistically native |
+| Language   | Mapping                             | Include? | Justification                                                      |
+| ---------- | ----------------------------------- | -------- | ------------------------------------------------------------------ |
+| German     | ß→"ss", ẞ→"ss"                      | Yes      | Official spelling reform — applies to both lowercase and uppercase |
+| Dutch      | Ĳ→"ij", ĳ→"ij" (U+0132/U+0133 only) | Yes      | Ligature expands in native Dutch search                            |
+| All others | —                                   | No       | Not linguistically native                                          |
 
 > **Critical**:
 >
@@ -61,13 +61,13 @@ Populate **only** for **official**, **native**, one-to-many equivalences used **
 
 Populate **only** when documented in **official pre-1980** contexts.
 
-| Language       | Mapping                          | Include? | Historical Evidence |
-|----------------|----------------------------------|----------|---------------------|
-| German         | Ä→"ae", Ö→"oe", Ü→"ue", ß→"ss"   | Yes      | Reichsbahn, passports |
-| Scandinavian   | Å→"aa", Ä→"ae", Ö→"oe"           | Yes      | Postal standards |
-| Icelandic      | Þ→"th", Ð→"d"                    | Yes      | International naming |
-| Russian        | ISO/R 9:1968 (see details below) | Yes      | ISO/R 9:1968 Scientific Transliteration (Pre-1980 standard) |
-| All others     | —                                | No       | No historical tradition |
+| Language     | Mapping                          | Include? | Historical Evidence                                         |
+| ------------ | -------------------------------- | -------- | ----------------------------------------------------------- |
+| German       | Ä→"ae", Ö→"oe", Ü→"ue", ß→"ss"   | Yes      | Reichsbahn, passports                                       |
+| Scandinavian | Å→"aa", Ä→"ae", Ö→"oe"           | Yes      | Postal standards                                            |
+| Icelandic    | Þ→"th", Ð→"d"                    | Yes      | International naming                                        |
+| Russian      | ISO/R 9:1968 (see details below) | Yes      | ISO/R 9:1968 Scientific Transliteration (Pre-1980 standard) |
+| All others   | —                                | No       | No historical tradition                                     |
 
 **Russian Transliteration Examples (ISO/R 9:1968)**:
 
@@ -87,14 +87,14 @@ Populate **only** when documented in **official pre-1980** contexts.
 
 Populate **only** when marks are pronunciation-based and commonly omitted.
 
-| Language Group                            | Strip?         | Notes |
-|-------------------------------------------|----------------|-------|
-| French, Portuguese, Italian, Catalan | Yes            | Accents routinely dropped |
-| Spanish (except ñ/Ñ) | Yes | Accents dropped, but **ñ/Ñ is a distinct letter** — never stripped |
-| Vietnamese                                | Yes (practical) | Removes **both tone marks** (◌́, ◌̀, ◌̉, ◌̃, ◌̣) and **vowel quality marks**. **Order matters**: decompose (NFD) → remove tone marks → remove quality marks (ơ→o, ư→u, â→a, ă→a, ô→o, ê→e) → recompose (NFC). **Always destructive and meaning-destroying**. Provided only because Vietnamese search engines universally support toneless search. |
+| Language Group                               | Strip?          | Notes                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| French, Portuguese, Italian, Catalan         | Yes             | Accents routinely dropped                                                                                                                                                                                                                                                                                                                                |
+| Spanish (except ñ/Ñ)                         | Yes             | Accents dropped, but **ñ/Ñ is a distinct letter** — never stripped                                                                                                                                                                                                                                                                                       |
+| Vietnamese                                   | Yes (practical) | Removes **both tone marks** (◌́, ◌̀, ◌̉, ◌̃, ◌̣) and **vowel quality marks**. **Order matters**: decompose (NFD) → remove tone marks → remove quality marks (ơ→o, ư→u, â→a, ă→a, ô→o, ê→e) → recompose (NFC). **Always destructive and meaning-destroying**. Provided only because Vietnamese search engines universally support toneless search.             |
 | Czech, Slovak, Polish, Croatian, **Slovene** | Yes (practical) | Acute/caron are phonemic — **stripping destroys meaning** (e.g., c↔č, l↔ł, đ↔d). Included **only** due to overwhelming international search-engine practice, **not** linguistic validity. **WARNING**: Native speakers expect diacritics in search. Use only for international/legacy systems. Slovene stripping is common but not universally expected. |
-| German, Dutch, Nordic, Icelandic          | No             | Ä, Ĳ, Å, Æ, Ø are **distinct letters** |
-| Turkish, Hungarian, Romanian              | No             | ğ, ş, ț are distinct phonemes |
+| German, Dutch, Nordic, Icelandic             | No              | Ä, Ĳ, Å, Æ, Ø are **distinct letters**                                                                                                                                                                                                                                                                                                                   |
+| Turkish, Hungarian, Romanian                 | No              | ğ, ş, ț are distinct phonemes                                                                                                                                                                                                                                                                                                                            |
 
 > **Spanish ñ/Ñ must never be stripped** — it is a separate letter in the Spanish alphabet, not an accented N.
 > Any character that is phonemically or orthographically meaningful in native text must never appear here. Inclusion implies acceptance of semantic loss.  
@@ -106,37 +106,39 @@ Populate **only** when marks are pronunciation-based and commonly omitted.
 
 Populate **only** with marks that **never** form precomposed characters in NFC.
 
-| Script         | Example Marks                       | Include? | Reason |
-|----------------|-------------------------------------|----------|--------|
-| Arabic         | fatḥa (U+064E), kasra (U+0650), ḍamma (U+064F) | Yes      | Optional vowel points — standalone only |
-| Arabic         | **shadda (U+0651)**                 | **No**   | Gemination mark — **phonemically significant**, must preserve |
-| Hebrew         | qamats (U+05B8), patach (U+05B7)    | Yes      | Optional pointing |
-| Thai, Lao      | mai ek (U+0E48), sara a (U+0E32)    | Yes      | Standalone tone/vowel signs |
-| Devanagari     | candrabindu (U+0901), nuktā (U+093C) | Yes only if never precomposed | Must verify per-script |
-| Latin/Cyrillic | U+0300–U+036F combining diacritics  | No       | Form é, č, ą in NFC |
-| Latin   | U+00B7 (MIDDLE DOT) in Catalan "l·l" | No  | Orthographic punctuation, not a diacritic — must preserve |
+| Script         | Example Marks                                  | Include?                      | Reason                                                        |
+| -------------- | ---------------------------------------------- | ----------------------------- | ------------------------------------------------------------- |
+| Arabic         | fatḥa (U+064E), kasra (U+0650), ḍamma (U+064F) | Yes                           | Optional vowel points — standalone only                       |
+| Arabic         | **shadda (U+0651)**                            | **No**                        | Gemination mark — **phonemically significant**, must preserve |
+| Hebrew         | qamats (U+05B8), patach (U+05B7)               | Yes                           | Optional pointing                                             |
+| Thai, Lao      | mai ek (U+0E48), sara a (U+0E32)               | Yes                           | Standalone tone/vowel signs                                   |
+| Devanagari     | candrabindu (U+0901), nuktā (U+093C)           | Yes only if never precomposed | Must verify per-script                                        |
+| Latin/Cyrillic | U+0300–U+036F combining diacritics             | No                            | Form é, č, ą in NFC                                           |
+| Latin          | U+00B7 (MIDDLE DOT) in Catalan "l·l"           | No                            | Orthographic punctuation, not a diacritic — must preserve     |
 
 > `spacing_diacritics` removal **must never** delete any mark that would normally be precomposed in NFC.
 
 **Why Arabic shadda must be preserved**:
 
-- Shadda (◌ّ) doubles consonants: مُعَلِّم "muʿallim" (teacher) vs مُعَلِم "muʿalim" (instructor/one who teaches)
+- Arabic vowel points (fatḥa, kasra, damma, tanwin, etc.): Yes
+- Shadda (U+0651): **Explicitly excluded** — phonemically significant (gemination)
 - Removing it fundamentally changes pronunciation and meaning
 - Unlike vowel points (fatḥa, kasra, ḍamma), shadda is not optional in vocalized text
 - Only pure spacing diacritics appear here; any phonemically meaningful mark is excluded.
+- Maddah (U+0653), Hamza above/below: Include only if purely optional (current: included—justify or remove)
 
 ---
 
 ## RULE 6: `needs_word_segmentation` — Script Boundary Segmentation
 
-| Language       | needs_segmentation | unigram_cjk | Heuristic Details |
-|----------------|--------------------|-------------|-------------------|
-| Chinese (ZH)   | true               | true        | Full unigram breaking |
-| Japanese (JA)  | true               | false       | Boundaries only at script transitions |
-| Korean (KO)    | true               | false       | Boundaries only at script transitions |
-| Hindi (HI)     | true               | false       | ZWSP at virama+consonant with conjunct exception (र/य/व/ह) |
-| Tamil (TA)     | true               | false       | ZWSP at virama+consonant (no exceptions) |
-| Thai, Lao, Khmer, Myanmar | true | false | Script transitions only — no syllable breaking |
+| Language                  | needs_segmentation | unigram_cjk | Heuristic Details                                          |
+| ------------------------- | ------------------ | ----------- | ---------------------------------------------------------- |
+| Chinese (ZH)              | true               | true        | Full unigram breaking                                      |
+| Japanese (JA)             | true               | false       | Boundaries only at script transitions                      |
+| Korean (KO)               | true               | false       | Boundaries only at script transitions                      |
+| Hindi (HI)                | true               | false       | ZWSP at virama+consonant with conjunct exception (र/य/व/ह) |
+| Tamil (TA)                | true               | false       | ZWSP at virama+consonant (no exceptions)                   |
+| Thai, Lao, Khmer, Myanmar | true               | false       | Script transitions only — no syllable breaking             |
 
 **Performance Guarantee**: Languages with `needs_segmentation = false` incur **zero overhead** — the stage is completely elided from the pipeline via `needs_apply()` returning false.
 
@@ -155,9 +157,9 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 
 ## RULE 7: `requires_peek_ahead` — Multi-Character Contextual Processing
 
-| Language | Rule | Include? | Reason |
-|----------|------|----------|--------|
-| All | — | No | Dictionary-based logic not supported |
+| Language | Rule | Include? | Reason                               |
+| -------- | ---- | -------- | ------------------------------------ |
+| All      | —    | No       | Dictionary-based logic not supported |
 
 > Normy treats all other digraph letters (Czech "ch", Slovak "dz/dž", Croatian "lj/nj", etc.) as **ordinary sequences** — they are **not** treated as atomic units because Unicode does not encode them as single codepoints.
 > Greek, Word-boundary detection for σ/ς, must peek ahead to determine if at word-end for correct sigma form (σ in word, ς at end) but it is not supported yet.
@@ -166,22 +168,22 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 
 ## RULE 8: `format_scope` — Structured Text Normalization (Format-Aware)
 
-| Scope                            | Normalize? | Justification |
-|----------------------------------|------------|-----------|
-| Text nodes                       | Yes        | Primary content |
-| HTML `<script>`, `<style>`, `<pre>`, `<code>` | No  | Prevents code corruption |
-| Markdown code blocks/fences/inline | No       | Preserves syntax |
-| HTML attribute values            | No         | Ensures functionality |
+| Scope                                         | Normalize? | Justification            |
+| --------------------------------------------- | ---------- | ------------------------ |
+| Text nodes                                    | Yes        | Primary content          |
+| HTML `<script>`, `<style>`, `<pre>`, `<code>` | No         | Prevents code corruption |
+| Markdown code blocks/fences/inline            | No         | Preserves syntax         |
+| HTML attribute values                         | No         | Ensures functionality    |
 
 ---
 
 ## RULE 9: `normalization_form` — Unicode Canonical Equivalence
 
-| Form | Applied? | Justification |
-|------|----------|---------------|
-| NFC (Composed) | **Always** (first stage) | Canonical composed form — most compact, best for text comparison |
-| NFD (Decomposed) | No (internal only) | Used internally for diacritic operations, always recomposed to NFC |
-| NFKC/NFKD (Compatibility) | Optional stage | Lossy compatibility decomposition (e.g., ﬁ→fi, ℃→°C) — opt-in only |
+| Form                      | Applied?                 | Justification                                                      |
+| ------------------------- | ------------------------ | ------------------------------------------------------------------ |
+| NFC (Composed)            | **Always** (first stage) | Canonical composed form — most compact, best for text comparison   |
+| NFD (Decomposed)          | No (internal only)       | Used internally for diacritic operations, always recomposed to NFC |
+| NFKC/NFKD (Compatibility) | Optional stage           | Lossy compatibility decomposition (e.g., ﬁ→fi, ℃→°C) — opt-in only |
 
 **Guarantee**: All Normy output is in NFC unless NFKC is explicitly enabled.
 
@@ -193,29 +195,18 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 
 ---
 
-## Out of Scope: Unidecode-Style ASCII Fallback
+## Scope and Philosophy
 
-Normy **must never** include full Unidecode-style fallbacks (e.g., ğ→g, č→c, ø→o, ł→l).  
-These belong to a **separate, optional compatibility module** (`normy-compat-ascii`), which is:
+Normy is **linguistically conservative** and **non-destructive by default**. Aggressive ASCII fallbacks (e.g., ğ→g, č→c, ø→o, ł→l) belong in an optional `normy-compat-ascii` crate (opt-in, never enabled in presets).
 
-- Not part of linguistic normalization
-- Not enabled by any default profile
-- Explicitly opt-in for legacy systems
+### Explicitly Out of Scope
 
----
+Normy intentionally does **not** perform:
 
-## Explicitly Out of Scope
-
-Normy **intentionally does not** perform:
-
-1. **Titlecasing** — Use Unicode default or ICU for proper titlecasing
-2. **Romanization** — Use dedicated libraries (e.g., Unidecode, AnyAscii)
-3. **Dictionary-based tokenization** — Use language-specific tokenizers (MeCab, PyThaiNLP, etc.)
-4. **Lemmatization** — Use NLP libraries (spaCy, Stanza)
-5. **Spell correction** — Out of scope for normalization
-6. **Locale-aware sorting** — Use ICU Collator or similar
-7. **Smart quotes/dashes** — Typography concerns, not normalization
-8. **Number formatting** — Use locale-aware formatters
+1. Titlecasing – use Unicode default or ICU
+2. Full romanization – use dedicated libraries (Unidecode, AnyAscii)
+3. Dictionary-based tokenization – use language-specific tools (MeCab, PyThaiNLP, etc.)
+4. Lemmatization, spell correction, locale-aware sorting, smart quotes/dashes, number formatting
 
 ---
 

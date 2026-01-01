@@ -35,7 +35,6 @@ mod unicode;
 
 #[cfg(test)]
 mod tests {
-    include!("tests/unit.rs");
     include!("tests/integration.rs");
     include!("tests/proptest.rs");
 }

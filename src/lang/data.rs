@@ -341,7 +341,7 @@ define_languages! {
             '\u{0650}', // Kasra (~25%)
             '\u{064F}', // Damma (~20%)
             '\u{0652}', // Sukun (~10%)
-            '\u{0651}', // Shadda (~5%) — added for full tashkil removal
+      //      '\u{0651}', // Shadda (~5%) — added for full tashkil removal
             '\u{064B}', // Tanwin Fath (~3%)
             '\u{064D}', // Tanwin Kasr (~2%)
             '\u{064C}', // Tanwin Damm (~2%)
