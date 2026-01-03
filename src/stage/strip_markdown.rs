@@ -10,15 +10,22 @@ use std::{borrow::Cow, iter::FusedIterator};
 
 /// Strips Markdown formatting while preserving visible text and logical structure.
 ///
-/// # Semantics
-/// - Inline code and math content is emitted literally (e.g. `` `*text*` `` → "*text*").
-/// - This preserves orthographic reality for code examples, critical for NLP/tokenization.
-/// - Output may contain sequences resembling Markdown syntax originating from literal code.
+/// This stage removes Markdown syntax using `pulldown-cmark` with extended options
+/// (strikethrough, tables, task lists, footnotes, math) enabled:
 ///
-/// # Idempotency
-/// - Idempotent on all realistic inputs and universal contract samples.
-/// - Pathological cases where literal code mimics markup may drift on second application.
-/// - Normy pipelines apply each stage once → this is not a practical concern.
+/// - Inline formatting (bold, italic, strikethrough, links, images) is stripped
+/// - Code and math content is emitted literally (including delimiters)
+/// - Block structure (headings, lists, quotes, tables) is converted to newlines
+/// - Task list markers become `[x] ` / `[ ] `
+/// - Tables are linearized with spaces between cells and newlines between rows
+///
+/// Handles malformed or nested Markdown robustly.
+///
+/// Zero-copy when no Markdown syntax is detected.
+///
+/// Static fusion is intentionally disabled — the optimized parser-based implementation
+/// is significantly faster than a character-by-character fused iterator.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct StripMarkdown;
 
 impl Stage for StripMarkdown {

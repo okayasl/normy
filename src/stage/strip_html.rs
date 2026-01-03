@@ -7,25 +7,22 @@ use crate::{
 use memchr::memchr;
 use std::{borrow::Cow, iter::FusedIterator};
 
-/// Strips HTML tags and decodes entities while preserving visible text.
+/// Strips HTML tags, decodes entities, and extracts visible text.
 ///
-/// # Behavior
-/// - **Tags removed**: All HTML tags stripped
-/// - **Entities decoded**: `&amp;` → `&`, `&lt;` → `<`, etc.
-/// - **Content stripped**: `<script>`, `<style>`, `<noscript>`, `<svg>`, `<math>` and their content removed
-/// - **Block spacing**: Block tags (div, p, h1-h6) add spaces to prevent word concatenation
+/// This stage removes all HTML markup while preserving readable content:
 ///
-/// # Performance
-/// - Zero-copy when no `<` or decodable `&` entities
-/// - Fast `memchr` scan for tags, full decode check for entities
-/// - Handles malformed HTML (unclosed tags, missing quotes, unclosed comments)
+/// - Tags are stripped
+/// - Entities are decoded (`&amp;` → `&`, `&euro;` → `€`, etc.)
+/// - Content of `<script>`, `<style>`, `<noscript>`, `<svg>`, `<math>` is completely removed
+/// - Block-level tags (p, div, h1–h6, etc.) insert spaces to prevent word concatenation
 ///
-/// # Example
-/// ```text
-/// "<h1>Title</h1><p>Text</p>" → "Title Text"
-/// "Price: &euro;99"          → "Price: €99"
-/// "<script>alert(1)</script>" → ""
-/// ```
+/// Handles malformed HTML robustly (unclosed tags, missing quotes, encoded attacks).
+///
+/// Zero-copy when input contains no `<` or decodable `&` entities.
+///
+/// Static fusion is intentionally disabled — the optimized batch parser
+/// is significantly faster than a character-by-character fused iterator.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct StripHtml;
 
 impl Stage for StripHtml {

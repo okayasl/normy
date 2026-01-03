@@ -27,21 +27,6 @@ tokenizers = "0.22.2"
 regex = "1.12.2"
 
 [[bench]]
-name = "calb"
-path = "benches/comparison_accent_lowercase_bench.rs"
-harness = false
-
-[[bench]]
-name = "cbpb"
-path = "benches/comparison_bert_pipeline_bench.rs"
-harness = true
-
-[[bench]]
-name = "cds"
-path = "benches/comparison_data_structs.rs"
-harness = false
-
-[[bench]]
 name = "cfb"
 path = "benches/comparison_fusing_bench.rs"
 harness = false
@@ -54,7 +39,7 @@ harness = false
 [[bench]]
 name = "ctb"
 path = "benches/comparison_tokenizers_bench.rs"
-harness = true
+harness = false
 
 [[bench]]
 name = "lagb"
@@ -79,11 +64,6 @@ harness = false
 [[bench]]
 name = "pb"
 path = "benches/process_bench.rs"
-harness = false
-
-[[bench]]
-name = "sb"
-path = "benches/stage_bench.rs"
 harness = false
 
 [[bench]]

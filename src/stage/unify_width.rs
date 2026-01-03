@@ -9,16 +9,22 @@ use crate::{
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 
-/// Convert full-width (wide) ASCII forms → half-width (narrow) equivalents
+/// Converts full-width (wide) ASCII forms to half-width (narrow) equivalents.
 ///
-/// Maps:
-/// - Full-width Latin `Ａ−Ｚａ−ｚ` → `A−Za−z`
-/// - Full-width digits `０−９` → `0−9`
+/// This stage maps full-width Latin letters, digits, punctuation, and ideographic
+/// space (U+3000) to their standard ASCII counterparts:
+///
+/// - `Ａ−Ｚａ−ｚ` → `A−Za−z`
+/// - `０−９` → `0−9`
 /// - Full-width punctuation → ASCII equivalents
-/// - Ideographic space `　` → ` `
+/// - `　` (U+3000) → ` ` (U+0020)
 ///
-/// Essential for CJK ↔ Latin search equivalence.
-/// Pure 1:1 → maximum fusion and zero-copy performance.
+/// Essential for CJK ↔ Latin search equivalence and consistent tokenization.
+///
+/// Pure 1:1 mapping → zero-copy when no full-width characters present
+/// and maximum static fusion performance.
+///
+/// This stage is eligible for static fusion in all supported languages.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UnifyWidth;
 

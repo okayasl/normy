@@ -8,16 +8,22 @@ use crate::{
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 
-/// Remove all Unicode format control characters (General Category `Cf`)
+/// Removes Unicode format control characters (General Category Cf).
 ///
-/// Strips invisible presentation controls:
+/// This stage strips invisible formatting controls such as:
+///
 /// - Zero-width spaces/joiners (ZWSP, ZWJ, ZWNJ)
 /// - Bidirectional marks/overrides (LRM, RLM, LRE, etc.)
-/// - Byte Order Mark (BOM U+FEFF)
-/// - Word joiner, invisible operators
+/// - Byte Order Mark (BOM, U+FEFF)
+/// - Word joiner and invisible operators
 ///
-/// Critical for search security and tokenization consistency.
-/// Zero-copy when clean. Fully fusable.
+/// These characters can disrupt tokenization, search matching, or cause security issues
+/// in user-generated content. General control characters (Cc) are **preserved** — use
+/// `StripControlChars` for those.
+///
+/// Zero-copy when no Cf characters are present. Fully fusable filter.
+///
+/// This stage is eligible for static fusion in all supported languages.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StripFormatControls;
 

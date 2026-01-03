@@ -22,30 +22,56 @@ static ICU4X_NFD: LazyLock<DecomposingNormalizerBorrowed<'static>> =
 static ICU4X_NFKD: LazyLock<DecomposingNormalizerBorrowed<'static>> =
     LazyLock::new(DecomposingNormalizerBorrowed::new_nfkd);
 
-// --- 1. Define Concrete Normalization Stage Structs ---
-
-/// Unicode Normalization Form C (Canonical Composition)
+// Unicode Normalization Form C (Canonical Composition)
 #[derive(Default, Clone, Copy)]
 pub struct NfcStage;
 
-/// Unicode Normalization Form D (Canonical Decomposition)
+// Unicode Normalization Form D (Canonical Decomposition)
 #[derive(Default, Clone, Copy)]
 pub struct NfdStage;
 
-/// Unicode Normalization Form KC (Compatibility Composition)
+// Unicode Normalization Form KC (Compatibility Composition)
 #[derive(Default, Clone, Copy)]
 pub struct NfkcStage;
 
-/// Unicode Normalization Form KD (Compatibility Decomposition)
+// Unicode Normalization Form KD (Compatibility Decomposition)
 #[derive(Default, Clone, Copy)]
 pub struct NfkdStage;
 
-// --- 2. Public Constants ---
-
-// The constants now use the direct, concrete stage structs.
+/// Applies Unicode Normalization Form C (NFC): canonical decomposition followed by canonical composition.
+///
+/// Produces the standard composed form preferred by most modern text protocols
+/// (e.g., W3C/WHATWG web standards, XML, modern databases). Ensures equivalent
+/// strings have identical binary representation while preserving semantic meaning.
+///
+/// This stage uses ICU4X's highly optimized batch normalizer and deliberately
+/// disables static fusion — the eager path is 2–6× faster than streaming normalization.
 pub const NFC: NfcStage = NfcStage;
+
+/// Applies Unicode Normalization Form D (NFD): canonical decomposition only.
+///
+/// Useful as a preparatory step before diacritic removal, custom transliteration,
+/// or when decomposition is required for further processing.
+///
+/// Like NFC, this stage uses optimized batch processing and disables fusion
+/// for maximum throughput.
 pub const NFD: NfdStage = NfdStage;
+
+/// Applies Unicode Normalization Form KC (NFKC): compatibility decomposition followed by canonical composition.
+///
+/// Expands compatibility characters (e.g., ﬃ → ffi, ½ → 1/2, full-width forms)
+/// into their canonical equivalents. Commonly used for search indexing where
+/// visual variants should match.
+///
+/// Batch-optimized; static fusion disabled for performance.
 pub const NFKC: NfkcStage = NfkcStage;
+
+/// Applies Unicode Normalization Form KD (NFKD): compatibility decomposition only.
+///
+/// Similar to NFKC but leaves characters decomposed. Useful before aggressive
+/// compatibility-based transformations or legacy text cleanup.
+///
+/// Batch-optimized; static fusion disabled for performance.
 pub const NFKD: NfkdStage = NfkdStage;
 
 macro_rules! impl_normalization_stage {
@@ -75,10 +101,12 @@ macro_rules! impl_normalization_stage {
                 = $adapter<'a, I>
             where
                 I: FusedIterator<Item = char> + 'a;
-
+            // Static fusion is intentionally disabled for normalization stages.
+            // ICU4X's iterator-based normalization (`normalize_iter`) has
+            // substantially higher per-character overhead than the eager
+            // `.normalize()` path, making fusion slower overall.
             fn supports_static_fusion(&self) -> bool {
-                true
-                //false
+                false
             }
 
             #[inline(always)]
@@ -99,13 +127,11 @@ macro_rules! impl_normalization_stage {
     };
 }
 
-// --- 5. Apply Macros ---
 impl_normalization_stage!(NfcStage, "nfc", ICU4X_NFC, NormalizationComposeAdapter);
 impl_normalization_stage!(NfkcStage, "nfkc", ICU4X_NFKC, NormalizationComposeAdapter);
 impl_normalization_stage!(NfdStage, "nfd", ICU4X_NFD, NormalizationDecomposeAdapter);
 impl_normalization_stage!(NfkdStage, "nfkd", ICU4X_NFKD, NormalizationDecomposeAdapter);
 
-// Generic Adapter for Composition (NFC, NFKC)
 pub struct NormalizationComposeAdapter<'a, I>
 where
     I: Iterator<Item = char>,
@@ -128,7 +154,6 @@ impl<'a, I: Iterator<Item = char>> Iterator for NormalizationComposeAdapter<'a, 
 
 impl<'a, I: Iterator<Item = char>> FusedIterator for NormalizationComposeAdapter<'a, I> {}
 
-// Generic Adapter for Decomposition (NFD, NFKD)
 pub struct NormalizationDecomposeAdapter<'a, I>
 where
     I: Iterator<Item = char>,
@@ -151,7 +176,6 @@ impl<'a, I: Iterator<Item = char>> Iterator for NormalizationDecomposeAdapter<'a
 
 impl<'a, I: Iterator<Item = char>> FusedIterator for NormalizationDecomposeAdapter<'a, I> {}
 
-// --- 4. Implementation for StageTestConfig (Must be Duplicated) ---
 macro_rules! impl_stage_test_config {
     ($type:ty) => {
         impl StageTestConfig for $type {

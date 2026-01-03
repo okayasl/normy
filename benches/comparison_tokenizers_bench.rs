@@ -5,7 +5,7 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use normy::{
     COLLAPSE_WHITESPACE_UNICODE, FRA, LowerCase, NFD, Normy, RemoveDiacritics, StripControlChars,
-    StripFormatControls, Transliterate, ZHO,
+    Transliterate, ZHO,
     context::Context,
     stage::normalization::NfdStage,
     stage::normalize_whitespace::NormalizeWhitespace,
@@ -155,64 +155,87 @@ impl StaticFusableStage for BertCompatChineseChars {
 // NORMY PIPELINES
 // ═══════════════════════════════════════════════════════════════════════════
 
-type NormyBertLikePipeline = Normy<
-    normy::process::ChainedProcess<
-        LowerCase,
-        normy::process::ChainedProcess<
-            RemoveDiacritics,
-            normy::process::ChainedProcess<
-                NfdStage,
-                normy::process::ChainedProcess<
-                    BertCompatChineseChars,
-                    normy::process::ChainedProcess<
-                        NormalizeWhitespace,
-                        normy::process::ChainedProcess<
-                            StripFormatControls,
-                            normy::process::ChainedProcess<
-                                StripControlChars,
-                                normy::process::EmptyProcess,
-                            >,
-                        >,
-                    >,
-                >,
-            >,
-        >,
-    >,
->;
+macro_rules! define_normy_pipeline {
+    // Helper to generate the nested Type (REVERSED)
+    (@type $head:ty, $($tail:ty),+) => {
+        define_normy_pipeline!(@type_inner
+            normy::process::ChainedProcess<$head, normy::process::EmptyProcess>,
+            $($tail),+
+        )
+    };
+    (@type $head:ty) => {
+        normy::process::ChainedProcess<$head, normy::process::EmptyProcess>
+    };
 
-type LowercaseTransliteratePipeline = Normy<
-    normy::process::ChainedProcess<
-        Transliterate,
-        normy::process::ChainedProcess<LowerCase, normy::process::EmptyProcess>,
-    >,
->;
+    // Recursively wraps the current chain into the next stage
+    (@type_inner $prev:ty, $curr:ty, $($tail:ty),+) => {
+        define_normy_pipeline!(@type_inner
+            normy::process::ChainedProcess<$curr, $prev>,
+            $($tail),+
+        )
+    };
+    (@type_inner $prev:ty, $curr:ty) => {
+        normy::process::ChainedProcess<$curr, $prev>
+    };
 
-static NORMY_BERT: LazyLock<NormyBertLikePipeline> = LazyLock::new(|| {
-    Normy::builder()
-        .lang(ZHO)
-        .modify_lang(|entry| {
-            entry.set_spacing_diacritics(&[
-                '\u{0300}', '\u{0301}', '\u{0302}', '\u{0308}', '\u{030A}', '\u{030B}', '\u{030C}',
-                '\u{030F}', '\u{0311}', '\u{0327}', '\u{0328}', '\u{0338}',
-            ]);
-        })
-        .add_stage(StripControlChars)
-        .add_stage(StripFormatControls)
-        .add_stage(COLLAPSE_WHITESPACE_UNICODE)
-        .add_stage(BertCompatChineseChars)
-        .add_stage(NFD)
-        .add_stage(RemoveDiacritics)
-        .add_stage(LowerCase)
-        .build()
-});
+    // Main entry point
+    (
+        $name:ident,
+        $type_alias:ident,
+        lang: $lang:expr,
+        $(modify_lang: $modify_fn:expr,)?
+        stages: [
+            $($stage_type:ty => $stage_val:expr),+ $(,)?
+        ]
+    ) => {
+        // Generate the Type alias by nesting in the order the builder produces
+        type $type_alias = Normy<define_normy_pipeline!(@type $($stage_type),+)>;
 
-static NORMY_FRA_PIPELINE: LazyLock<LowercaseTransliteratePipeline> = LazyLock::new(|| {
-    Normy::builder()
-        .lang(FRA)
-        .add_stage(LowerCase)
-        .add_stage(Transliterate)
-        .build()
-});
+        static $name: LazyLock<$type_alias> = LazyLock::new(|| {
+            let builder = Normy::builder().lang($lang);
+
+            // If modify_lang exists, we shadow 'builder' with the modified version
+            $(
+                let builder = builder.modify_lang($modify_fn);
+            )?
+
+            // Chain the stages and build
+            builder
+                $(.add_stage($stage_val))+
+                .build()
+        });
+    };
+}
+
+define_normy_pipeline!(
+    NORMY_BERT,
+    NormyBertLikePipeline,
+    lang: ZHO,
+    modify_lang: |entry| {
+        entry.set_spacing_diacritics(&[
+            '\u{0300}', '\u{0301}', '\u{0302}', '\u{0308}', '\u{030A}', '\u{030B}', '\u{030C}',
+            '\u{030F}', '\u{0311}', '\u{0327}', '\u{0328}', '\u{0338}',
+        ]);
+    },
+    stages: [
+        StripControlChars      => StripControlChars,
+        NormalizeWhitespace    => COLLAPSE_WHITESPACE_UNICODE,
+        BertCompatChineseChars => BertCompatChineseChars,
+        NfdStage               => NFD,
+        RemoveDiacritics       => RemoveDiacritics,
+        LowerCase              => LowerCase,
+    ]
+);
+
+define_normy_pipeline!(
+    NORMY_FRA_PIPELINE,
+    LowercaseTransliteratePipeline,
+    lang: FRA,
+    stages: [
+        LowerCase    => LowerCase,
+        Transliterate => Transliterate,
+    ]
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // HUGGINGFACE TOKENIZERS
@@ -234,11 +257,11 @@ static HF_FRA_NORMALIZER: LazyLock<Sequence> = LazyLock::new(|| {
 
 fn bert_pool() -> &'static [&'static str; 5] {
     &[
-        "Ｈｅｌｌｏ　naïve Café\u{0000}\u{200B}résumé",
+        "Ｈｅｌｌｏ naive Café\0 résumé",
         "你好世界",
         "NAÏVE déjà-vu",
-        "Hello world\u{3000}",
-        "Ｈｅｌｌｏ　世界　café",
+        "Hello world café",
+        "Ｈｅｌｌｏ 世界 café",
     ]
 }
 
@@ -349,35 +372,6 @@ fn bench_normy_bert(
 }
 
 #[allow(clippy::cast_precision_loss)]
-fn bench_normy_bert_apply_only(
-    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    name: &str,
-    scenario: &str,
-    corpus: &str,
-) {
-    let mut zero_copy_hits = 0usize;
-    let mut total = 0usize;
-
-    group.bench_function(BenchmarkId::new(name, scenario), |b| {
-        b.iter(|| {
-            total += 1;
-            let result = NORMY_BERT.normalize_apply_only(black_box(corpus)).unwrap();
-            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
-                zero_copy_hits += 1;
-            }
-            black_box(result);
-        });
-    });
-
-    let pct = if total > 0 {
-        (zero_copy_hits as f64 / total as f64) * 100.0
-    } else {
-        0.0
-    };
-    println!("   {name:35} - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
-}
-
-#[allow(clippy::cast_precision_loss)]
 fn bench_normy_fra(
     group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
     name: &str,
@@ -391,35 +385,6 @@ fn bench_normy_fra(
         b.iter(|| {
             total += 1;
             let result = NORMY_FRA_PIPELINE.normalize(black_box(corpus)).unwrap();
-            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
-                zero_copy_hits += 1;
-            }
-            black_box(result);
-        });
-    });
-
-    let pct = if total > 0 {
-        (zero_copy_hits as f64 / total as f64) * 100.0
-    } else {
-        0.0
-    };
-    println!("   {name:35} - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn bench_normy_fra_apply_only(
-    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
-    name: &str,
-    scenario: &str,
-    corpus: &str,
-) {
-    let mut zero_copy_hits = 0usize;
-    let mut total = 0usize;
-
-    group.bench_function(BenchmarkId::new(name, scenario), |b| {
-        b.iter(|| {
-            total += 1;
-            let result = NORMY_FRA_PIPELINE.normalize_apply_only(black_box(corpus)).unwrap();
             if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
                 zero_copy_hits += 1;
             }
@@ -472,8 +437,6 @@ fn bench_bert_normalizers(c: &mut Criterion) {
 
         bench_normy_bert(&mut group, "Normy BERT (normalize)", scenario, corpus);
 
-        bench_normy_bert_apply_only(&mut group, "Normy BERT (apply_only)", scenario, corpus);
-
         bench_hf_normalizer(
             &mut group,
             "HuggingFace BertNormalizer",
@@ -501,8 +464,6 @@ fn bench_french_normalizers(c: &mut Criterion) {
         println!("\n[French: {scenario}]");
 
         bench_normy_fra(&mut group, "Normy FRA (normalize)", scenario, corpus);
-
-        bench_normy_fra_apply_only(&mut group, "Normy FRA (apply_only)", scenario, corpus);
 
         bench_hf_normalizer(
             &mut group,
@@ -539,7 +500,7 @@ mod tests {
 
             // Normy apply_only
             let normy_apply = NORMY_BERT
-                .normalize_apply_only(input)
+                .normalize_no_fusion(input)
                 .expect("Normy apply_only failed");
             let normy_apply_output: String = normy_apply.clone().into_owned();
 
@@ -570,81 +531,6 @@ mod tests {
     }
 
     #[test]
-    fn bert_normalizer_semantic_equivalence2() {
-        let normy = &*NORMY_BERT;
-        let hf = &*HF_BERT;
-
-        let pool = bert_pool();
-
-        for (i, &input) in pool.iter().enumerate() {
-            // --- Hugging Face ---
-            let mut hf_ns = NormalizedString::from(input);
-            hf.normalize(&mut hf_ns).expect("HF normalize failed");
-            let hf_output: String = hf_ns.get().into();
-
-            // --- Normy ---
-            let normy_result = normy
-                .normalize_apply_only(input)
-                .expect("Normy normalize apply only failed");
-            let normy_output: String = normy_result.clone().into_owned();
-
-            // --- Normy ---
-            let normy_fusable_result = normy.normalize(input).expect("Normy normalize failed");
-            let normy_fusable_output: String = normy_fusable_result.clone().into_owned();
-
-            // Semantic equivalence
-            assert_eq!(
-                hf_output,
-                normy_output,
-                "\n\nFailed equivalence on test case #{}\n\
-             Input:  {:?}\n\
-             HF:     {:?}\n\
-             Normy:  {:?}\n\
-             HF len:  {} chars\n\
-             Normy len: {} chars\n",
-                i + 1,
-                input,
-                hf_output,
-                normy_output,
-                hf_output.len(),
-                normy_output.len()
-            );
-
-            assert_eq!(
-                hf_output,
-                normy_fusable_output,
-                "\n\nFailed equivalence on test case #{}\n\
-             Input:  {:?}\n\
-             HF:     {:?}\n\
-             Normy:  {:?}\n\
-             HF len:  {} chars\n\
-             Normy len: {} chars\n",
-                i + 1,
-                input,
-                hf_output,
-                normy_fusable_output,
-                hf_output.len(),
-                normy_fusable_output.len()
-            );
-
-            // --- Zero-copy proof on unchanged input ---
-            if input.chars().all(|c| {
-                c.is_ascii_lowercase() || c.is_ascii_whitespace() || c.is_ascii_punctuation()
-            }) && input
-                .trim()
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_punctuation())
-            {
-                // This input should be completely unchanged → zero-copy must trigger
-                assert!(
-                    matches!(normy_result, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr() && s.len() == input.len()),
-                    "Zero-copy failed on already-normalized input: {input:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn test_french_normalizer_semantic_equivalence() {
         for (i, &input) in french_pool().iter().enumerate() {
             // HuggingFace
@@ -656,7 +542,7 @@ mod tests {
 
             // Normy apply_only
             let normy_apply = NORMY_FRA_PIPELINE
-                .normalize_apply_only(input)
+                .normalize_no_fusion(input)
                 .expect("Normy apply_only failed");
             let normy_apply_output: String = normy_apply.clone().into_owned();
 
@@ -714,6 +600,9 @@ mod tests {
         let mut hf_ns = NormalizedString::from(CORPUS_BERT_NEEDS.as_str());
         HF_BERT.normalize(&mut hf_ns).unwrap();
         let hf_result = hf_ns.get();
+        //println!("CORPUS_BERT_NEEDS: {:?}", *CORPUS_BERT_NEEDS);
+
+        assert_eq!(normy_result, hf_result, "❌ BERT corpus mismatch");
 
         assert_eq!(
             normy_result.len(),

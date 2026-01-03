@@ -7,14 +7,22 @@ use crate::{
 };
 use std::borrow::Cow;
 
-/// Locale-aware orthographic transliteration (lossy, opt-in).
+/// Performs locale-aware orthographic transliteration (lossy, opt-in).
 ///
-/// Performs language-specific multi-character expansions:
-/// - French: Œ→oe, Æ→ae
+/// This stage applies language-specific multi-character expansions using the
+/// target's `transliterate` map:
+///
+/// - French: Œ→oe, Æ→ae, Ç→c
 /// - German: Ä→ae, Ö→oe, Ü→ue
-/// - Nordic: Å→aa
-/// - Case-preserving
-/// - Zero-copy when no rules or no matches
+/// - Nordic (Danish/Norwegian/Swedish): Å→aa, Æ→ae, Ø→oe
+/// - Icelandic: Þ→th, Ð→d, Æ→ae
+///
+/// Rules are applied strictly per language — foreign characters are preserved.
+/// Case is preserved (maps exist for both upper and lower forms).
+///
+/// Zero-copy when no transliteration rules apply or no matches found.
+///
+/// This stage is eligible for static fusion in all supported languages.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct Transliterate;
 

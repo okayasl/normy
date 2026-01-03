@@ -10,11 +10,7 @@ use normy::{
     stage::{Stage, StaticFusableStage},
 };
 
-// ============================================================================
-// Language-Specific Test Data
-// ============================================================================
-
-/// LowerCase uses case_map (TUR, LIT) + fallback to Unicode
+// LowerCase uses case_map (TUR, LIT) + fallback to Unicode
 const LOWERCASE_SAMPLES: &[(&str, Lang)] = &[
     // Languages with case_map
     ("İSTANBUL İĞNE İĞDE", TUR),
@@ -23,7 +19,7 @@ const LOWERCASE_SAMPLES: &[(&str, Lang)] = &[
     ("HELLO WORLD", ENG),
 ];
 
-/// CaseFold uses fold_map (DEU, NLD) + case_map (TUR, LIT) + fallback
+// CaseFold uses fold_map (DEU, NLD) + case_map (TUR, LIT) + fallback
 const CASEFOLD_SAMPLES: &[(&str, Lang)] = &[
     // Languages with fold_map (multi-char expansions)
     ("GRÜßE STRAẞE", DEU),
@@ -35,7 +31,7 @@ const CASEFOLD_SAMPLES: &[(&str, Lang)] = &[
     ("HELLO WORLD", ENG),
 ];
 
-/// Transliterate - ordered by mapping count (RUS highest at 66)
+// Transliterate - ordered by mapping count (RUS highest at 66)
 const TRANSLITERATE_SAMPLES: &[(&str, Lang)] = &[
     // High complexity (66 mappings)
     ("Привет мир ЁЛКИ-ПАЛКИ", RUS),
@@ -52,8 +48,8 @@ const TRANSLITERATE_SAMPLES: &[(&str, Lang)] = &[
     ("Hello World", ENG),
 ];
 
-/// RemoveDiacritics - both precomposed_to_base and spacing_diacritics
-/// Ordered by total mapping count
+// RemoveDiacritics - both precomposed_to_base and spacing_diacritics
+// Ordered by total mapping count
 const REMOVEDIACRITICS_SAMPLES: &[(&str, Lang)] = &[
     // Highest complexity (146 precomposed + 5 spacing = 151)
     ("Việt Nam Phở Phỏ̉", VIE),
@@ -72,7 +68,7 @@ const REMOVEDIACRITICS_SAMPLES: &[(&str, Lang)] = &[
     ("Hello World", ENG),
 ];
 
-/// SegmentWords - languages with segment_rules
+// SegmentWords - languages with segment_rules
 const SEGMENTWORDS_SAMPLES: &[(&str, Lang)] = &[
     // CJK unigram (highest complexity)
     ("汉字仮名한글漢字", ZHO),
@@ -85,10 +81,6 @@ const SEGMENTWORDS_SAMPLES: &[(&str, Lang)] = &[
     // Baseline (no rules)
     ("Hello World", ENG),
 ];
-
-// ============================================================================
-// Benchmark Functions
-// ============================================================================
 
 fn bench_stage_focused<S, C>(
     c: &mut Criterion,
@@ -115,10 +107,6 @@ fn bench_stage_focused<S, C>(
         let status = if is_unchanged { "unchanged" } else { "changed" };
 
         let supports_fusion = stage.supports_static_fusion();
-
-        // ====================================================================
-        // Changed Input Benchmarks
-        // ====================================================================
 
         // Full pipeline (includes needs_apply overhead)
         let id = format!("{}/{}/{}", lang.code(), status, text);
@@ -159,10 +147,6 @@ fn bench_stage_focused<S, C>(
                 )
             });
         }
-
-        // ====================================================================
-        // Unchanged Input Benchmarks (if different from changed)
-        // ====================================================================
 
         if !is_unchanged {
             let unchanged_id = format!("{}/unchanged/{}", lang.code(), normalized);
@@ -212,10 +196,6 @@ fn bench_stage_focused<S, C>(
     group.finish();
 }
 
-// ============================================================================
-// Individual Stage Benchmarks
-// ============================================================================
-
 fn bench_lowercase_focused(c: &mut Criterion) {
     bench_stage_focused(c, "LowerCase", LOWERCASE_SAMPLES, || LowerCase);
 }
@@ -237,10 +217,6 @@ fn bench_removediacritics_focused(c: &mut Criterion) {
 fn bench_segmentwords_focused(c: &mut Criterion) {
     bench_stage_focused(c, "SegmentWords", SEGMENTWORDS_SAMPLES, || SegmentWords);
 }
-
-// ============================================================================
-// Comparison Benchmark: Show fusion overhead clearly
-// ============================================================================
 
 fn bench_fusion_overhead(c: &mut Criterion) {
     let mut group = c.benchmark_group("fusion_overhead_analysis");
@@ -277,10 +253,6 @@ fn bench_fusion_overhead(c: &mut Criterion) {
 
     group.finish();
 }
-
-// ============================================================================
-// Criterion Configuration
-// ============================================================================
 
 criterion_group!(
     name = focused_benches;

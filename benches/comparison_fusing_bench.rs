@@ -1,382 +1,335 @@
-use std::{borrow::Cow, hint::black_box, time::Duration};
-
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
-    ARA, COLLAPSE_WHITESPACE_UNICODE, CaseFold, DEU, ENG, JPN, LowerCase, NFC,
-    NormalizePunctuation, Normy, RemoveDiacritics, StripControlChars, StripHtml, StripMarkdown,
-    TUR, UnifyWidth, VIE,
-    lang::Lang,
-    process::{FusablePipeline, Process},
+    ARA, COLLAPSE_WHITESPACE_UNICODE, CaseFold, DEU, FRA, JPN, NormalizePunctuation, POL, RUS,
+    RemoveDiacritics, StripControlChars, TRIM_WHITESPACE, Transliterate, UnifyWidth, VIE,
 };
+use std::{hint::black_box, time::Duration};
 
-// Samples with diverse content
-const SAMPLES: &[(&str, Lang)] = &[
-    // English with HTML, accents, needs NFC normalization
-    (
-        concat!(
-            "<html><head><title>Test</title></head><body>",
-            "<h1>Hello Naïve World!</h1>",
-            "<p>This is a longer paragraph with <b>bold</b>, <i>italic</i>, and <a href=\"#\">links</a>. ",
-            "It includes multiple sentences. Café in French. Résumé with accents. ",
-            "Decomposed accents: cafe\u{0301} ",
-            "Control chars:\t\r\n\u{200B}\u{200C}. ",
-            "Repeated content: Hello world hello world hello world hello world hello world. </p>",
-            "<ul><li>Item 1</li><li>Item 2 with emoji 🇺🇸</li></ul>",
-            "</body></html>"
-        ),
-        ENG,
-    ),
-    // Turkish with dotted letters
-    (
-        concat!(
-            "<div>İSTANBUL'da büyük bir ŞEHİR. İĞNE iğde Iı. ",
-            "Longer Turkish text with cafe\u{0301} decomposed. ",
-            "İİİİİİİİİİ ıııııııııı. ",
-            "HTML tags: <p>Paragraf</p> <b>Kalın</b>. ",
-            "Repeated: İstanbul İstanbul İstanbul İstanbul İstanbul.</div>"
-        ),
-        TUR,
-    ),
-    // German with eszett
-    (
-        concat!(
-            "GRÜNE STRAßE mit ẞ und ß. Dies ist ein längerer Text mit Maßstab für die Größe. ",
-            "Decomposed: Gru\u{0308}ne ",
-            "ẞßẞßẞßẞßẞß. ",
-            "ÄÖÜäöü in Wörtern. "
-        ),
-        DEU,
-    ),
-    // Japanese with half/full width
-    (
-        concat!(
-            "ﾊﾟﾋﾟﾌﾟﾍﾟﾎﾟーーこんにちは世界。これは長いテキストで、半角と全角が混在しています。",
-            "ﾊﾟﾊﾟﾊﾟﾊﾟﾊﾟﾊﾟﾊﾟﾊﾟ。 ",
-            "Repeated: 世界世界世界世界世界世界世界。"
-        ),
-        JPN,
-    ),
-    // Arabic with diacritics
-    (
-        concat!(
-            "ٱلْكِتَابُ مُحَمَّدٌ ـــــ هذا نص أطول مع حركات وتطويل. ",
-            "Repeated lam-alef: ٱٱٱٱٱٱٱ. ",
-            "More: الكتاب محمد الكتاب محمد."
-        ),
-        ARA,
-    ),
-    // Vietnamese with stacked diacritics
-    (
-        concat!(
-            "<p>Việt Nam with stacked: Phỏ̉ Tiếng Việt. ",
-            "Longer: Đây là một đoạn văn dài hơn với nhiều dấu. ",
-            "Decomposed: Vie\u{0302}\u{0323}t ",
-            "Repeated: Việt Việt Việt Việt. </p>"
-        ),
-        VIE,
-    ),
-];
+// Test samples where EVERY stage transforms the text
 
-// Pipeline builders
-fn build_single_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
-    Normy::builder().lang(lang).add_stage(LowerCase).build()
-}
+// German: ß folding + umlaut transliteration + diacritic removal
+const GERMAN_TEXT: &str = "  GRÜßE SCHÖNE ÄPFEL   ";
 
-fn build_multi_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
-    Normy::builder()
-        .lang(lang)
-        .add_stage(LowerCase)
-        .add_stage(CaseFold)
-        .add_stage(RemoveDiacritics)
-        .build()
-}
+// Vietnamese: Case fold + heavy diacritics
+const VIETNAMESE_TEXT: &str = "TIẾNG VIỆT HÀ NỘI PHỞ";
 
-fn build_nfc_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
-    Normy::builder()
-        .lang(lang)
-        .add_stage(NFC)
-        .add_stage(LowerCase)
-        .add_stage(RemoveDiacritics)
-        .build()
-}
+// Polish: Case fold + Polish diacritics
+const POLISH_TEXT: &str = "ŁÓDŹ KRAKÓW GDAŃSK";
 
-fn build_mixed_pipeline(lang: Lang) -> Normy<impl FusablePipeline> {
-    Normy::builder()
-        .lang(lang)
-        .add_stage(StripHtml)
-        .add_stage(NFC)
-        .add_stage(LowerCase)
-        .add_stage(RemoveDiacritics)
-        .build()
-}
+// Russian: Case fold + Cyrillic transliteration
+const RUSSIAN_TEXT: &str = "МОСКВА РОССИЯ САНКТ-ПЕТЕРБУРГ";
 
-fn build_complex_pipeline(lang: Lang) -> Normy<impl FusablePipeline> {
-    Normy::builder()
-        .lang(lang)
-        .add_stage(StripHtml)
-        .add_stage(NFC)
-        .add_stage(LowerCase)
-        .add_stage(CaseFold)
-        .add_stage(RemoveDiacritics)
-        .add_stage(StripMarkdown)
-        .add_stage(UnifyWidth)
-        .add_stage(NormalizePunctuation)
-        .add_stage(StripControlChars)
-        .add_stage(COLLAPSE_WHITESPACE_UNICODE)
-        .build()
-}
+// Japanese: Fullwidth + halfwidth katakana + punctuation
+const JAPANESE_TEXT: &str = "ＨＥＬＬＯ　ﾊﾟﾋﾟﾌﾟﾍﾟﾎﾟ－－－";
 
-fn build_non_fusable(lang: Lang) -> Normy<impl FusablePipeline> {
-    Normy::builder()
-        .lang(lang)
-        .add_stage(StripHtml)
-        .add_stage(StripMarkdown)
-        .build()
-}
+// Arabic: Text with control chars and diacritics
+const ARABIC_TEXT: &str = "اَلْعَرَبِيَّةُ\u{200B}\u{200C}اللغة";
 
-// Helper to check zero-copy on a sample
-fn check_zero_copy<'a>(input: &'a str, result: Cow<'a, str>) -> bool {
-    matches!(result, Cow::Borrowed(s) if s.as_ptr() == input.as_ptr() && s.len() == input.len())
-}
+// French: Case + ligatures + accents
+const FRENCH_TEXT: &str = "ŒUVRE FRANÇAIS CAFÉ---ÉLÈVE";
 
-// Correctness verification
-fn verify_outputs_match<P: Process + FusablePipeline>(
-    pipeline: &Normy<P>,
-    text: &str,
-) -> Result<(), String> {
-    let normal_result = pipeline
-        .normalize(text)
-        .map_err(|e| format!("normalize failed: {}", e))?;
-    let apply_only_result = pipeline
-        .normalize_apply_only(text)
-        .map_err(|e| format!("normalize_apply_only failed: {}", e))?;
+fn fusion_real_work_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("fusion_real_work");
 
-    if normal_result != apply_only_result {
-        return Err(format!(
-            "Output mismatch!\n  normalize:            '{}'\n  normalize_apply_only: '{}'",
-            normal_result, apply_only_result
-        ));
+    println!("\n╔══════════════════════════════════════════════════════════════════════╗");
+    println!("║       FUSION: ALL STAGES DO WORK (NON-REDUNDANT PIPELINES)          ║");
+    println!("║                                                                      ║");
+    println!("║  Testing realistic pipelines where each stage adds value            ║");
+    println!("╚══════════════════════════════════════════════════════════════════════╝\n");
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 2-STAGE: CaseFold + RemoveDiacritics
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        let name = "vietnamese_2stage_fold_strip";
+        let text = VIETNAMESE_TEXT;
+
+        let pipeline = normy::Normy::builder()
+            .lang(VIE)
+            .add_stage(CaseFold) // TIẾNG -> tiếng (includes lowercase)
+            .add_stage(RemoveDiacritics) // tiếng -> tieng (strip 80+ diacritics)
+            .build();
+
+        let fusion_enabled = pipeline.uses_fusion();
+        let result = pipeline.normalize(text).unwrap();
+
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!(
+            "🇻🇳 VIETNAMESE | {} | Fusion: {}",
+            name,
+            if fusion_enabled { "✅ YES" } else { "❌ NO" }
+        );
+        println!("   Input:  \"{}\"", text);
+        println!("   Output: \"{}\"", result);
+        println!("   Transform: CaseFold + strip 80+ diacritics");
+
+        group.bench_with_input(BenchmarkId::new("normalize", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
+        });
+
+        group.bench_with_input(BenchmarkId::new("no_fusion", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize_no_fusion(black_box(text)).unwrap()));
+        });
+        println!();
     }
 
-    Ok(())
-}
+    // ═══════════════════════════════════════════════════════════════════════
+    // 2-STAGE: CaseFold + Transliterate
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        let name = "russian_2stage_fold_translit";
+        let text = RUSSIAN_TEXT;
 
-// Macro for fusable cases (BuildIter pipelines)
-macro_rules! bench_fusable_case {
-    ($group:expr, $case:expr, $build:expr, $samples:expr) => {
-        for &(raw_text, lang) in $samples {
-            let pipeline = ($build)(lang);
+        let pipeline = normy::Normy::builder()
+            .lang(RUS)
+            .add_stage(CaseFold) // МОСКВА -> москва
+            .add_stage(Transliterate) // москва -> moskva (Cyrillic->Latin)
+            .build();
 
-            // Verify correctness before benchmarking
-            if let Err(e) = verify_outputs_match(&pipeline, raw_text) {
-                panic!(
-                    "❌ {} CORRECTNESS FAILURE for {}/{}: {}",
-                    $case,
-                    lang.code(),
-                    raw_text.len(),
-                    e
-                );
-            }
+        let fusion_enabled = pipeline.uses_fusion();
+        let result = pipeline.normalize(text).unwrap();
 
-            let normalized_output = pipeline.normalize(raw_text).unwrap();
-            let normalized = normalized_output.into_owned();
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!(
+            "🇷🇺 RUSSIAN | {} | Fusion: {}",
+            name,
+            if fusion_enabled { "✅ YES" } else { "❌ NO" }
+        );
+        println!("   Input:  \"{}\"", text);
+        println!("   Output: \"{}\"", result);
+        println!("   Transform: Lowercase + Cyrillic->Latin");
 
-            if let Err(e) = verify_outputs_match(&pipeline, &normalized) {
-                panic!(
-                    "❌ {} CORRECTNESS FAILURE (normalized) for {}/{}: {}",
-                    $case,
-                    lang.code(),
-                    normalized.len(),
-                    e
-                );
-            }
+        group.bench_with_input(BenchmarkId::new("normalize", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
+        });
 
-            // Check zero-copy behavior
-            let zc_raw_smart = check_zero_copy(raw_text, pipeline.normalize(raw_text).unwrap());
-            let zc_raw_apply =
-                check_zero_copy(raw_text, pipeline.normalize_apply_only(raw_text).unwrap());
-            let zc_norm_smart =
-                check_zero_copy(&normalized, pipeline.normalize(&normalized).unwrap());
-            let zc_norm_apply = check_zero_copy(
-                &normalized,
-                pipeline.normalize_apply_only(&normalized).unwrap(),
-            );
+        group.bench_with_input(BenchmarkId::new("no_fusion", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize_no_fusion(black_box(text)).unwrap()));
+        });
+        println!();
+    }
 
-            let id = format!("{}/{}/{}b", $case, lang.code(), raw_text.len());
-            let fusion_status = if pipeline.uses_fusion() {
-                "FUSION"
-            } else {
-                "APPLY"
-            };
+    // ═══════════════════════════════════════════════════════════════════════
+    // 3-STAGE: CaseFold + Transliterate + Trim Whitespace
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        let name = "german_3stage_fold_translit_trim";
+        let text = GERMAN_TEXT;
 
-            println!(
-                "  {} [{}] - Zero-Copy: Raw[Smart={} Apply={}] Norm[Smart={} Apply={}]",
-                id,
-                fusion_status,
-                if zc_raw_smart { "✓" } else { "✗" },
-                if zc_raw_apply { "✓" } else { "✗" },
-                if zc_norm_smart { "✓" } else { "✗" },
-                if zc_norm_apply { "✓" } else { "✗" },
-            );
+        let pipeline = normy::Normy::builder()
+            .lang(DEU)
+            .add_stage(CaseFold) // GRÜßE -> grüße (ß->ss)
+            .add_stage(Transliterate) // ü->ue, ö->oe, ä->ae
+            .add_stage(TRIM_WHITESPACE) // Trim whitespace
+            .build();
 
-            // --- RAW INPUT BENCHMARKS ---
+        let fusion_enabled = pipeline.uses_fusion();
+        let result = pipeline.normalize(text).unwrap();
 
-            $group.bench_with_input(
-                BenchmarkId::new("normalize/raw", &id),
-                &raw_text,
-                |b, &text| {
-                    b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
-                },
-            );
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!(
+            "🇩🇪 GERMAN | {} | Fusion: {}",
+            name,
+            if fusion_enabled { "✅ YES" } else { "❌ NO" }
+        );
+        println!("   Input:  \"{}\"", text);
+        println!("   Output: \"{}\"", result);
+        println!("   Transform: ß->ss + ü->ue + trim");
 
-            $group.bench_with_input(
-                BenchmarkId::new("normalize_apply_only/raw", &id),
-                &raw_text,
-                |b, &text| {
-                    b.iter(|| black_box(pipeline.normalize_apply_only(black_box(text)).unwrap()));
-                },
-            );
+        group.bench_with_input(BenchmarkId::new("normalize", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
+        });
 
-            // --- NORMALIZED INPUT BENCHMARKS (Zero-copy path) ---
+        group.bench_with_input(BenchmarkId::new("no_fusion", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize_no_fusion(black_box(text)).unwrap()));
+        });
+        println!();
+    }
 
-            $group.bench_with_input(
-                BenchmarkId::new("normalize/normalized", &id),
-                &normalized,
-                |b, text| {
-                    b.iter(|| black_box(pipeline.normalize(black_box(text.as_str())).unwrap()));
-                },
-            );
+    // ═══════════════════════════════════════════════════════════════════════
+    // 3-STAGE: Polish heavy transformation
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        let name = "polish_3stage_fold_translit_strip";
+        let text = POLISH_TEXT;
 
-            $group.bench_with_input(
-                BenchmarkId::new("normalize_apply_only/normalized", &id),
-                &normalized,
-                |b, text| {
-                    b.iter(|| {
-                        black_box(
-                            pipeline
-                                .normalize_apply_only(black_box(text.as_str()))
-                                .unwrap(),
-                        )
-                    });
-                },
-            );
-        }
-    };
-}
+        let pipeline = normy::Normy::builder()
+            .lang(POL)
+            .add_stage(CaseFold) // ŁÓDŹ -> łódź
+            .add_stage(Transliterate) // If any transliteration rules exist
+            .add_stage(RemoveDiacritics) // ł->l, ó->o, ź->z
+            .build();
 
-// Macro for non-fusable case
-macro_rules! bench_non_fusable_case {
-    ($group:expr, $case:expr, $build:expr, $samples:expr) => {
-        for &(raw_text, lang) in $samples {
-            let pipeline = ($build)(lang);
-            let normalized_output = pipeline.normalize(raw_text).unwrap();
-            let normalized = normalized_output.into_owned();
+        let fusion_enabled = pipeline.uses_fusion();
+        let result = pipeline.normalize(text).unwrap();
 
-            // Check zero-copy for both methods
-            let zc_raw_norm = check_zero_copy(raw_text, pipeline.normalize(raw_text).unwrap());
-            let zc_raw_apply =
-                check_zero_copy(raw_text, pipeline.normalize_apply_only(raw_text).unwrap());
-            let zc_norm_norm =
-                check_zero_copy(&normalized, pipeline.normalize(&normalized).unwrap());
-            let zc_norm_apply = check_zero_copy(
-                &normalized,
-                pipeline.normalize_apply_only(&normalized).unwrap(),
-            );
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!(
+            "🇵🇱 POLISH | {} | Fusion: {}",
+            name,
+            if fusion_enabled { "✅ YES" } else { "❌ NO" }
+        );
+        println!("   Input:  \"{}\"", text);
+        println!("   Output: \"{}\"", result);
+        println!("   Transform: Lowercase + strip Polish characters");
 
-            let id = format!("{}/{}/{}b", $case, lang.code(), raw_text.len());
-            let fusion_status = if pipeline.uses_fusion() {
-                "FUSION"
-            } else {
-                "APPLY"
-            };
+        group.bench_with_input(BenchmarkId::new("normalize", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
+        });
 
-            println!(
-                "  {} [{}] - Zero-Copy: Raw[normalize={} apply={}] Norm[normalize={} apply={}]",
-                id,
-                fusion_status,
-                if zc_raw_norm { "✓" } else { "✗" },
-                if zc_raw_apply { "✓" } else { "✗" },
-                if zc_norm_norm { "✓" } else { "✗" },
-                if zc_norm_apply { "✓" } else { "✗" },
-            );
+        group.bench_with_input(BenchmarkId::new("no_fusion", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize_no_fusion(black_box(text)).unwrap()));
+        });
+        println!();
+    }
 
-            // normalize/raw (smart routing)
-            $group.bench_with_input(
-                BenchmarkId::new("normalize/raw", &id),
-                &raw_text,
-                |b, &text| {
-                    b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
-                },
-            );
+    // ═══════════════════════════════════════════════════════════════════════
+    // 3-STAGE: Japanese width/punctuation normalization
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        let name = "japanese_3stage_width_punct_ws";
+        let text = JAPANESE_TEXT;
 
-            // normalize_apply_only/raw (direct apply)
-            $group.bench_with_input(
-                BenchmarkId::new("normalize_apply_only/raw", &id),
-                &raw_text,
-                |b, &text| {
-                    b.iter(|| black_box(pipeline.normalize_apply_only(black_box(text)).unwrap()));
-                },
-            );
+        let pipeline = normy::Normy::builder()
+            .lang(JPN)
+            .add_stage(UnifyWidth) // Fullwidth->halfwidth, ﾊﾟ->パ
+            .add_stage(NormalizePunctuation) // ----> -
+            .add_stage(COLLAPSE_WHITESPACE_UNICODE) // 　-> space
+            .build();
 
-            // normalize/normalized (smart routing)
-            $group.bench_with_input(
-                BenchmarkId::new("normalize/normalized", &id),
-                &normalized,
-                |b, text| {
-                    b.iter(|| black_box(pipeline.normalize(black_box(text.as_str())).unwrap()));
-                },
-            );
+        let fusion_enabled = pipeline.uses_fusion();
+        let result = pipeline.normalize(text).unwrap();
 
-            // normalize_apply_only/normalized (direct apply)
-            $group.bench_with_input(
-                BenchmarkId::new("normalize_apply_only/normalized", &id),
-                &normalized,
-                |b, text| {
-                    b.iter(|| {
-                        black_box(
-                            pipeline
-                                .normalize_apply_only(black_box(text.as_str()))
-                                .unwrap(),
-                        )
-                    });
-                },
-            );
-        }
-    };
-}
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!(
+            "🇯🇵 JAPANESE | {} | Fusion: {}",
+            name,
+            if fusion_enabled { "✅ YES" } else { "❌ NO" }
+        );
+        println!("   Input:  \"{}\"", text);
+        println!("   Output: \"{}\"", result);
+        println!("   Transform: Width + punctuation + whitespace");
 
-fn normalize_vs_apply_benches(c: &mut Criterion) {
-    let mut group = c.benchmark_group("normalize_vs_apply_only");
+        group.bench_with_input(BenchmarkId::new("normalize", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
+        });
 
-    println!("\n=== Single Fusable Stage ===");
-    bench_fusable_case!(group, "single_fusable", build_single_fusable, SAMPLES);
+        group.bench_with_input(BenchmarkId::new("no_fusion", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize_no_fusion(black_box(text)).unwrap()));
+        });
+        println!();
+    }
 
-    println!("\n=== Multi Fusable Stages ===");
-    bench_fusable_case!(group, "multi_fusable", build_multi_fusable, SAMPLES);
+    // ═══════════════════════════════════════════════════════════════════════
+    // 2-STAGE: Arabic diacritics + control chars
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        let name = "arabic_2stage_strip_ctrl";
+        let text = ARABIC_TEXT;
 
-    println!("\n=== NFC Fusable Stage ===");
-    bench_fusable_case!(group, "nfc_fusable", build_nfc_fusable, SAMPLES);
+        let pipeline = normy::Normy::builder()
+            .lang(ARA)
+            .add_stage(RemoveDiacritics) // Strip tashkeel
+            .add_stage(StripControlChars) // Remove zero-width chars
+            .build();
 
-    println!("\n=== Mixed Pipeline (Has Barriers) ===");
-    bench_fusable_case!(group, "mixed_pipeline", build_mixed_pipeline, SAMPLES);
+        let fusion_enabled = pipeline.uses_fusion();
+        let result = pipeline.normalize(text).unwrap();
 
-    println!("\n=== Complex Pipeline (Has Barriers) ===");
-    bench_fusable_case!(group, "complex_pipeline", build_complex_pipeline, SAMPLES);
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!(
+            "🇸🇦 ARABIC | {} | Fusion: {}",
+            name,
+            if fusion_enabled { "✅ YES" } else { "❌ NO" }
+        );
+        println!("   Input:  \"{}\" (with diacritics+ZWSP)", text);
+        println!("   Output: \"{}\"", result);
+        println!("   Transform: Strip tashkeel + control chars");
 
-    println!("\n=== Non-Fusable Only ===");
-    bench_non_fusable_case!(group, "non_fusable", build_non_fusable, SAMPLES);
+        group.bench_with_input(BenchmarkId::new("normalize", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
+        });
+
+        group.bench_with_input(BenchmarkId::new("no_fusion", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize_no_fusion(black_box(text)).unwrap()));
+        });
+        println!();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // 4-STAGE: French comprehensive normalization
+    // ═══════════════════════════════════════════════════════════════════════
+    {
+        let name = "french_4stage_fold_translit_punct_strip";
+        let text = FRENCH_TEXT;
+
+        let pipeline = normy::Normy::builder()
+            .lang(FRA)
+            .add_stage(CaseFold) // ŒUVRE -> œuvre
+            .add_stage(Transliterate) // œ->oe, ç->c
+            .add_stage(NormalizePunctuation) // --- -> -
+            .add_stage(RemoveDiacritics) // é->e, à->a
+            .build();
+
+        let fusion_enabled = pipeline.uses_fusion();
+        let result = pipeline.normalize(text).unwrap();
+
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!(
+            "🇫🇷 FRENCH | {} | Fusion: {}",
+            name,
+            if fusion_enabled { "✅ YES" } else { "❌ NO" }
+        );
+        println!("   Input:  \"{}\"", text);
+        println!("   Output: \"{}\"", result);
+        println!("   Transform: 4-stage heavy normalization");
+
+        group.bench_with_input(BenchmarkId::new("normalize", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize(black_box(text)).unwrap()));
+        });
+
+        group.bench_with_input(BenchmarkId::new("no_fusion", name), &text, |b, &text| {
+            b.iter(|| black_box(pipeline.normalize_no_fusion(black_box(text)).unwrap()));
+        });
+        println!();
+    }
 
     group.finish();
+
+    println!("\n╔══════════════════════════════════════════════════════════════════════╗");
+    println!("║                         ANALYSIS GUIDE                               ║");
+    println!("╚══════════════════════════════════════════════════════════════════════╝");
+    println!();
+    println!("🎯 CRITICAL TEST: Every stage transforms text, no redundancy");
+    println!();
+    println!("📊 What we're measuring:");
+    println!("   • 2-stage: Does fusion beat 2 sequential passes?");
+    println!("   • 3-stage: Does fusion beat 3 sequential passes?");
+    println!("   • 4-stage: Does fusion beat 4 sequential passes?");
+    println!();
+    println!("✅ If fusion WINS:");
+    println!("   • Single-pass iteration < multi-pass overhead");
+    println!("   • Keep fusion for 2+ stage pipelines");
+    println!("   • Validates the design");
+    println!();
+    println!("❌ If fusion LOSES:");
+    println!("   • Iterator overhead > saved iterations");
+    println!("   • Remove fusion entirely");
+    println!("   • Fundamental flaw in implementation");
+    println!();
+    println!("💡 Watch for:");
+    println!("   • Break-even point: At what stage count does fusion win?");
+    println!("   • Language variance: Does complexity affect fusion benefit?");
+    println!("   • Magnitude: Small differences (<10%) vs large (>20%)");
+    println!();
 }
 
 criterion_group!(
     name = benches;
     config = Criterion::default()
-        .measurement_time(Duration::from_secs(2))
-        .warm_up_time(Duration::from_secs(2))
-        .sample_size(500)
-        .noise_threshold(0.015)
-        .significance_level(0.05);
-    targets = normalize_vs_apply_benches
+        .measurement_time(Duration::from_secs(3))
+        .warm_up_time(Duration::from_secs(1))
+        .sample_size(500);
+    targets = fusion_real_work_benchmark
 );
 criterion_main!(benches);

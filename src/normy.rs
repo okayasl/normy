@@ -38,9 +38,9 @@ impl<P: Process> Normy<P> {
     }
 }
 
-// For fusable pipelines (ChainedProcess with BuildIter)
 impl<P: FusablePipeline> Normy<P> {
-    /// Normalize text - automatically routes to fusion or apply path
+    /// Normalize text using the fastest available execution strategy.
+    /// Automatically uses fusion when supported.
     #[inline(always)]
     pub fn normalize<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]
@@ -57,8 +57,18 @@ impl<P: FusablePipeline> Normy<P> {
                 .map_err(Into::into)
         }
     }
+
+    /// Normalize text **without fusion**.
+    ///
+    /// This forces full materialization at each stage and disables
+    /// iterator fusion, even when the pipeline supports it.
+    ///
+    /// Useful for:
+    /// - Benchmark comparisons
+    /// - Debugging stage behavior
+    /// - Semantic validation
     #[inline(always)]
-    pub fn normalize_apply_only<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
+    pub fn normalize_no_fusion<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]
         assert_utf8(text);
         self.pipeline

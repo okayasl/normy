@@ -234,7 +234,7 @@ impl LangEntry {
         self.pre_composed_to_base_char_slice
     }
 
-    /// Finds a language-specific case map entry for a character.
+    // Finds a language-specific case map entry for a character.
     #[inline(always)]
     pub fn find_case_map(&self, c: char) -> Option<char> {
         self.case_map
@@ -243,7 +243,7 @@ impl LangEntry {
             .map(|(_, to)| *to)
     }
 
-    /// Finds a language-specific fold map entry for a character.
+    // Finds a language-specific fold map entry for a character.
     #[inline(always)]
     pub fn find_fold_map(&self, c: char) -> Option<&'static str> {
         self.fold_map
@@ -311,8 +311,8 @@ impl LangEntry {
         }
     }
 
-    /// Check if a two-character sequence needs special handling.
-    /// Returns the target string if this is a context-sensitive fold.
+    // Check if a two-character sequence needs special handling.
+    // Returns the target string if this is a context-sensitive fold.
     #[inline]
     pub fn get_peek_fold(&self, current: char, next: Option<char>) -> Option<&'static str> {
         // Early-out for languages that never need peek-ahead
@@ -410,14 +410,14 @@ impl LangEntry {
     // Updates primary field and all dependent derived fields
     // ============================================================
 
-    /// Sets the case_map and updates has_case_map flag
+    // Sets the case_map and updates has_case_map flag
     #[inline]
     pub fn set_case_map(&mut self, case_map: &'static [(char, char)]) {
         self.case_map = case_map;
         self.has_case_map = !case_map.is_empty();
     }
 
-    /// Sets the fold_map and updates all related fields
+    // Sets the fold_map and updates all related fields
     #[inline]
     pub fn set_fold_map(&mut self, fold_map: &'static [(char, &'static str)]) {
         self.fold_map = fold_map;
@@ -430,7 +430,7 @@ impl LangEntry {
         }
     }
 
-    /// Sets the transliterate_map and updates all related fields
+    // Sets the transliterate_map and updates all related fields
     #[inline]
     pub fn set_transliterate_map(&mut self, transliterate_map: &'static [(char, &'static str)]) {
         self.transliterate_map = transliterate_map;
@@ -445,45 +445,45 @@ impl LangEntry {
         }
     }
 
-    /// Helper to set the transliterate_char_slice directly
+    // Helper to set the transliterate_char_slice directly
     #[inline]
     pub fn set_transliterate_char_slice(&mut self, slice: &'static [char]) {
         self.transliterate_char_slice = slice;
     }
 
-    /// Sets the pre_composed_to_base_map and updates all related fields
+    // Sets the pre_composed_to_base_map and updates all related fields
     #[inline]
     pub fn set_pre_composed_to_base_map(&mut self, map: &'static [(char, char)]) {
         self.pre_composed_to_base_map = map;
         self.has_pre_composed_to_base_map = !map.is_empty();
     }
 
-    /// Helper to set the pre_composed_to_base_char_slice directly
+    // Helper to set the pre_composed_to_base_char_slice directly
     #[inline]
     pub fn set_pre_composed_to_base_char_slice(&mut self, slice: &'static [char]) {
         self.pre_composed_to_base_char_slice = slice;
     }
 
-    /// Sets the spacing_diacritics and updates all related fields
+    // Sets the spacing_diacritics and updates all related fields
     #[inline]
     pub fn set_spacing_diacritics(&mut self, diacritics: &'static [char]) {
         self.spacing_diacritics = diacritics;
         self.has_spacing_diacritics = !diacritics.is_empty();
     }
 
-    /// Sets the needs_segmentation flag
+    // Sets the needs_segmentation flag
     #[inline]
     pub fn set_needs_segmentation(&mut self, needs: bool) {
         self.needs_segmentation = needs;
     }
 
-    /// Sets the requires_peek_ahead flag
+    // Sets the requires_peek_ahead flag
     #[inline]
     pub fn set_requires_peek_ahead(&mut self, requires: bool) {
         self.requires_peek_ahead = requires;
     }
 
-    /// Sets the peek_pairs and updates related fields
+    // Sets the peek_pairs and updates related fields
     #[inline]
     pub fn set_peek_pairs(&mut self, pairs: &'static [(char, char, &'static str)]) {
         self.peek_pairs = pairs;
@@ -495,7 +495,7 @@ impl LangEntry {
         }
     }
 
-    /// Sets the segment_rules and updates related fields
+    // Sets the segment_rules and updates related fields
     #[inline]
     pub fn set_segment_rules(&mut self, rules: &'static [SegmentRule]) {
         self.segment_rules = rules;
@@ -505,7 +505,7 @@ impl LangEntry {
         self.unigram_cjk = rules.contains(&SegmentRule::CJKIdeographUnigram);
     }
 
-    /// Sets the unigram_cjk flag directly
+    // Sets the unigram_cjk flag directly
     #[inline]
     pub fn set_unigram_cjk(&mut self, unigram: bool) {
         self.unigram_cjk = unigram;

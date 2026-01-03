@@ -12,158 +12,51 @@ use crate::{
     },
 };
 
-/// Language-aware word segmentation — inserts spaces at script and orthographic boundaries.
+/// Inserts word boundaries for unsegmented or mixed-script text.
 ///
-/// `SegmentWords` transforms unsegmented or mixed-script text into space-separated tokens
-/// using **only** the current language's explicit segmentation rules — no dictionaries,
-/// no statistical models, no heap allocation in the common case.
+/// This stage adds spaces (U+0020) or zero-width spaces (ZWSP, U+200B) at linguistically
+/// meaningful script transitions and orthographic boundaries, using only the
+/// target language's explicit rules — no dictionaries or statistical models.
 ///
-/// # Core Guarantee
+/// Key behaviors:
 ///
-/// > "Zero-copy when processing Western text"
+/// - Western scripts: no changes (zero-copy)
+/// - Chinese: unigram mode — space between every CJK ideograph
+/// - Japanese/Korean: spaces at script transitions only
+/// - Thai/Lao/Khmer/Myanmar: spaces at script transitions only
+/// - **Indic scripts**: ZWSP inserted after virama+consonant to enable breaking.
+///   In Devanagari (Hindi), mandatory conjuncts (e.g., involving र य व ह) are preserved
+///   and not broken — other Indic scripts use the generic virama rule.
 ///
-/// When the input contains only scripts that do **not** require segmentation
-/// (Latin, Cyrillic, Greek, etc.), and the language does not define custom boundaries,
-/// this stage is **completely elided** from the pipeline — even in dynamic builds.
-///
-/// When segmentation **is** required (Thai, Lao, Khmer, Myanmar, or cross-script CJK),
-/// it operates via a fused, branch-predictable iterator that inserts U+0020 spaces
-/// only where linguistically mandated.
-///
-/// # Segmentation Strategy
-///
-/// ## By Script and Language
-///
-/// | Script / Language          | Behavior                                                                 |
-/// |----------------------------|--------------------------------------------------------------------------|
-/// | Latin, Cyrillic, etc.      | No spaces inserted — zero-cost pass-through                             |
-/// | **Chinese (ZH)**           | **Unigram breaking**: space between EVERY CJK character                 |
-/// | **Japanese (JA)**          | Space at script transitions ONLY (kanji+kana stay together)             |
-/// | **Korean (KO)**            | Space at script transitions ONLY (Hangul blocks stay together)          |
-/// | Thai, Lao, Khmer, Myanmar  | Space at script transitions (no dictionary-based syllable breaking)     |
-/// | Hindi, Tamil (Indic)       | ZWSP after virama+consonant; space at script transitions                |
-///
-/// ## Script Transition Rules
-///
-/// Spaces are inserted when transitioning between different script families:
-/// - Western (Latin, digits) ↔ CJK/Hangul/Southeast Asian/Indic
-/// - Between different non-Western scripts (e.g., Thai ↔ Khmer)
-///
-/// **Exception**: Whitespace, ZWJ (U+200D), and ZWNJ (U+200C) are transparent and reset boundaries.
-///
-/// # CJK Unigram Mode (Chinese Only)
-///
-/// For Chinese (`unigram_cjk = true`), **every consecutive CJK ideograph becomes a separate token**:
-///
-/// ```text
-/// Input:  "你好世界"
-/// Output: "你 好 世 界"  (4 tokens)
-/// ```
-///
-/// This aggressive tokenization enables downstream processors to handle Chinese text
-/// without dictionary lookup, treating each character as a semantic unit.
-///
-/// **Japanese and Korean do NOT use unigram mode** (`unigram_cjk = false`):
-///
-/// ```text
-/// Japanese: "こんにちは世界" → "こんにちは世界"  (no spaces within Japanese)
-/// Korean:   "안녕하세요세계"   → "안녕하세요세계"  (no spaces within Korean)
-/// ```
-///
-/// Mixed script examples:
-///
-/// ```text
-/// Chinese:  "Hello世界"    → "Hello 世 界"     (transition + unigram)
-/// Japanese: "Hello世界"    → "Hello 世界"     (transition only)
-/// Chinese:  "你好World"    → "你 好 World"    (unigram + transition)
-/// Japanese: "世界World"    → "世界 World"     (transition only)
-/// ```
-///
-/// # Indic Script Handling (Linguistic Heuristic)
-///
-/// For Indic scripts, segmentation applies a character-based rule to manage word-break opportunities.
-///
-/// The rules operate as follows:
-///
-/// 1.  **Universal ZWSP Break:** A ZWSP (U+200B) is inserted after a **virama** when followed by a consonant.
-///     This provides essential break points for tokenization and line wrapping.
-///     
-///     ```text
-///     Tamil:  "பற்றி" → "பற்\u{200B}றி"
-///     ```
-///
-/// 2.  **Devanagari (Hindi) Exception:** For **Devanagari (Hindi)**, a minimal, zero-cost **heuristic** prevents
-///     ZWSP insertion where the **virama** is followed by a consonant known to form a mandatory, non-breaking
-///     **conjunct** (specifically: `र` /ra/, `य` /ya/, `व` /va/, `ह` /ha/).
-///     
-///     This ensures complex words like `विद्वत्` remain unsegmented, resolving a major flaw found in naive segmenters.
-///     
-///     ```text
-///     Hindi:  "विद्वत्"  → "विद्वत्"           (conjunct preserved, no ZWSP)
-///     Hindi:  "पत्नी"    → "पत्\u{200B}नी"     (non-conjunct, ZWSP inserted)
-///     Tamil:  "பற்றி"    → "பற்\u{200B}றி"     (no Hindi exception applies)
-///     ```
-///
-/// 3.  **Script Transitions:** A standard space (U+0020) is inserted at script transitions (Indic ↔ Western).
-///
-///     ```text
-///     "Helloपत्नी" → "Hello पत्\u{200B}नी"  (space at transition + ZWSP at virama)
-///     ```
-///
-/// This approach prioritizes **performance** and **Devanagari linguistic accuracy**, treating the generic
-/// **virama** break as correct for all other supported Indic scripts.
-///
-/// # Performance Characteristics
-///
-/// | Scenario                            | Path                    | Allocation | Notes |
-/// |-------------------------------------|-------------------------|------------|-------|
-/// | Western-only text                   | Stage skipped           | None       | Fully elided via `needs_apply` |
-/// | No boundaries needed                | Stage skipped           | None       | Zero-copy pass-through |
-/// | Segmentation required               | Fused `CharMapper`      | One        | Single `String` allocation at `collect()` |
-/// | Fallback path                       | `segment_allocating`    | One        | Used when `CharMapper` unavailable |
-///
-/// The iterator uses a 3-state buffer (`prev_char`, `prev_class`, `pending_space`) with minimal overhead.
-/// All boundary detection is `#[inline(always)]` for maximum compiler optimization.
+/// Whitespace and joiners (ZWJ/ZWNJ) are transparent.
 ///
 /// # Examples
 ///
-/// ## Chinese (Unigram Mode)
-/// ```text
-/// "你好世界"              → "你 好 世 界"
-/// "Hello世界"            → "Hello 世 界"
-/// "AI+区块链=未来"       → "AI+ 区 块 链 = 未 来"
-/// ```
+/// Chinese (unigram):
+/// "你好世界" → "你 好 世 界"
+/// "Hello世界" → "Hello 世 界"
 ///
-/// ## Japanese (Script Transitions Only)
-/// ```text
-/// "こんにちは世界"        → "こんにちは世界"        (no space within Japanese)
-/// "Rustは最高"           → "Rust は最高"           (space at Latin→Japanese only)
-/// "東京2025年"           → "東京 2025 年"          (spaces at transitions)
-/// ```
+/// Japanese:
+/// "こんにちは世界" → "こんにちは世界"
+/// "Rustは最高" → "Rust は最高"
 ///
-/// ## Korean (Script Transitions Only)
-/// ```text
-/// "안녕하세요세계"        → "안녕하세요세계"        (no space within Korean)
-/// "Hello안녕하세요"      → "Hello 안녕하세요"      (space at transition)
-/// ```
+/// Korean:
+/// "안녕하세요세계" → "안녕하세요세계"
+/// "Hello안녕하세요" → "Hello 안녕하세요"
 ///
-/// ## Thai/Lao/Khmer/Myanmar (Script Transitions Only)
-/// ```text
-/// "Helloสวัสดี"          → "Hello สวัสดี"          (space at transition)
-/// "สวัสดีชาวโลก"         → "สวัสดีชาวโลก"         (no syllable breaking without dictionary)
-/// ```
+/// Thai:
+/// "Helloสวัสดี" → "Hello สวัสดี"
 ///
-/// ## Indic Scripts (ZWSP + Conjunct Heuristic)
-/// ```text
-/// Hindi:   "पत्नी"       → "पत्\u{200B}नी"        (ZWSP after virama)
-/// Hindi:   "विद्वत्"     → "विद्वत्"              (conjunct preserved)
-/// Tamil:   "பற்றி"       → "பற்\u{200B}றி"        (ZWSP after virama, no Hindi exception)
-/// ```
+/// Indic:
+/// Hindi:  "पत्नी" → "पत्\u{200B}नी"
+/// Hindi:  "विद्वत्" → "विद्वत्" (conjunct preserved)
+/// Hindi:  "विद्वत्त्व" → "विद्वत्\u{200B}त्व"
+/// Tamil:  "பற்றி" → "பற்\u{200B}றி" (generic virama rule)
 ///
-/// ## Edge Cases
-/// ```text
-/// "  你好  世界  "        → "  你 好  世 界  "     (whitespace preserved)
-/// ```
+/// Edge case:
+/// " 你好 世界 " → " 你 好 世 界 " (whitespace preserved)
+///
+/// This stage is eligible for static fusion in all supported languages.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SegmentWords;
 

@@ -9,27 +9,26 @@ use crate::{
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 
-/// Normalize Unicode punctuation to ASCII equivalents based on a fixed mapping.
+/// Replaces typographic Unicode punctuation with ASCII equivalents.
 ///
-/// This stage replaces various Unicode punctuation characters with standard
-/// ASCII ones according to the internal `PUNCT_NORM` table, making text
-/// easier to process in search, tokenization, or other NLP pipelines. It is
-/// idempotent and zero-copy when the input requires no changes.
+/// This stage maps various Unicode punctuation characters to their basic ASCII
+/// counterparts using a fixed table. It simplifies text for search indexing,
+/// tokenization, or downstream systems that expect plain ASCII punctuation.
 ///
-/// ## Normalizations performed
+/// | Unicode                  | ASCII |
+/// |--------------------------|-------|
+/// | `“` `”` `„` `«` `»` `′` `″` | `"`   |
+/// | `‘` `’` `‚`               | `'`   |
+/// | `–` `—` `─` `―`           | `-`   |
+/// | `…` `⋯` `․` `‧`           | `.`   |
+/// | `•` `·` `∙`               | `*`   |
+/// | `‹`                      | `<`   |
+/// | `›`                      | `>`   |
 ///
-/// | Unicode | ASCII |
-/// |---------|-------|
-/// | `“`, `”`, `„`, `«`, `»` | `"` |
-/// | `‘`, `’`, `‚`             | `'` |
-/// | `–`, `—`, `─`, `―`       | `-` |
-/// | `…`, `⋯`, `․`, `‧`       | `.` |
-/// | `•`, `·`, `∙`             | `*` |
-/// | `‹`                       | `<` |
-/// | `›`                       | `>` |
-/// | `′`, `″`                  | `"` |
+/// All other characters pass through unchanged. The stage is fully fusable.
 ///
-/// All other characters, including ASCII, are left unchanged.
+/// This stage is eligible for static fusion in all supported languages.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct NormalizePunctuation;
 
 impl Stage for NormalizePunctuation {

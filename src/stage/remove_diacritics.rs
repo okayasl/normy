@@ -8,24 +8,22 @@ use crate::{
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 
-/// Removes language-specific diacritical marks using optimized lookup tables.
+/// Strips language-specific diacritical marks while preserving distinct letters.
 ///
-/// This stage strips diacritics and maps characters to their base forms based **strictly**
-/// on the target language's definition. It prioritizes performance (O(1) lookups) and
-/// linguistic accuracy over aggressive "ASCII-fication".
+/// This stage removes diacritics according to the target language's rules:
 ///
-/// # Mechanism
+/// - Maps precomposed characters to base forms (e.g., `é` → `e` in French)
+/// - Drops standalone spacing diacritics (e.g., Arabic harakat, Hebrew niqqud)
 ///
-/// 1. **Direct Mapping:** Uses language's `pre_composed_to_base_map` (e.g., `é` → `e` in French)
-/// 2. **Diacritic Removal:** Skips characters in `spacing_diacritics` (e.g., Arabic harakat)
-/// 3. **Preservation:** All other characters unchanged
-///
-/// # Design Philosophy
-///
-/// Strict locale behavior:
-/// - Polish strips `ł` → `l` but preserves Czech `ř`
+/// Behavior is **strictly locale-aware**:
 /// - Spanish preserves `ñ` (distinct letter)
-/// - Foreign scripts untouched
+/// - Polish strips `ł` → `l` but leaves Czech `ř` untouched in Czech context
+/// - Foreign scripts and unmapped characters pass through unchanged
+///
+/// Use when accent-insensitive matching is needed without aggressive ASCII conversion.
+///
+/// This stage is eligible for static fusion in all supported languages.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct RemoveDiacritics;
 
 impl Stage for RemoveDiacritics {

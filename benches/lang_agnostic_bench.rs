@@ -68,17 +68,6 @@ where
             },
         );
 
-        group.bench_function(
-            BenchmarkId::new(format!("{label}/normy apply only pipeline"), &safe_id),
-            |b| {
-                b.iter(|| {
-                    let s = constructor();
-                    let normy = Normy::builder().lang(lang).add_stage(s).build();
-                    black_box(normy.normalize_apply_only(text).unwrap().into_owned())
-                })
-            },
-        );
-
         // APPLY Bench
         group.bench_function(BenchmarkId::new(format!("{label}/apply"), &safe_id), |b| {
             b.iter(|| {

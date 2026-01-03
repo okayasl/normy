@@ -8,44 +8,20 @@ use crate::{
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 
-/// Simple, locale-aware lowercase transformation.
+/// Simple, locale-aware orthographic lowercasing.
 ///
-/// This stage performs **strict linguistic lowercasing** using only the language’s
-/// `case_map` (guaranteed 1→1) and falls back to Unicode `.to_lowercase()` for
-/// unmapped characters.
+/// This stage produces the correct lowercase form using language-specific 1→1 mappings
+/// (`case_map`) with Unicode fallback. It never performs multi-character expansions
+/// or context-sensitive folding.
 ///
-/// # Design Philosophy
+/// Example: In Turkish, "İSTANBUL" → "istanbul" and "I" → "ı" (dotless i).
 ///
-/// Unlike many normalization libraries that silently conflate "visual lowercase"
-/// with "search equivalence", **Normy refuses to lie to you**.
+/// Use for display text, slugs, filenames, or UI sorting where linguistic accuracy
+/// matters. For case-insensitive search/comparison (especially German/Dutch),
+/// prefer `CaseFold`.
 ///
-/// `LowerCase` does **exactly one thing**: produce the correct orthographic
-/// lowercase form of text in the target language — nothing more, nothing less.
-/// It is intentionally **not** suitable for case-insensitive search in languages
-/// with exceptional case-folding rules (e.g. Turkish, Azerbaijani, Lithuanian).
-///
-/// This is a deliberate, principled choice: **zero-cost wins by default**.
-///
-/// # Key Differences from `CaseFold`
-///
-/// | Aspect                  | `LowerCase`                                   | `CaseFold`                                            |
-/// |-------------------------|------------------------------------------------|-------------------------------------------------------|
-/// | Purpose                 | Visual / orthographic normalization           | Case-insensitive matching & search                    |
-/// | Turkish `I` / `İ`       | `I` → `ı`, `İ` → `i` (correct lowercase)      | Same (uses `case_map`)                                |
-/// | German `ẞ` / `ß`        | `ẞ` → `ß` (preserved)                         | `ẞ`/`ß` → `"ss"` (expanded)                           |
-/// | Dutch `IJ` digraph      | `IJ` → `ij` (per-char)                        | `IJ` → `"ij"` (peek-ahead aware)                      |
-/// | Multi-character output  | Never                                         | Yes (e.g. `ß` → `"ss"`)                               |
-/// | Zero-allocation path    | **Always** — implements `CharMapper`          | Only when no multi-char or peek-ahead rules           |
-/// | Search-safe in Turkish? | **No** — `"Istanbul"` ≠ `"İSTANBUL"`          | Yes — if no conflicting `fold:` rules (currently safe)|
-///
-/// # When to Use
-///
-/// - Display text, slugs, filenames, UI sorting
-/// - Preprocessing before NFKC/NFKD
-/// - Any pipeline where linguistic correctness > search recall
-///
-/// Use `CaseFold` when you need case-insensitive matching that works correctly
-/// across all languages — including Turkish.
+/// This stage is eligible for static fusion in all supported languages.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct LowerCase;
 
 impl Stage for LowerCase {

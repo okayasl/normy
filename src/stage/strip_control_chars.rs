@@ -8,14 +8,17 @@ use crate::{
 use std::borrow::Cow;
 use std::iter::FusedIterator;
 
-/// Remove all Unicode control characters (General Category `Cc`)
+/// Removes Unicode control characters (General Category Cc).
 ///
-/// This stage strips C0 (U+0000–U+001F) and C1 (U+007F–U+009F) control characters,
-/// which are invisible and often indicate corruption or injection.
+/// This stage strips C0 controls (U+0000–U+001F) and C1 controls (U+007F–U+009F),
+/// which are invisible and often indicate data corruption or injection attacks.
 ///
-/// - Format controls (Cf) like ZWSP/ZWJ are preserved → use `StripFormatControls`
-/// - Zero-copy when no Cc present
-/// - Fully fusable filter
+/// - Format controls (Cf) such as ZWSP, ZWJ, and BOM are **preserved** — use
+///   `StripFormatControls` for those.
+/// - Zero-copy when no Cc characters are present.
+/// - Fully fusable filter.
+///
+/// This stage is eligible for static fusion in all supported languages.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct StripControlChars;
 

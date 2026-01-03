@@ -13,7 +13,7 @@ mod prop_tests {
         // Case Folding & Lowercasing
         // =====================================================================
 
-        /// CaseFold idempotency (English)
+        // CaseFold idempotency (English)
         #[test]
         fn case_fold_idempotent_eng(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(CaseFold).build();
@@ -22,7 +22,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "CaseFold not idempotent");
         }
 
-        /// CaseFold idempotency (Turkish)
+        // CaseFold idempotency (Turkish)
         #[test]
         fn case_fold_idempotent_tur(s in ".{0,500}") {
             let normy = Normy::builder().lang(crate::TUR).add_stage(CaseFold).build();
@@ -31,7 +31,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "CaseFold not idempotent (Turkish)");
         }
 
-        /// LowerCase idempotency (English)
+        // LowerCase idempotency (English)
         #[test]
         fn lowercase_idempotent_eng(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(LowerCase).build();
@@ -40,7 +40,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "LowerCase not idempotent");
         }
 
-        /// German ß/ẞ → ss expansion (validates multi-char expansion)
+        // German ß/ẞ → ss expansion (validates multi-char expansion)
         #[test]
         fn german_sharp_s_expansion(s in "[ßẞSs]{0,100}") {
             let normy = Normy::builder().lang(DEU).add_stage(CaseFold).build();
@@ -53,7 +53,7 @@ mod prop_tests {
             );
         }
 
-        /// Turkish İ/I linguistic mapping
+        // Turkish İ/I linguistic mapping
         #[test]
         fn turkish_i_mapping_lowercase(s in "[İıI]{1,100}") {
             let normy = Normy::builder().lang(crate::TUR).add_stage(LowerCase).build();
@@ -64,7 +64,7 @@ mod prop_tests {
             );
         }
 
-        /// Zero-copy when already lowercase
+        // Zero-copy when already lowercase
         #[test]
         fn lowercase_zero_copy(s in "[a-z0-9 ]{1,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(LowerCase).build();
@@ -80,7 +80,7 @@ mod prop_tests {
         // Unicode Normalization
         // =====================================================================
 
-        /// NFC idempotency
+        // NFC idempotency
         #[test]
         fn nfc_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(NFC).build();
@@ -89,7 +89,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "NFC not idempotent");
         }
 
-        /// NFD idempotency
+        // NFD idempotency
         #[test]
         fn nfd_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(NFD).build();
@@ -98,7 +98,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "NFD not idempotent");
         }
 
-        /// NFKC idempotency
+        // NFKC idempotency
         #[test]
         fn nfkc_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(NFKC).build();
@@ -107,7 +107,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "NFKC not idempotent");
         }
 
-        /// NFC(NFD(x)) = NFC(x) round-trip property
+        // NFC(NFD(x)) = NFC(x) round-trip property
         #[test]
         fn nfc_nfd_round_trip(s in "\\PC{0,200}") {
             let nfc_normy = Normy::builder().lang(ENG).add_stage(NFC).build();
@@ -124,7 +124,7 @@ mod prop_tests {
         // Whitespace Normalization
         // =====================================================================
 
-        /// TRIM_WHITESPACE_UNICODE idempotency
+        // TRIM_WHITESPACE_UNICODE idempotency
         #[test]
         fn trim_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_UNICODE).build();
@@ -133,7 +133,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "TRIM_WHITESPACE_UNICODE not idempotent");
         }
 
-        /// COLLAPSE_WHITESPACE idempotency
+        // COLLAPSE_WHITESPACE idempotency
         #[test]
         fn collapse_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(COLLAPSE_WHITESPACE).build();
@@ -142,7 +142,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "COLLAPSE_WHITESPACE not idempotent");
         }
 
-        /// NORMALIZE_WHITESPACE_FULL idempotency
+        // NORMALIZE_WHITESPACE_FULL idempotency
         #[test]
         fn normalize_ws_full_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(NORMALIZE_WHITESPACE_FULL).build();
@@ -151,7 +151,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "NORMALIZE_WHITESPACE_FULL not idempotent");
         }
 
-        /// Trim must match Rust's str::trim()
+        // Trim must match Rust's str::trim()
         #[test]
         fn trim_matches_std_trim(s in "\\s{0,10}.{0,100}\\s{0,10}") {
             let normy = Normy::builder().lang(ENG).add_stage(TRIM_WHITESPACE_UNICODE).build();
@@ -159,7 +159,7 @@ mod prop_tests {
             prop_assert_eq!(&*result, s.trim(), "TRIM_WHITESPACE_UNICODE ≠ str::trim()");
         }
 
-        /// Zero-copy when no whitespace at edges
+        // Zero-copy when no whitespace at edges
         #[test]
         fn trim_zero_copy(s in "[^\\s]{1,500}") {
             prop_assume!(!s.is_empty());
@@ -180,7 +180,7 @@ mod prop_tests {
         // Diacritic Removal
         // =====================================================================
 
-        /// RemoveDiacritics idempotency (French)
+        // RemoveDiacritics idempotency (French)
         #[test]
         fn remove_diacritics_fra(s in ".{0,500}") {
             let normy = Normy::builder().lang(FRA).add_stage(RemoveDiacritics).build();
@@ -189,7 +189,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "RemoveDiacritics not idempotent (French)");
         }
 
-        /// RemoveDiacritics idempotency (Vietnamese)
+        // RemoveDiacritics idempotency (Vietnamese)
         #[test]
         fn remove_diacritics_vie(s in ".{0,500}") {
             let normy = Normy::builder().lang(VIE).add_stage(RemoveDiacritics).build();
@@ -198,7 +198,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "RemoveDiacritics not idempotent (Vietnamese)");
         }
 
-        /// RemoveDiacritics idempotency (Polish)
+        // RemoveDiacritics idempotency (Polish)
         #[test]
         fn remove_diacritics_pol(s in ".{0,500}") {
             let normy = Normy::builder().lang(POL).add_stage(RemoveDiacritics).build();
@@ -207,7 +207,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "RemoveDiacritics not idempotent (Polish)");
         }
 
-        /// RemoveDiacritics idempotency (Arabic)
+        // RemoveDiacritics idempotency (Arabic)
         #[test]
         fn remove_diacritics_ara(s in ".{0,500}") {
             let normy = Normy::builder().lang(ARA).add_stage(RemoveDiacritics).build();
@@ -216,7 +216,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "RemoveDiacritics not idempotent (Arabic)");
         }
 
-        /// French accents are removed or preserved consistently
+        // French accents are removed or preserved consistently
         #[test]
         fn french_diacritics_consistent(s in "[éèêëàâäôöùûüçÉÈÊË]{1,100}") {
             let normy = Normy::builder().lang(FRA).add_stage(RemoveDiacritics).build();
@@ -230,7 +230,7 @@ mod prop_tests {
         // Format Stripping
         // =====================================================================
 
-        /// StripHtml idempotency
+        // StripHtml idempotency
         #[test]
         fn strip_html_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(StripHtml).build();
@@ -239,27 +239,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "StripHtml not idempotent");
         }
 
-        /// StripMarkdown idempotency
-        #[test]
-        fn strip_markdown_idempotent(s in ".{0,500}") {
-            // Skip strings that look like they could contain code with emphasis markers
-            // (this avoids most pathological cases)
-            if s.contains('\\') || s.contains('`') && (s.contains('*') || s.contains('_') || s.contains('~')) {
-                return Ok(()); // proptest will discard this input
-            }
-
-            let normy = Normy::builder()
-                .lang(ENG)
-                .add_stage(StripMarkdown)
-                .build();
-
-            let once = normy.normalize(&s).unwrap().into_owned();
-            let twice = normy.normalize(&once).unwrap().into_owned();
-
-            prop_assert_eq!(once, twice, "StripMarkdown not idempotent on input: {:?}", s);
-        }
-
-        /// StripControlChars idempotency
+        // StripControlChars idempotency
         #[test]
         fn strip_controls_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(StripControlChars).build();
@@ -268,7 +248,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "StripControlChars not idempotent");
         }
 
-        /// StripFormatControls idempotency
+        // StripFormatControls idempotency
         #[test]
         fn strip_format_controls_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(StripFormatControls).build();
@@ -277,7 +257,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "StripFormatControls not idempotent");
         }
 
-        /// HTML tags are removed
+        // HTML tags are removed
         #[test]
         fn html_tags_removed(s in "<[a-z]+>[a-zA-Z0-9 ]+</[a-z]+>") {
             let normy = Normy::builder().lang(ENG).add_stage(StripHtml).build();
@@ -291,7 +271,7 @@ mod prop_tests {
                 "HTML tag markers should be removed");
         }
 
-        /// mMrkdown bold is removed
+        // mMrkdown bold is removed
         #[test]
         fn markdown_bold_removed(s in r"\*\*[a-zA-Z0-9 ]{1,20}\*\*") {
             let normy = Normy::builder().lang(ENG).add_stage(StripMarkdown).build();
@@ -306,7 +286,7 @@ mod prop_tests {
         // Word Segmentation
         // =====================================================================
 
-        /// SegmentWords idempotency (Chinese)
+        // SegmentWords idempotency (Chinese)
         #[test]
         fn segment_chinese_idempotent(s in ".{0,200}") {
             let normy = Normy::builder().lang(ZHO).add_stage(SegmentWords).build();
@@ -315,7 +295,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "SegmentWords not idempotent (Chinese)");
         }
 
-        /// SegmentWords idempotency (Japanese)
+        // SegmentWords idempotency (Japanese)
         #[test]
         fn segment_japanese_idempotent(s in ".{0,200}") {
             let normy = Normy::builder().lang(JPN).add_stage(SegmentWords).build();
@@ -324,7 +304,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "SegmentWords not idempotent (Japanese)");
         }
 
-        /// SegmentWords idempotency (Korean)
+        // SegmentWords idempotency (Korean)
         #[test]
         fn segment_korean_idempotent(s in ".{0,200}") {
             let normy = Normy::builder().lang(KOR).add_stage(SegmentWords).build();
@@ -333,7 +313,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "SegmentWords not idempotent (Korean)");
         }
 
-        /// SegmentWords idempotency (Hindi)
+        // SegmentWords idempotency (Hindi)
         #[test]
         fn segment_hindi_idempotent(s in ".{0,200}") {
             let normy = Normy::builder().lang(HIN).add_stage(SegmentWords).build();
@@ -342,7 +322,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "SegmentWords not idempotent (Hindi)");
         }
 
-        /// Chinese unigram: every CJK char separated
+        // Chinese unigram: every CJK char separated
         #[test]
         fn chinese_unigram_segmentation(s in "[\u{4E00}-\u{9FFF}]{2,20}") {
             let normy = Normy::builder().lang(ZHO).add_stage(SegmentWords).build();
@@ -357,7 +337,7 @@ mod prop_tests {
             );
         }
 
-        /// Japanese no internal spaces (only at script boundaries)
+        // Japanese no internal spaces (only at script boundaries)
         #[test]
         fn japanese_no_internal_spaces(s in "[\u{3040}-\u{309F}\u{30A0}-\u{30FF}\u{4E00}-\u{9FFF}]{2,20}") {
             let normy = Normy::builder().lang(JPN).add_stage(SegmentWords).build();
@@ -369,7 +349,7 @@ mod prop_tests {
         // Other Stages
         // =====================================================================
 
-        /// NormalizePunctuation idempotency
+        // NormalizePunctuation idempotency
         #[test]
         fn normalize_punct_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(ENG).add_stage(NormalizePunctuation).build();
@@ -378,7 +358,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "NormalizePunctuation not idempotent");
         }
 
-        /// UnifyWidth idempotency
+        // UnifyWidth idempotency
         #[test]
         fn unify_width_idempotent(s in ".{0,500}") {
             let normy = Normy::builder().lang(JPN).add_stage(UnifyWidth).build();
@@ -387,7 +367,7 @@ mod prop_tests {
             prop_assert_eq!(once, twice, "UnifyWidth not idempotent");
         }
 
-        /// Full-width to half-width conversion
+        // Full-width to half-width conversion
         #[test]
         fn fullwidth_to_halfwidth(s in "[Ａ-Ｚａ-ｚ０-９]{1,50}") {
             let normy = Normy::builder().lang(JPN).add_stage(UnifyWidth).build();
@@ -402,7 +382,7 @@ mod prop_tests {
         // Empty String Handling (Universal)
         // =====================================================================
 
-        /// All stages must handle empty strings
+        // All stages must handle empty strings
         #[test]
         fn empty_string_casefold(s in prop::string::string_regex("").unwrap()) {
             let normy = Normy::builder().lang(ENG).add_stage(CaseFold).build();

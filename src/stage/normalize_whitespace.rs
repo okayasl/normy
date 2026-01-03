@@ -8,91 +8,54 @@ use crate::{
 use smallvec::SmallVec;
 use std::{borrow::Cow, iter::FusedIterator};
 
-/// Normalize and standardize whitespace in text pipelines.
+/// Normalizes whitespace with configurable collapse, trim, and Unicode handling.
 ///
-/// This stage performs up to three operations in **one pass**, with **at most one allocation**,
-/// and guarantees **zero-copy** whenever the input is already clean.
+/// This stage performs whitespace standardization in a single pass with at most one allocation:
 ///
-/// ## Features
+/// - `collapse`: replaces runs of whitespace with a single `replacement_char`
+/// - `trim`: removes leading and trailing whitespace
+/// - `normalize_unicode`: **modifier flag** – treats all Unicode `White_Space=Yes` characters
+///   as whitespace and immediately replaces them with `replacement_char`.
+///   **It does nothing by itself** and only enhances `collapse` or `trim`.
 ///
-/// | Operation                        | Flag                  | Effect when enabled                                                                                     |
-/// |----------------------------------|-----------------------|----------------------------------------------------------------------------------------------------------|
-/// | **Collapse sequential WS**       | `collapse`            | Multiple consecutive whitespace → single `replacement_char`                                             |
-/// | **Trim edges**                   | `trim`                | Remove leading and trailing whitespace                                                                  |
-/// | **Normalize all whitespace**     | `normalize_unicode`   | **All** whitespace (ASCII + Unicode) → `replacement_char` immediately when emitted                     |
-/// | **Custom replacement**           | `replacement_char`    | Character used for all emitted whitespace (default `' '`; can be `'\u{200B}'` for CJK, etc.)            |
+/// When `normalize_unicode` is true, the following Unicode whitespace characters
+/// (property `White_Space=Yes`, Unicode 15.1+) are recognized and replaced:
 ///
-/// ## Design Philosophy
-///
-/// **`normalize_unicode` is a modifier flag, not a standalone operation:**
-///
-/// - **`normalize_unicode` alone**: No-op (returns `Cow::Borrowed` immediately)
-/// - **`trim_edges + normalize_unicode`**: Trim edges including Unicode whitespace (matches `str::trim()`)
-/// - **`collapse + normalize_unicode`**: Collapse sequential whitespace including Unicode WS, normalize to ASCII space `' '`
-///
-/// This enables:
-/// - Maximum zero-copy on already-clean text
-/// - Predictable, high-performance NLP preprocessing
-///
-/// ## Whitespace Recognition Rules
-///
-/// | `normalize_unicode` | Recognized Characters                                                                                 |
-/// |---------------------|--------------------------------------------------------------------------------------------------------|
-/// | `false`             | Only ASCII: `\t`, `\n`, `\r`, `\v`, `\f`, space (U+0020)                                               |
-/// | `true`              | ASCII **+** all Unicode `White_Space=Yes` characters (U+00A0, U+1680, U+2000–U+200A, U+202F, U+3000, etc.) |
-///
-/// When recognized → **immediately emitted as `replacement_char`**, no exceptions.
-///
-/// ## Unicode Whitespace Support (when `normalize_unicode = true`)
-///
-/// All characters with Unicode property `White_Space=Yes` are recognized and replaced:
-///
-/// - U+0009–U+000D (TAB, LF, etc.)
+/// - U+0009–U+000D (TAB, NEL, VT, FF, CR, LF)
 /// - U+0020 (SPACE)
-/// - U+0085 (NEL)
-/// - U+00A0 (NBSP)
+/// - U+0085 (NEXT LINE)
+/// - U+00A0 (NO-BREAK SPACE)
 /// - U+1680 (OGHAM SPACE MARK)
-/// - U+2000..=U+200A (En/Em/Thin/Hair spaces)
-/// - U+2028–U+2029 (Line/Paragraph Separator)
+/// - U+2000..=U+200A (EN QUAD .. HAIR SPACE)
+/// - U+2028 (LINE SEPARATOR)
+/// - U+2029 (PARAGRAPH SEPARATOR)
 /// - U+202F (NARROW NO-BREAK SPACE)
 /// - U+205F (MEDIUM MATHEMATICAL SPACE)
 /// - U+3000 (IDEOGRAPHIC SPACE)
 ///
-/// This list is exhaustive for Unicode 15.1+.
+/// Common presets:
+/// - `NORMALIZE_WHITESPACE_FULL`: collapse + trim + Unicode normalization (recommended)
+/// - `COLLAPSE_WHITESPACE_UNICODE`: collapse Unicode whitespace, preserve edges
+/// - `TRIM_WHITESPACE_UNICODE`: trim Unicode edges only
 ///
-/// ## Final Note
-///
-/// This stage is intentionally **aggressive** when `normalize_unicode = true`.
-///
-/// It does **not** preserve:
-/// - Tabs in code
-/// - Newlines as sentence boundaries
-/// - Non-breaking spaces for layout
-/// - Zero-width characters
-#[derive(Debug, Clone, Copy)]
+/// This stage is eligible for static fusion in all configurations.
+#[derive(Debug, Clone)]
 pub struct NormalizeWhitespace {
     /// Collapse multiple sequential whitespace chars into one
     pub collapse: bool,
-
     /// Remove leading and trailing whitespace
     pub trim: bool,
-
-    /// Every recognized whitespace character
-    /// — whether \t, \n, \r, U+00A0, U+202F, U+3000, U+2003, etc. —
-    /// is always emitted as replacement_char (usually ' ')
-    /// immediately when the stage decides to emit whitespace,
-    /// regardless of collapse or trim settings.
+    /// Modifier flag: normalize all Unicode whitespace to `replacement_char`
     pub normalize_unicode: bool,
-
-    /// Convert whitespace (NBSP, etc.) to this character
+    /// Character emitted for whitespace (default `' '`)
     pub replacement_char: char,
 }
 
-// ------------------------------------------------------------------------
-// Helper Constants
-// ------------------------------------------------------------------------
-
-/// Collapse, trim, and normalize Unicode whitespace (recommended for most pipelines)
+/// Collapse, trim, and normalize all Unicode whitespace to space.
+///
+/// Recommended for most NLP/search pipelines: removes leading/trailing whitespace,
+/// collapses internal runs to a single space, and treats all Unicode `White_Space=Yes`
+/// characters as normalizable whitespace.
 pub const NORMALIZE_WHITESPACE_FULL: NormalizeWhitespace = NormalizeWhitespace {
     collapse: true,
     trim: true,
@@ -100,7 +63,9 @@ pub const NORMALIZE_WHITESPACE_FULL: NormalizeWhitespace = NormalizeWhitespace {
     replacement_char: ' ',
 };
 
-/// Collapse sequential whitespace only, preserve edges
+/// Collapse sequential whitespace runs to a single space, preserving leading/trailing edges.
+///
+/// Only ASCII whitespace is recognized (`\t`, `\n`, `\r`, `\f`, `\v`, space).
 pub const COLLAPSE_WHITESPACE: NormalizeWhitespace = NormalizeWhitespace {
     collapse: true,
     trim: false,
@@ -108,7 +73,9 @@ pub const COLLAPSE_WHITESPACE: NormalizeWhitespace = NormalizeWhitespace {
     replacement_char: ' ',
 };
 
-/// Collapse sequential unicode whitespace, preserve edges
+/// Collapse sequential whitespace runs to a single space, preserving edges.
+///
+/// All Unicode `White_Space=Yes` characters are recognized and normalized to space.
 pub const COLLAPSE_WHITESPACE_UNICODE: NormalizeWhitespace = NormalizeWhitespace {
     collapse: true,
     trim: false,
@@ -116,7 +83,9 @@ pub const COLLAPSE_WHITESPACE_UNICODE: NormalizeWhitespace = NormalizeWhitespace
     replacement_char: ' ',
 };
 
-/// Trim edges only, preserve internal spacing
+/// Trim leading and trailing whitespace, preserving internal spacing.
+///
+/// Only ASCII whitespace is recognized.
 pub const TRIM_WHITESPACE: NormalizeWhitespace = NormalizeWhitespace {
     collapse: false,
     trim: true,
@@ -124,7 +93,9 @@ pub const TRIM_WHITESPACE: NormalizeWhitespace = NormalizeWhitespace {
     replacement_char: ' ',
 };
 
-/// Trim unicode edges, preserve internal spacing
+/// Trim leading and trailing whitespace, preserving internal spacing.
+///
+/// All Unicode `White_Space=Yes` characters are recognized on edges and removed.
 pub const TRIM_WHITESPACE_UNICODE: NormalizeWhitespace = NormalizeWhitespace {
     collapse: false,
     trim: true,
@@ -478,7 +449,7 @@ impl StaticFusableStage for NormalizeWhitespace {
         if self.collapse {
             NormalizeWhitespaceStaticAdapter::Collapse(WhitespaceCollapseAdapter {
                 input,
-                config: *self,
+                config: self.clone(),
                 ws_count: 0,
                 first_ws: '\0',
                 first_ws_needs_replacement: false,
@@ -488,7 +459,7 @@ impl StaticFusableStage for NormalizeWhitespace {
         } else {
             NormalizeWhitespaceStaticAdapter::Preserve(WhitespacePreserveAdapter {
                 input,
-                config: *self,
+                config: self.clone(),
                 pending_ws: SmallVec::new(),
                 next_char: None,
                 started: false,

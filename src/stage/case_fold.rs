@@ -7,7 +7,7 @@ use crate::{
 };
 use std::borrow::Cow;
 
-/// Locale-sensitive case folding for search and comparison.
+/// Locale-sensitive case folding
 ///
 /// `CaseFold` performs full Unicode case folding with language-specific rules,
 /// including:
@@ -20,8 +20,8 @@ use std::borrow::Cow;
 /// scenario requiring case-insensitive matching that respects linguistic norms.
 /// It is stronger than simple lowercasing but weaker than NFKC/NFKD.
 ///
-/// When the target language has only one-to-one mappings and no peek-ahead rules,
-/// this stage implements `CharMapper`, enabling zero-allocation pipeline fusion.
+/// This stage is eligible for static fusion in all supported languages.
+#[derive(Debug, Default, Clone, Copy)]
 pub struct CaseFold;
 
 impl Stage for CaseFold {
@@ -63,8 +63,7 @@ impl Stage for CaseFold {
         }
 
         // 2. Fast path: Manual loop (The "Manual Slow-Path" Optimization)
-        let cap = (text.len() as f64 * 1.1) as usize;
-        let mut out = String::with_capacity(cap);
+        let mut out = String::with_capacity((text.len() as f64 * 1.1) as usize);
 
         for c in text.chars() {
             // Priority 1: Multi-char expansions (ß -> ss)
@@ -78,7 +77,9 @@ impl Stage for CaseFold {
                 continue;
             }
             // Priority 3: Unicode Standard Fallback
-            out.extend(c.to_lowercase());
+            for ch in c.to_lowercase() {
+                out.push(ch);
+            }
         }
         Ok(Cow::Owned(out))
     }
@@ -108,7 +109,6 @@ impl StaticFusableStage for CaseFold {
 }
 
 /// Universal adapter for case folding.
-/// Works for both Static Fusion (Generic I) and Dynamic Fusion (I = Box<dyn ...>).
 pub struct CaseFoldAdapter<'a, I> {
     input: I,
     lang: &'a LangEntry,

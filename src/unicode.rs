@@ -3,8 +3,8 @@
 //
 // These are removed by `RemoveFormatControls` and commonly appear
 // in user-generated content, especially in mixed-script environments.
-/// Returns true if the character is a format control character or
-/// one of the selected zero-width characters to be removed.
+// Returns true if the character is a format control character or
+// one of the selected zero-width characters to be removed.
 #[inline(always)] // Use inline(always) for maximum performance boost
 pub const fn is_format_control(c: char) -> bool {
     match c {

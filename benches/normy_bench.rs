@@ -24,14 +24,14 @@ use unicode_normalization::UnicodeNormalization;
 
 // ── Corpus generators ──
 
-/// Generate corpus with mixed content (uppercase, diacritics, special chars)
-/// This corpus is EXPECTED to have low zero-copy rate with full pipeline
+// Generate corpus with mixed content (uppercase, diacritics, special chars)
+// This corpus is EXPECTED to have low zero-copy rate with full pipeline
 fn realistic_corpus_needs_transform(seed: u64, size_kb: usize) -> String {
     const POOL: &[&str] = &[
         "Hello, world!",
         "This is a test sentence for bench.",
         "déjà vu café naïve — accents and dash.",
-        "İstanbul'da büyük ŞOK! İiIı göz göze.",
+        "İstanbul'da büyük GÖSTERİ! İiIı göz göze.",
         "Größe Straße fußball ßẞ ÄÖÜäöü Maßstab.",
         "　全角スペースと半角 space が混在　こんにちは世界！",
         "你好，世界！Ｈｅｌｌｏ　Ｗｏｒｌｄ",
@@ -62,8 +62,8 @@ fn realistic_corpus_needs_transform(seed: u64, size_kb: usize) -> String {
     out
 }
 
-/// Generate corpus that's already normalized (lowercase ASCII, no diacritics)
-/// This corpus is EXPECTED to have high zero-copy rate with full pipeline
+// Generate corpus that's already normalized (lowercase ASCII, no diacritics)
+// This corpus is EXPECTED to have high zero-copy rate with full pipeline
 fn realistic_corpus_already_normalized(seed: u64, size_kb: usize) -> String {
     const POOL: &[&str] = &[
         "hello world this is a test",
@@ -90,9 +90,9 @@ fn realistic_corpus_already_normalized(seed: u64, size_kb: usize) -> String {
     out
 }
 
-/// Generate mixed corpus with configurable ratio of already-normalized content
-/// This simulates real-world NLP workloads
-/// Returns a Vec of strings so we can measure zero-copy per-string, not per-corpus
+// Generate mixed corpus with configurable ratio of already-normalized content
+// This simulates real-world NLP workloads
+// Returns a Vec of strings so we can measure zero-copy per-string, not per-corpus
 fn realistic_corpus_mixed_batch(seed: u64, count: usize, normalized_ratio: f64) -> Vec<String> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut batch = Vec::with_capacity(count);
@@ -272,7 +272,7 @@ impl ZeroCopyTracker {
 
 // ── Benchmarks ──
 
-/// Main benchmark suite with correct expectations
+// Main benchmark suite with correct expectations
 fn benches_main(c: &mut Criterion) {
     let mut group = c.benchmark_group("Normy Full Pipeline");
 
@@ -385,7 +385,7 @@ fn benches_main(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark individual normalization forms
+// Benchmark individual normalization forms
 fn benches_normalization_forms(c: &mut Criterion) {
     let mut group = c.benchmark_group("Normalization Forms");
 
@@ -453,7 +453,7 @@ fn benches_normalization_forms(c: &mut Criterion) {
     group.finish();
 }
 
-/// Incremental pipeline benchmark to identify bottlenecks
+// Incremental pipeline benchmark to identify bottlenecks
 fn benches_incremental_pipeline(c: &mut Criterion) {
     let mut group = c.benchmark_group("Pipeline Stages (Incremental)");
 
@@ -487,7 +487,7 @@ const ASCII_LOWERCASE: &str = "hello simple ascii no accents 12345 keep this lig
 const LATIN_COMPOSED_UPPER: &str = "Café with precomposed e-acute (U+00E9) and ASCII";
 const LATIN_COMPOSED_LOWER: &str = "café with precomposed e-acute already normalized";
 
-/// Zero-copy microbenchmark with correct expectations
+// Zero-copy microbenchmark with correct expectations
 fn bench_zero_copy_micro(c: &mut Criterion) {
     let mut group = c.benchmark_group("Zero-Copy Microbench");
 
