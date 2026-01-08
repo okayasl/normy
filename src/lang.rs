@@ -164,10 +164,19 @@ impl LangEntry {
 
     #[inline(always)]
     pub fn needs_lowercase(&self, c: char) -> bool {
-        if self.case_map.iter().any(|(from, _)| *from == c) {
+        // Check uppercase FIRST (most common when work is needed)
+        if c.to_lowercase().next() != Some(c) {
             return true;
         }
-        c.to_lowercase().next() != Some(c)
+
+        // Then check custom mappings with direct comparisons for small maps
+        match self.case_map.len() {
+            0 => false,
+            1 => c == self.case_map[0].0,
+            2 => c == self.case_map[0].0 || c == self.case_map[1].0,
+            3 => c == self.case_map[0].0 || c == self.case_map[1].0 || c == self.case_map[2].0,
+            _ => self.case_map.iter().any(|(from, _)| *from == c),
+        }
     }
 
     #[inline(always)]

@@ -9,151 +9,269 @@ use normy::{
 use std::{borrow::Cow, hint::black_box, time::Duration};
 
 // ============================================================================
-// Named Meaningful Samples
+// Base Text Samples (Short patterns for repetition)
 // ============================================================================
-
-const TEXT_MIXED_WIDTH_CTRL: &str = "Ｈｅｌｌｏ\u{0000}ｗｏｒｌｄ";
-const TEXT_HTML_ACCENTS: &str = "<b>Hello naïve Café</b> <script>alert(1)</script>";
-const TEXT_PUNCTUATION: &str = "Hello---world... café!!";
-const TEXT_UNI_WHITESPACE: &str = "Hello\u{3000}world\u{2028}café";
-const TEXT_FULLWIDTH: &str = "ＦＵＬＬＷＩＤＴＨ";
-const TEXT_COMPATIBILITY: &str = "ﬁle ½ ① ﬁﬀ";
+const TEXT_MIXED_WIDTH_CTRL: &str = "Ｈｅｌｌｏ\u{0000}ｗｏｒｌｄ ";
+const TEXT_HTML_ACCENTS: &str = "<b>Hello naïve Café</b> <script>alert(1)</script> ";
+const TEXT_PUNCTUATION: &str = "Hello⋯world... café!! ";
+const TEXT_UNI_WHITESPACE: &str = "Hello\u{3000}world\u{2028}café ";
+const TEXT_FULLWIDTH: &str = "ＦＵＬＬＷＩＤＴＨ ";
+const TEXT_COMPATIBILITY: &str = "ﬁle ½ ① ﬁﬀ ";
 const TEXT_PADDING: &str = "    lots of padding    ";
 
 // ============================================================================
-// Utility & Core Logic
+// Length Configuration
 // ============================================================================
-
-fn sanitize_id(s: &str) -> String {
-    let mut cleaned = String::with_capacity(s.len());
-    for c in s.chars().take(20) {
-        match c {
-            '\0' => cleaned.push_str("[NUL]"),
-            c if c.is_ascii_control() => cleaned.push('.'),
-            _ => cleaned.push(c),
-        }
-    }
-    cleaned
+struct LengthConfig {
+    name: &'static str,
+    target_bytes: usize,
+    description: &'static str,
 }
 
-fn bench_stage_focused<S, C>(c: &mut Criterion, stage_name: &str, constructor: C, input: &str)
-where
+const LENGTH_CONFIGS: &[LengthConfig] = &[
+    LengthConfig {
+        name: "short",
+        target_bytes: 100,
+        description: "Single sentence",
+    },
+    LengthConfig {
+        name: "medium",
+        target_bytes: 1000,
+        description: "Paragraph",
+    },
+    LengthConfig {
+        name: "long",
+        target_bytes: 2000,
+        description: "Multi-paragraph",
+    },
+    LengthConfig {
+        name: "huge",
+        target_bytes: 5000,
+        description: "Document",
+    },
+];
+
+// ============================================================================
+// Text Generation Helper
+// ============================================================================
+fn generate_text(base: &str, target_len: usize) -> String {
+    if target_len <= base.len() {
+        return base.to_string();
+    }
+
+    let repetitions = (target_len / base.len()) + 1;
+    let mut result = String::with_capacity(target_len);
+
+    for _ in 0..repetitions {
+        result.push_str(base);
+        if result.len() >= target_len {
+            break;
+        }
+    }
+
+    if result.len() > target_len {
+        let mut truncate_at = target_len;
+        while truncate_at > 0 && !result.is_char_boundary(truncate_at) {
+            truncate_at -= 1;
+        }
+        result.truncate(truncate_at);
+    }
+
+    result
+}
+
+// ============================================================================
+// FIXED: Restructured Benchmark Function
+// ============================================================================
+fn bench_stage_length_scaling<S, C>(
+    c: &mut Criterion,
+    stage_name: &str,
+    constructor: C,
+    base_input: &str,
+) where
     S: Stage + StaticFusableStage + 'static,
     C: Fn() -> S + Copy,
 {
-    let mut group = c.benchmark_group(stage_name);
+    let mut group = c.benchmark_group(format!("{}_length_scaling", stage_name));
     let lang = ENG;
-    let ctx = Context::new(lang);
 
-    // 1. PRE-CALCULATION: "Retrieve" the result for the second bench
-    let stage = constructor();
-    let normalized = stage
-        .apply(Cow::Borrowed(input), &ctx)
-        .unwrap()
-        .into_owned();
-    let is_unchanged = input == normalized.as_str();
+    println!("\n┌────────────────────────────────────────────────────────────┐");
+    println!("│ 📊 {} - Length Scaling Benchmark", stage_name);
+    println!("└────────────────────────────────────────────────────────────┘\n");
 
-    let mut run_suite = |label: &str, text: &str| {
-        let safe_id = sanitize_id(text);
+    for config in LENGTH_CONFIGS {
+        let input = generate_text(base_input, config.target_bytes);
+        let actual_len = input.len();
 
-        // PIPELINE Bench
-        group.bench_function(
-            BenchmarkId::new(format!("{label}/normy pipeline"), &safe_id),
-            |b| {
-                b.iter(|| {
-                    let s = constructor();
-                    let normy = Normy::builder().lang(lang).add_stage(s).build();
-                    black_box(normy.normalize(text).unwrap().into_owned())
-                })
-            },
+        println!(
+            "  📏 {} ({} bytes - {})",
+            config.name, actual_len, config.description
         );
 
-        // APPLY Bench
-        group.bench_function(BenchmarkId::new(format!("{label}/apply"), &safe_id), |b| {
-            b.iter(|| {
-                let s = constructor();
-                black_box(s.apply(Cow::Borrowed(text), &ctx).unwrap())
-            })
-        });
+        // Pre-calculate normalized result
+        let ctx = Context::new(lang);
+        let normalized = {
+            let stage = constructor();
+            stage
+                .apply(Cow::Borrowed(&input), &ctx)
+                .unwrap()
+                .into_owned()
+        };
 
-        // FUSION Bench
-        if stage.supports_static_fusion() {
-            group.bench_function(BenchmarkId::new(format!("{label}/fusion"), &safe_id), |b| {
+        let is_unchanged = input == normalized.as_str();
+        let status = if is_unchanged { "unchanged" } else { "changed" };
+        let supports_fusion = constructor().supports_static_fusion();
+
+        let bench_id = format!("{}/{}/{}", stage_name, config.name, status);
+
+        // ═══════════════════════════════════════════════════════════
+        // CHANGED INPUT - Pre-construct outside timing loop
+        // ═══════════════════════════════════════════════════════════
+
+        // Pipeline benchmark - FIXED
+        {
+            let stage = constructor();
+            let normy = Normy::builder().lang(lang).add_stage(stage).build();
+
+            group.bench_function(BenchmarkId::new("pipeline", &bench_id), |b| {
+                b.iter(|| black_box(normy.normalize(&input).unwrap()))
+            });
+        }
+
+        // Apply benchmark - FIXED
+        {
+            let stage = constructor();
+            let ctx = Context::new(lang);
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&input), &ctx).unwrap()))
+            });
+        }
+
+        // Fusion benchmark - FIXED
+        if supports_fusion {
+            let stage = constructor();
+            let ctx = Context::new(lang);
+
+            group.bench_function(BenchmarkId::new("fusion", &bench_id), |b| {
                 b.iter(|| {
-                    let s = constructor();
-                    let iter = s.static_fused_adapter(text.chars(), &ctx);
+                    let iter = stage.static_fused_adapter(input.chars(), &ctx);
                     black_box(iter.collect::<String>())
                 })
             });
         }
-    };
 
-    // First bench: The input that triggers logic
-    run_suite("changed", input);
+        // ═══════════════════════════════════════════════════════════
+        // UNCHANGED INPUT - Tests short-circuiting
+        // ═══════════════════════════════════════════════════════════
 
-    // Second bench: The result of the first bench (tests short-circuiting)
-    if !is_unchanged {
-        run_suite("unchanged", &normalized);
+        if !is_unchanged {
+            let unchanged_bench_id = format!("{}/{}/unchanged", stage_name, config.name);
+
+            // Pipeline - unchanged
+            {
+                let stage = constructor();
+                let normy = Normy::builder().lang(lang).add_stage(stage).build();
+
+                group.bench_function(BenchmarkId::new("pipeline", &unchanged_bench_id), |b| {
+                    b.iter(|| black_box(normy.normalize(&normalized).unwrap()))
+                });
+            }
+
+            // Apply - unchanged
+            {
+                let stage = constructor();
+                let ctx = Context::new(lang);
+
+                group.bench_function(BenchmarkId::new("apply", &unchanged_bench_id), |b| {
+                    b.iter(|| black_box(stage.apply(Cow::Borrowed(&normalized), &ctx).unwrap()))
+                });
+            }
+
+            // Fusion - unchanged
+            if supports_fusion {
+                let stage = constructor();
+                let ctx = Context::new(lang);
+
+                group.bench_function(BenchmarkId::new("fusion", &unchanged_bench_id), |b| {
+                    b.iter(|| {
+                        let iter = stage.static_fused_adapter(normalized.chars(), &ctx);
+                        black_box(iter.collect::<String>())
+                    })
+                });
+            }
+        }
     }
 
+    println!();
     group.finish();
 }
 
 // ============================================================================
-// Macro & Target Registration
+// Individual Stage Benchmarks
 // ============================================================================
 
-macro_rules! register_stage_bench {
-    ($fn_name:ident, $name_str:expr, $constructor:expr, $input_text:expr) => {
-        fn $fn_name(c: &mut Criterion) {
-            bench_stage_focused(c, $name_str, || $constructor, $input_text);
-        }
-    };
+fn bench_unify_width(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "UnifyWidth", || UnifyWidth, TEXT_FULLWIDTH);
 }
 
-register_stage_bench!(bench_unify_width, "UnifyWidth", UnifyWidth, TEXT_FULLWIDTH);
-register_stage_bench!(bench_nfc, "NFC", NFC, TEXT_HTML_ACCENTS);
-register_stage_bench!(bench_nfd, "NFD", NFD, TEXT_HTML_ACCENTS);
-register_stage_bench!(bench_nfkc, "NFKC", NFKC, TEXT_COMPATIBILITY);
-register_stage_bench!(bench_nfkd, "NFKD", NFKD, TEXT_COMPATIBILITY);
-register_stage_bench!(
-    bench_punct,
-    "Punctuation",
-    NormalizePunctuation,
-    TEXT_PUNCTUATION
-);
-register_stage_bench!(
-    bench_strip_ctrl,
-    "StripCtrl",
-    StripControlChars,
-    TEXT_MIXED_WIDTH_CTRL
-);
-register_stage_bench!(bench_strip_html, "StripHtml", StripHtml, TEXT_HTML_ACCENTS);
-register_stage_bench!(
-    bench_ws_full,
-    "WS_Full",
-    NORMALIZE_WHITESPACE_FULL,
-    TEXT_UNI_WHITESPACE
-);
-register_stage_bench!(
-    bench_collapse,
-    "WS_Collapse",
-    COLLAPSE_WHITESPACE,
-    TEXT_PADDING
-);
-register_stage_bench!(
-    bench_collapse_uni,
-    "WS_Collapse_Uni",
-    COLLAPSE_WHITESPACE_UNICODE,
-    TEXT_UNI_WHITESPACE
-);
-register_stage_bench!(bench_trim, "WS_Trim", TRIM_WHITESPACE, TEXT_PADDING);
-register_stage_bench!(
-    bench_trim_uni,
-    "WS_Trim_Uni",
-    TRIM_WHITESPACE_UNICODE,
-    TEXT_PADDING
-);
+fn bench_nfc(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "NFC", || NFC, TEXT_HTML_ACCENTS);
+}
+
+fn bench_nfd(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "NFD", || NFD, TEXT_HTML_ACCENTS);
+}
+
+fn bench_nfkc(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "NFKC", || NFKC, TEXT_COMPATIBILITY);
+}
+
+fn bench_nfkd(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "NFKD", || NFKD, TEXT_COMPATIBILITY);
+}
+
+fn bench_punct(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "Punctuation", || NormalizePunctuation, TEXT_PUNCTUATION);
+}
+
+fn bench_strip_ctrl(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "StripCtrl", || StripControlChars, TEXT_MIXED_WIDTH_CTRL);
+}
+
+fn bench_strip_html(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "StripHtml", || StripHtml, TEXT_HTML_ACCENTS);
+}
+
+fn bench_ws_full(c: &mut Criterion) {
+    bench_stage_length_scaling(
+        c,
+        "WS_Full",
+        || NORMALIZE_WHITESPACE_FULL,
+        TEXT_UNI_WHITESPACE,
+    );
+}
+
+fn bench_collapse(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "WS_Collapse", || COLLAPSE_WHITESPACE, TEXT_PADDING);
+}
+
+fn bench_collapse_uni(c: &mut Criterion) {
+    bench_stage_length_scaling(
+        c,
+        "WS_Collapse_Uni",
+        || COLLAPSE_WHITESPACE_UNICODE,
+        TEXT_UNI_WHITESPACE,
+    );
+}
+
+fn bench_trim(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "WS_Trim", || TRIM_WHITESPACE, TEXT_PADDING);
+}
+
+fn bench_trim_uni(c: &mut Criterion) {
+    bench_stage_length_scaling(c, "WS_Trim_Uni", || TRIM_WHITESPACE_UNICODE, TEXT_PADDING);
+}
 
 // ============================================================================
 // Criterion Group
@@ -162,7 +280,7 @@ register_stage_bench!(
 criterion_group!(
     name = agnostic_benches;
     config = Criterion::default()
-        .measurement_time(Duration::from_secs(2))
+        .measurement_time(Duration::from_secs(3))
         .warm_up_time(Duration::from_secs(1))
         .sample_size(100);
     targets =

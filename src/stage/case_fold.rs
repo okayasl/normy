@@ -63,22 +63,20 @@ impl Stage for CaseFold {
         }
 
         // 2. Fast path: Manual loop (The "Manual Slow-Path" Optimization)
-        let mut out = String::with_capacity((text.len() as f64 * 1.1) as usize);
+        let mut out = String::with_capacity(
+            text.len().saturating_mul(13).saturating_div(10), // 1.3x, integer math only
+        );
 
         for c in text.chars() {
             // Priority 1: Multi-char expansions (ß -> ss)
             if let Some(to) = ctx.lang_entry.find_fold_map(c) {
                 out.push_str(to);
-                continue;
-            }
-            // Priority 2: Language specific 1:1 (Turkish İ -> i)
-            if let Some(to) = ctx.lang_entry.find_case_map(c) {
+            } else if let Some(to) = ctx.lang_entry.find_case_map(c) {
                 out.push(to);
-                continue;
-            }
-            // Priority 3: Unicode Standard Fallback
-            for ch in c.to_lowercase() {
-                out.push(ch);
+            } else {
+                for ch in c.to_lowercase() {
+                    out.push(ch);
+                }
             }
         }
         Ok(Cow::Owned(out))
@@ -143,7 +141,7 @@ where
         // 2. 1:N expansions (German ß -> ss)
         if let Some(to) = self.lang.find_fold_map(c) {
             let mut chars = to.chars();
-            let first = chars.next().unwrap();
+            let first = chars.next().expect("Pending string should not be empty");
             let rest = chars.as_str();
             if !rest.is_empty() {
                 self.pending = Some(rest);
@@ -166,9 +164,19 @@ where
         Some(first)
     }
 
-    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.input.size_hint()
+        let (lower, upper) = self.input.size_hint();
+        let pending_len = self.pending.as_ref().map_or(0, |s| s.chars().count());
+
+        // German: ß→ss is 2x, but rare. Conservative: 1.3x
+        (
+            lower + pending_len,
+            upper.map(|u| {
+                u.saturating_mul(13)
+                    .saturating_div(10)
+                    .saturating_add(pending_len)
+            }),
+        )
     }
 }
 
@@ -178,10 +186,7 @@ fn apply_with_peek_ahead<'a>(
     text: Cow<'a, str>,
     ctx: &Context,
 ) -> Result<Cow<'a, str>, StageError> {
-    // Use capacity hint for allocation
-    let (fold_count, extra_bytes) = ctx.lang_entry.hint_capacity_fold(&text);
-    let capacity = text.len() + extra_bytes + (fold_count * 2);
-    let mut out = String::with_capacity(capacity);
+    let mut out = String::with_capacity(text.len().saturating_mul(13).saturating_div(10));
     let mut chars = text.chars().peekable();
 
     while let Some(c) = chars.next() {

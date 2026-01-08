@@ -27,6 +27,11 @@ tokenizers = "0.22.2"
 regex = "1.12.2"
 
 [[bench]]
+name = "cb"
+path = "benches/check_bench.rs"
+harness = false
+
+[[bench]]
 name = "cfb"
 path = "benches/comparison_fusing_bench.rs"
 harness = false

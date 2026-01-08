@@ -243,8 +243,8 @@ impl NormalizeWhitespace {
             (true, true) => (input_len * 23) >> 4, // ~92% of original
             // Collapse only: moderate reduction
             (true, false) => (input_len * 19) >> 4, // ~95% of original
-            // Trim only: minimal reduction
-            (false, true) => input_len.saturating_sub(input_len >> 5), // ~98% of original
+            // Trim only: minimal reduction (only edge chars removed)
+            (false, true) => input_len,
             // Neither: should never allocate (caught by needs_apply)
             (false, false) => input_len,
         }
@@ -461,6 +461,7 @@ impl StaticFusableStage for NormalizeWhitespace {
                 input,
                 config: self.clone(),
                 pending_ws: SmallVec::new(),
+                pending_idx: 0, // Initialize cursor
                 next_char: None,
                 started: false,
             })
@@ -560,17 +561,25 @@ pub struct WhitespacePreserveAdapter<I> {
     input: I,
     config: NormalizeWhitespace,
     pending_ws: SmallVec<[char; 4]>,
+    pending_idx: usize, // Add cursor
     next_char: Option<char>,
     started: bool,
 }
 
 impl<I: Iterator<Item = char>> Iterator for WhitespacePreserveAdapter<I> {
     type Item = char;
-
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.pending_ws.is_empty() {
-            return Some(self.pending_ws.remove(0));
+        // Emit pending whitespace using cursor (no shifting)
+        if self.pending_idx < self.pending_ws.len() {
+            let c = self.pending_ws[self.pending_idx];
+            self.pending_idx += 1;
+            if self.pending_idx >= self.pending_ws.len() {
+                self.pending_ws.clear();
+                self.pending_idx = 0;
+            }
+            return Some(c);
         }
+
         if let Some(c) = self.next_char.take() {
             self.started = true;
             return Some(c);
@@ -595,6 +604,7 @@ impl<I: Iterator<Item = char>> Iterator for WhitespacePreserveAdapter<I> {
                 return self.next();
             }
             self.pending_ws = ws_run;
+            self.pending_idx = 0; // Reset cursor
             self.started = true;
             return self.next();
         }

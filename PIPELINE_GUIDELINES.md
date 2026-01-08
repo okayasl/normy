@@ -107,6 +107,18 @@ Normy::builder()
 9. **Whitespace normalization** (`COLLAPSE_WHITESPACE_UNICODE`, etc.)
 10. **Segmentation** (`SegmentWords`) — always last
 
+### Why This Specific Order? (Linguistic Conflict Resolution)
+
+The ordering above is not arbitrary—it resolves potential conflicts between transformations in a linguistically principled way:
+
+- **NFC first**: Ensures canonical composed form (W3C/WHATWG standard); most compact and enables efficient comparison.
+- **Case operations before folding**: Locale-specific rules (e.g., Turkish dotted/dotless I) must be applied before any search-equivalence folding.
+- **Folding before diacritic stripping**: Preserves more semantic information (e.g., German `ß → "ss"` is better than `ß → s`).
+- **Transliteration before diacritic removal**: Transliteration is the most lossy letter-level transform and takes highest priority (e.g., German `ö → "oe"` overrides a hypothetical `ö → o` from accent stripping).
+- **Diacritic/spacing mark removal before whitespace/segmentation**: Operates on final letter forms; whitespace and word boundaries are computed last.
+
+This order guarantees predictable, conservative results while maximizing zero-copy opportunities.
+
 ### Detailed Stage Guidance
 
 **Unicode Normalization (NFC/NFD/NFKC/NFKD):**

@@ -35,7 +35,7 @@ impl Stage for Transliterate {
     fn needs_apply(&self, text: &str, ctx: &Context) -> Result<bool, StageError> {
         let entry = ctx.lang_entry;
 
-        if !entry.has_transliterate_map() {
+        if !entry.has_transliterate_map() || text.is_ascii() {
             return Ok(false);
         }
 
@@ -127,13 +127,17 @@ impl<'a, I: Iterator<Item = char>> Iterator for TransliterateAdapter<'a, I> {
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let (lower, upper) = self.input.size_hint();
+        // Calculate pending length in characters (usually 1 or 0 for your data)
         let pending_len = self.pending.map_or(0, |s| s.chars().count());
 
-        // Expansion could potentially double the size (e.g. all chars are 'ß')
-        (
-            lower + pending_len,
-            upper.map(|u| u.saturating_mul(2).saturating_add(pending_len)),
-        )
+        // Lower bound: at least the remaining input + what's in pending
+        let lower_bound = lower.saturating_add(pending_len);
+
+        // Upper bound: Your mappings (Ä->ae, Þ->th) are max 1:2 expansions.
+        // We use saturating_mul(2) to safely represent this maximum.
+        let upper_bound = upper.map(|u| u.saturating_mul(2).saturating_add(pending_len));
+
+        (lower_bound, upper_bound)
     }
 }
 

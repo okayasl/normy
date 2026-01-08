@@ -1,52 +1,71 @@
-// Format control characters (General Category = Cf) and selected
-// zero-width characters relevant to text normalization.
-//
-// These are removed by `RemoveFormatControls` and commonly appear
-// in user-generated content, especially in mixed-script environments.
-// Returns true if the character is a format control character or
-// one of the selected zero-width characters to be removed.
-#[inline(always)] // Use inline(always) for maximum performance boost
+// // Format control characters (General Category = Cf) and selected
+// // zero-width characters relevant to text normalization.
+// //
+// // These are removed by `RemoveFormatControls` and commonly appear
+// // in user-generated content, especially in mixed-script environments.
+// // Returns true if the character is a format control character or
+// // one of the selected zero-width characters to be removed.
+// #[inline(always)] // Use inline(always) for maximum performance boost
+// pub const fn is_format_control(c: char) -> bool {
+//     match c {
+//         // Zero-width spaces and joiners
+//         '\u{200B}' | // Zero-width space
+//         '\u{200C}' | // Zero-width non-joiner
+//         '\u{200D}' => true, // Zero-width joiner
+
+//         // Directional Marks/Embeddings/Overrides/Isolates
+//         '\u{200E}' | // LTR mark
+//         '\u{200F}' | // RTL mark
+//         '\u{202A}' | // LTR embedding
+//         '\u{202B}' | // RTL embedding
+//         '\u{202C}' | // Pop directional formatting
+//         '\u{202D}' | // LTR override
+//         '\u{202E}' | // RTL override
+//         '\u{2066}' | // LTR isolate
+//         '\u{2067}' | // RTL isolate
+//         '\u{2068}' | // First-strong isolate
+//         '\u{2069}' => true, // Pop isolate
+
+//         // Invisible Operators / Word Joiner
+//         '\u{2060}' | // Word joiner
+//         '\u{2061}' | // Invisible function application
+//         '\u{2062}' | // Invisible times
+//         '\u{2063}' | // Invisible separator
+//         '\u{2064}' => true, // Invisible plus
+
+//         // Deprecated Format Controls
+//         '\u{206A}' | // Inhibit symmetric swapping (deprecated)
+//         '\u{206B}' | // Activate symmetric swapping (deprecated)
+//         '\u{206C}' | // Inhibit Arabic shaping (deprecated)
+//         '\u{206D}' | // Activate Arabic shaping (deprecated)
+//         '\u{206E}' | // National digit shapes (deprecated)
+//         '\u{206F}' => true, // Nominal digit shapes (deprecated)
+
+//         // Zero-width no-break space / BOM
+//         '\u{FEFF}' => true,
+
+//         // Otherwise, it is not a format control character
+//         _ => false,
+//     }
+// }
+
+#[inline(always)]
 pub const fn is_format_control(c: char) -> bool {
-    match c {
-        // Zero-width spaces and joiners
-        '\u{200B}' | // Zero-width space
-        '\u{200C}' | // Zero-width non-joiner
-        '\u{200D}' => true, // Zero-width joiner
+    let cp = c as u32;
 
-        // Directional Marks/Embeddings/Overrides/Isolates
-        '\u{200E}' | // LTR mark
-        '\u{200F}' | // RTL mark
-        '\u{202A}' | // LTR embedding
-        '\u{202B}' | // RTL embedding
-        '\u{202C}' | // Pop directional formatting
-        '\u{202D}' | // LTR override
-        '\u{202E}' | // RTL override
-        '\u{2066}' | // LTR isolate
-        '\u{2067}' | // RTL isolate
-        '\u{2068}' | // First-strong isolate
-        '\u{2069}' => true, // Pop isolate
-
-        // Invisible Operators / Word Joiner
-        '\u{2060}' | // Word joiner
-        '\u{2061}' | // Invisible function application
-        '\u{2062}' | // Invisible times
-        '\u{2063}' | // Invisible separator
-        '\u{2064}' => true, // Invisible plus
-
-        // Deprecated Format Controls
-        '\u{206A}' | // Inhibit symmetric swapping (deprecated)
-        '\u{206B}' | // Activate symmetric swapping (deprecated)
-        '\u{206C}' | // Inhibit Arabic shaping (deprecated)
-        '\u{206D}' | // Activate Arabic shaping (deprecated)
-        '\u{206E}' | // National digit shapes (deprecated)
-        '\u{206F}' => true, // Nominal digit shapes (deprecated)
-
-        // Zero-width no-break space / BOM
-        '\u{FEFF}' => true,
-
-        // Otherwise, it is not a format control character
-        _ => false,
+    // Early exit: 99.9% of characters are outside this range
+    if cp < 0x200B || cp > 0xFEFF {
+        return false;
     }
+
+    matches!(cp,
+        0x200B..=0x200F |
+        0x202A..=0x202E |
+        0x2060..=0x2064 |
+        0x2066..=0x2069 |
+        0x206A..=0x206F |
+        0xFEFF
+    )
 }
 
 // The calling function now uses the new standalone function
@@ -108,9 +127,9 @@ pub fn is_any_whitespace(c: char) -> bool {
 
 // Control characters (Category Cc). Format controls (Cf) are handled separately.
 #[inline(always)]
-pub fn is_control(c: char) -> bool {
+pub const fn is_control(c: char) -> bool {
     let cp = c as u32;
-    cp <= 0x1F || (0x7F..=0x9F).contains(&cp)
+    cp <= 0x1F || (cp >= 0x7F && cp <= 0x9F)
 }
 
 // Fullwidth Latin punctuation/letters in FF01–FF5E plus ideographic space.

@@ -46,10 +46,7 @@ impl Stage for NormalizePunctuation {
         let mut out = String::with_capacity(text.len());
 
         for c in text.chars() {
-            let n = normalize_punctuation_char(c);
-            if n != '\0' {
-                out.push(n);
-            }
+            out.push(normalize_punctuation_char(c));
         }
 
         Ok(Cow::Owned(out))
@@ -83,20 +80,12 @@ impl<I: Iterator<Item = char>> Iterator for NormalizePunctuationAdapter<I> {
 
     #[inline(always)]
     fn next(&mut self) -> Option<Self::Item> {
-        // Use a loop to skip characters that normalize to '\0'
-        loop {
-            let c = self.input.next()?;
-            let n = normalize_punctuation_char(c);
-            if n != '\0' {
-                return Some(n);
-            }
-        }
+        self.input.next().map(normalize_punctuation_char)
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let (_, upper) = self.input.size_hint();
-        (0, upper) // Lower bound is 0 because we might filter everything
+        self.input.size_hint()
     }
 }
 

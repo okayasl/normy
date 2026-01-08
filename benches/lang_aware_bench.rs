@@ -1,6 +1,6 @@
 use std::{borrow::Cow, hint::black_box, time::Duration};
 
-use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use normy::{
     ARA, CAT, CES, CaseFold, DAN, DEU, ENG, FRA, HEB, HIN, ISL, JPN, KHM, KOR, LIT, LowerCase, NLD,
     NOR, Normy, POL, POR, RUS, RemoveDiacritics, SWE, SegmentWords, THA, TUR, Transliterate, VIE,
@@ -10,77 +10,125 @@ use normy::{
     stage::{Stage, StaticFusableStage},
 };
 
-// LowerCase uses case_map (TUR, LIT) + fallback to Unicode
+// ============================================================================
+// Length Configuration
+// ============================================================================
+
+struct LengthConfig {
+    name: &'static str,
+    target_bytes: usize,
+    description: &'static str,
+}
+
+const LENGTH_CONFIGS: &[LengthConfig] = &[
+    LengthConfig {
+        name: "short",
+        target_bytes: 100,
+        description: "Single sentence",
+    },
+    LengthConfig {
+        name: "medium",
+        target_bytes: 1000,
+        description: "Paragraph",
+    },
+    LengthConfig {
+        name: "long",
+        target_bytes: 2000,
+        description: "Multi-paragraph",
+    },
+    LengthConfig {
+        name: "huge",
+        target_bytes: 5000,
+        description: "Document",
+    },
+];
+
+// ============================================================================
+// Text Generation Helper
+// ============================================================================
+
+fn generate_text(base: &str, target_len: usize) -> String {
+    if target_len <= base.len() {
+        return base.to_string();
+    }
+
+    let repetitions = (target_len / base.len()) + 1;
+    let mut result = String::with_capacity(target_len);
+
+    for _ in 0..repetitions {
+        result.push_str(base);
+        if result.len() >= target_len {
+            break;
+        }
+    }
+
+    if result.len() > target_len {
+        let mut truncate_at = target_len;
+        while truncate_at > 0 && !result.is_char_boundary(truncate_at) {
+            truncate_at -= 1;
+        }
+        result.truncate(truncate_at);
+    }
+
+    result
+}
+
+// ============================================================================
+// Base Samples
+// ============================================================================
+
 const LOWERCASE_SAMPLES: &[(&str, Lang)] = &[
-    // Languages with case_map
-    ("İSTANBUL İĞNE İĞDE", TUR),
-    ("IÌ Í Ĩ IĮ ĖĖ ŲŲ", LIT),
-    // Baseline (no case_map, uses Unicode)
-    ("HELLO WORLD", ENG),
+    ("İSTANBUL İĞNE İĞDE ", TUR),
+    ("IĮ Į Ĩ IĮ ĖĖ ŲŲ ", LIT),
+    ("HELLO WORLD ", ENG),
 ];
 
-// CaseFold uses fold_map (DEU, NLD) + case_map (TUR, LIT) + fallback
 const CASEFOLD_SAMPLES: &[(&str, Lang)] = &[
-    // Languages with fold_map (multi-char expansions)
-    ("GRÜßE STRAẞE", DEU),
-    ("IJssEL Ĳssel", NLD),
-    // Languages with only case_map (fallback)
-    ("İSTANBUL İĞNE", TUR),
-    ("IÌ Í Ĩ IĮ ĖĖ", LIT),
-    // Baseline
-    ("HELLO WORLD", ENG),
+    ("GRÜẞE STRAẞE ", DEU),
+    ("IJssEL Ĳssel ", NLD),
+    ("İSTANBUL İĞNE ", TUR),
+    ("IĮ Į Ĩ IĮ ĖĖ ", LIT),
+    ("HELLO WORLD ", ENG),
 ];
 
-// Transliterate - ordered by mapping count (RUS highest at 66)
 const TRANSLITERATE_SAMPLES: &[(&str, Lang)] = &[
-    // High complexity (66 mappings)
-    ("Привет мир ЁЛКИ-ПАЛКИ", RUS),
-    // Medium complexity (6 mappings each)
-    ("Äöü ÄÖÜ Grüße", DEU),
-    ("Œuf çà Sœur", FRA),
-    ("Åse Ææble Øre", DAN),
-    ("Ærlig Øl Åtte", NOR),
-    ("Ålder Ääkta Öga", SWE),
-    ("Þórður Ægir Ðóra", ISL),
-    // Low complexity (2 mappings)
-    ("Força Çà", CAT),
-    // Baseline (0 mappings)
-    ("Hello World", ENG),
+    ("Привет мир АЛКИ-ПАЛКИ ", RUS),
+    ("Äöü ÄÖÜ Grüße ", DEU),
+    ("Œuf çà Sœur ", FRA),
+    ("Åse Ææble Øre ", DAN),
+    ("Ærlig Øl Åtte ", NOR),
+    ("Ålder Ääkta Öga ", SWE),
+    ("Þórður Ægir Þóra ", ISL),
+    ("Força Çà ", CAT),
+    ("Hello World ", ENG),
 ];
 
-// RemoveDiacritics - both precomposed_to_base and spacing_diacritics
-// Ordered by total mapping count
 const REMOVEDIACRITICS_SAMPLES: &[(&str, Lang)] = &[
-    // Highest complexity (146 precomposed + 5 spacing = 151)
-    ("Việt Nam Phở Phỏ̉", VIE),
-    // High complexity (26 precomposed)
-    ("José café naïve résumé", POR),
-    ("Café naïve à l'œuf", FRA),
-    // Medium complexity (18-20 precomposed)
-    ("Český řeřicha háček", CES),
-    ("Łódź żółć Kraków", POL),
-    // Spacing diacritics only (no precomposed)
-    ("ٱلْكِتَابُ مُحَمَّدٌ ـــــ", ARA), // 14 spacing
-    ("עִבְרִית ספר", HEB),         // 20 spacing
-    ("हिन्दी ज़िंदगी", HIN),       // 5 spacing
-    ("ภาษาไทย สวัสดี", THA),      // 16 spacing
-    // Baseline (0 mappings)
-    ("Hello World", ENG),
+    ("Việt Nam Phở Phở̉ ", VIE),
+    ("José café naïve résumé ", POR),
+    ("Café naïve à l'œuf ", FRA),
+    ("Český řeřicha háček ", CES),
+    ("Łódź żółć Kraków ", POL),
+    ("اَلْكِتَابُ مُحَمَّدٌ ـــــ ", ARA),
+    ("עִבְרִית ספר ", HEB),
+    ("हिन्दी ज़िंदगी ", HIN),
+    ("ภาษาไทย สวัสดี ", THA),
+    ("Hello World ", ENG),
 ];
 
-// SegmentWords - languages with segment_rules
 const SEGMENTWORDS_SAMPLES: &[(&str, Lang)] = &[
-    // CJK unigram (highest complexity)
-    ("汉字仮名한글漢字", ZHO),
-    // Script boundary segmentation
-    ("日本語テキストです", JPN),
-    ("한글 텍스트입니다", KOR),
-    ("हिन्दी ज़िंदगी है", HIN),
-    ("ภาษาไทย สวัสดี", THA),
-    ("ភាសាខ្មែរ", KHM),
-    // Baseline (no rules)
-    ("Hello World", ENG),
+    ("汉字仮名글자漢字 ", ZHO),
+    ("日本語テキストです ", JPN),
+    ("한글 텍스트입니다 ", KOR),
+    ("हिन्दी ज़िंदगी है ", HIN),
+    ("ภาษาไทย สวัสดี ", THA),
+    ("ភាសាខ្មែរ ", KHM),
+    ("Hello World ", ENG),
 ];
+
+// ============================================================================
+// RESTRUCTURED: Length Scaling Benchmark
+// ============================================================================
 
 fn bench_stage_focused<S, C>(
     c: &mut Criterion,
@@ -91,110 +139,130 @@ fn bench_stage_focused<S, C>(
     S: Stage + StaticFusableStage + 'static,
     C: Fn() -> S + Copy,
 {
-    let mut group = c.benchmark_group(stage_name.to_string());
+    let mut group = c.benchmark_group(format!("{}_length_scaling", stage_name));
 
-    for &(text, lang) in samples {
-        let stage = constructor();
-        let ctx = Context::new(lang);
+    println!("\n┌────────────────────────────────────────────────────────────┐");
+    println!("│ 📊 {} - Length Scaling Benchmark", stage_name);
+    println!("└────────────────────────────────────────────────────────────┘\n");
 
-        // Get unchanged version by normalizing once
-        let normalized = {
-            let stage = constructor();
-            stage.apply(Cow::Borrowed(text), &ctx).unwrap().into_owned()
-        };
+    for &(base_text, lang) in samples {
+        println!("  🌍 Language: {} ({})", lang.name(), lang.code());
 
-        let is_unchanged = text == normalized.as_str();
-        let status = if is_unchanged { "unchanged" } else { "changed" };
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let actual_len = text.len();
 
-        let supports_fusion = stage.supports_static_fusion();
+            println!(
+                "    📏 {} ({} bytes - {})",
+                config.name, actual_len, config.description
+            );
 
-        // Full pipeline (includes needs_apply overhead)
-        let id = format!("{}/{}/{}", lang.code(), status, text);
-        group.bench_function(BenchmarkId::new("pipeline", &id), |b| {
-            b.iter_batched(
-                || text,
-                |t| {
-                    let stage = constructor();
-                    let normy = Normy::builder().lang(lang).add_stage(stage).build();
-                    black_box(normy.normalize(t).unwrap().into_owned())
-                },
-                BatchSize::SmallInput,
-            )
-        });
+            // Pre-normalize once to get unchanged version
+            let ctx = Context::new(lang);
+            let normalized = {
+                let stage = constructor();
+                stage
+                    .apply(Cow::Borrowed(&text), &ctx)
+                    .unwrap()
+                    .into_owned()
+            };
 
-        // Direct apply (no pipeline overhead)
-        group.bench_function(BenchmarkId::new("apply", &id), |b| {
-            b.iter_batched(
-                constructor,
-                |stage| {
-                    let ctx = Context::new(lang);
-                    black_box(stage.apply(Cow::Borrowed(text), &ctx).unwrap())
-                },
-                BatchSize::SmallInput,
-            )
-        });
+            let is_unchanged = text == normalized.as_str();
+            let status = if is_unchanged { "unchanged" } else { "changed" };
+            let supports_fusion = constructor().supports_static_fusion();
 
-        if supports_fusion {
-            group.bench_function(BenchmarkId::new("static_fusion", &id), |b| {
-                b.iter_batched(
-                    constructor,
-                    |stage| {
-                        let ctx = Context::new(lang);
-                        let iter = stage.static_fused_adapter(text.chars(), &ctx);
-                        black_box(iter.collect::<String>())
-                    },
-                    BatchSize::SmallInput,
-                )
-            });
-        }
+            let bench_id = format!("{}/{}/{}", lang.code(), config.name, status);
 
-        if !is_unchanged {
-            let unchanged_id = format!("{}/unchanged/{}", lang.code(), normalized);
+            // ═══════════════════════════════════════════════════════════
+            // FIXED: Pre-construct all objects outside timing loop
+            // ═══════════════════════════════════════════════════════════
 
-            // Full pipeline
-            group.bench_function(BenchmarkId::new("pipeline", &unchanged_id), |b| {
-                b.iter_batched(
-                    || normalized.as_str(),
-                    |t| {
-                        let stage = constructor();
-                        let normy = Normy::builder().lang(lang).add_stage(stage).build();
-                        black_box(normy.normalize(t).unwrap().into_owned())
-                    },
-                    BatchSize::SmallInput,
-                )
-            });
+            // 1. PIPELINE - Pure operation (no construction overhead)
+            {
+                let stage = constructor();
+                let normy = Normy::builder().lang(lang).add_stage(stage).build();
 
-            // Direct apply
-            group.bench_function(BenchmarkId::new("apply", &unchanged_id), |b| {
-                b.iter_batched(
-                    constructor,
-                    |stage| {
-                        let ctx = Context::new(lang);
-                        black_box(stage.apply(Cow::Borrowed(&normalized), &ctx).unwrap())
-                    },
-                    BatchSize::SmallInput,
-                )
-            });
-
-            // Static fusion
-            if supports_fusion {
-                group.bench_function(BenchmarkId::new("static_fusion", &unchanged_id), |b| {
-                    b.iter_batched(
-                        constructor,
-                        |stage| {
-                            let ctx = Context::new(lang);
-                            let iter = stage.static_fused_adapter(normalized.chars(), &ctx);
-                            black_box(iter.collect::<String>())
-                        },
-                        BatchSize::SmallInput,
-                    )
+                group.bench_function(BenchmarkId::new("pipeline", &bench_id), |b| {
+                    b.iter(|| black_box(normy.normalize(&text).unwrap()))
                 });
             }
+
+            // 2. APPLY - Pure operation (no construction overhead)
+            {
+                let stage = constructor();
+                let ctx = Context::new(lang);
+
+                group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                    b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+                });
+            }
+
+            // 3. FUSION - Pure operation (no construction overhead)
+            if supports_fusion {
+                let stage = constructor();
+                let ctx = Context::new(lang);
+
+                group.bench_function(BenchmarkId::new("static_fusion", &bench_id), |b| {
+                    b.iter(|| {
+                        let iter = stage.static_fused_adapter(text.chars(), &ctx);
+                        black_box(iter.collect::<String>())
+                    })
+                });
+            }
+
+            // ═══════════════════════════════════════════════════════════
+            // UNCHANGED TEXT BENCHMARKS
+            // ═══════════════════════════════════════════════════════════
+
+            if !is_unchanged {
+                let unchanged_bench_id = format!("{}/{}/unchanged", lang.code(), config.name);
+
+                // Pipeline - unchanged
+                {
+                    let stage = constructor();
+                    let normy = Normy::builder().lang(lang).add_stage(stage).build();
+
+                    group.bench_function(BenchmarkId::new("pipeline", &unchanged_bench_id), |b| {
+                        b.iter(|| black_box(normy.normalize(&normalized).unwrap()))
+                    });
+                }
+
+                // Apply - unchanged
+                {
+                    let stage = constructor();
+                    let ctx = Context::new(lang);
+
+                    group.bench_function(BenchmarkId::new("apply", &unchanged_bench_id), |b| {
+                        b.iter(|| black_box(stage.apply(Cow::Borrowed(&normalized), &ctx).unwrap()))
+                    });
+                }
+
+                // Fusion - unchanged
+                if supports_fusion {
+                    let stage = constructor();
+                    let ctx = Context::new(lang);
+
+                    group.bench_function(
+                        BenchmarkId::new("static_fusion", &unchanged_bench_id),
+                        |b| {
+                            b.iter(|| {
+                                let iter = stage.static_fused_adapter(normalized.chars(), &ctx);
+                                black_box(iter.collect::<String>())
+                            })
+                        },
+                    );
+                }
+            }
         }
+        println!();
     }
 
     group.finish();
 }
+
+// ============================================================================
+// Individual Stage Benchmarks
+// ============================================================================
 
 fn bench_lowercase_focused(c: &mut Criterion) {
     bench_stage_focused(c, "LowerCase", LOWERCASE_SAMPLES, || LowerCase);
@@ -218,48 +286,344 @@ fn bench_segmentwords_focused(c: &mut Criterion) {
     bench_stage_focused(c, "SegmentWords", SEGMENTWORDS_SAMPLES, || SegmentWords);
 }
 
-fn bench_fusion_overhead(c: &mut Criterion) {
-    let mut group = c.benchmark_group("fusion_overhead_analysis");
+// ============================================================================
+// NEW: Construction Overhead Benchmark (separate from operation timing)
+// ============================================================================
 
-    // Test cases that show the pattern clearly
-    let test_cases = [
-        ("Fast op (no-op)", "Hello", ENG, RemoveDiacritics),
-        ("Fast op (work)", "café", FRA, RemoveDiacritics),
-        ("Medium op", "Привет", RUS, RemoveDiacritics),
-        ("Slow op", "Việt Nam Phỏ̉", VIE, RemoveDiacritics),
-    ];
+fn bench_construction_overhead(c: &mut Criterion) {
+    let mut group = c.benchmark_group("construction_overhead");
 
-    for (label, text, lang, stage) in test_cases {
-        let ctx = Context::new(lang);
+    println!("\n┌────────────────────────────────────────────────────────────┐");
+    println!("│ 🏗️  Construction Overhead Analysis");
+    println!("└────────────────────────────────────────────────────────────┘\n");
 
-        // Baseline: apply
-        group.bench_function(BenchmarkId::new("apply", label), |b| {
-            b.iter(|| black_box(stage.apply(Cow::Borrowed(text), &ctx).unwrap()))
+    // LowerCase
+    {
+        println!("  📦 LowerCase");
+
+        group.bench_function("stage_construction/LowerCase", |b| {
+            b.iter(|| black_box(LowerCase))
         });
 
-        // Fusion
-        if stage.supports_static_fusion() {
-            group.bench_function(BenchmarkId::new("fusion", label), |b| {
-                b.iter(|| {
-                    let iter = stage.static_fused_adapter(text.chars(), &ctx);
-                    black_box(iter.collect::<String>())
-                })
-            });
-        }
+        group.bench_function("context_construction/LowerCase", |b| {
+            b.iter(|| black_box(Context::new(RUS)))
+        });
 
-        // Calculate overhead
-        println!("  {} overhead will be measured", label);
+        group.bench_function("pipeline_construction/LowerCase", |b| {
+            b.iter(|| black_box(Normy::builder().lang(RUS).add_stage(LowerCase).build()))
+        });
+    }
+
+    // Transliterate
+    {
+        println!("  📦 Transliterate");
+
+        group.bench_function("stage_construction/Transliterate", |b| {
+            b.iter(|| black_box(Transliterate))
+        });
+
+        group.bench_function("context_construction/Transliterate", |b| {
+            b.iter(|| black_box(Context::new(RUS)))
+        });
+
+        group.bench_function("pipeline_construction/Transliterate", |b| {
+            b.iter(|| black_box(Normy::builder().lang(RUS).add_stage(Transliterate).build()))
+        });
+    }
+
+    // RemoveDiacritics
+    {
+        println!("  📦 RemoveDiacritics");
+
+        group.bench_function("stage_construction/RemoveDiacritics", |b| {
+            b.iter(|| black_box(RemoveDiacritics))
+        });
+
+        group.bench_function("context_construction/RemoveDiacritics", |b| {
+            b.iter(|| black_box(Context::new(VIE)))
+        });
+
+        group.bench_function("pipeline_construction/RemoveDiacritics", |b| {
+            b.iter(|| {
+                black_box(
+                    Normy::builder()
+                        .lang(VIE)
+                        .add_stage(RemoveDiacritics)
+                        .build(),
+                )
+            })
+        });
     }
 
     group.finish();
 }
+
+// ============================================================================
+// Fusion Overhead Analysis
+// ============================================================================
+
+fn bench_fusion_overhead(c: &mut Criterion) {
+    let mut group = c.benchmark_group("fusion_overhead_analysis");
+
+    println!("\n┌────────────────────────────────────────────────────────────┐");
+    println!("│ 📊 Fusion Overhead Analysis");
+    println!("└────────────────────────────────────────────────────────────┘\n");
+
+    // Fast op (no-op) - English
+    {
+        let label = "Fast op (no-op)";
+        let base_text = "Hello ";
+        let lang = ENG;
+        let stage = RemoveDiacritics;
+
+        println!("  📊 Testing: {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+
+            println!("    📏 {} ({} bytes)", config.name, text.len());
+
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+
+            if stage.supports_static_fusion() {
+                group.bench_function(BenchmarkId::new("fusion", &bench_id), |b| {
+                    b.iter(|| {
+                        let iter = stage.static_fused_adapter(text.chars(), &ctx);
+                        black_box(iter.collect::<String>())
+                    })
+                });
+            }
+        }
+        println!();
+    }
+
+    // Fast op (work) - French
+    {
+        let label = "Fast op (work)";
+        let base_text = "café ";
+        let lang = FRA;
+        let stage = RemoveDiacritics;
+
+        println!("  📊 Testing: {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+
+            println!("    📏 {} ({} bytes)", config.name, text.len());
+
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+
+            if stage.supports_static_fusion() {
+                group.bench_function(BenchmarkId::new("fusion", &bench_id), |b| {
+                    b.iter(|| {
+                        let iter = stage.static_fused_adapter(text.chars(), &ctx);
+                        black_box(iter.collect::<String>())
+                    })
+                });
+            }
+        }
+        println!();
+    }
+
+    // Medium op - Russian
+    {
+        let label = "Medium op";
+        let base_text = "Привет ";
+        let lang = RUS;
+        let stage = RemoveDiacritics;
+
+        println!("  📊 Testing: {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+
+            println!("    📏 {} ({} bytes)", config.name, text.len());
+
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+
+            if stage.supports_static_fusion() {
+                group.bench_function(BenchmarkId::new("fusion", &bench_id), |b| {
+                    b.iter(|| {
+                        let iter = stage.static_fused_adapter(text.chars(), &ctx);
+                        black_box(iter.collect::<String>())
+                    })
+                });
+            }
+        }
+        println!();
+    }
+
+    // Slow op - Vietnamese
+    {
+        let label = "Slow op";
+        let base_text = "Việt Nam Phở̉ ";
+        let lang = VIE;
+        let stage = RemoveDiacritics;
+
+        println!("  📊 Testing: {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+
+            println!("    📏 {} ({} bytes)", config.name, text.len());
+
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+
+            if stage.supports_static_fusion() {
+                group.bench_function(BenchmarkId::new("fusion", &bench_id), |b| {
+                    b.iter(|| {
+                        let iter = stage.static_fused_adapter(text.chars(), &ctx);
+                        black_box(iter.collect::<String>())
+                    })
+                });
+            }
+        }
+        println!();
+    }
+
+    group.finish();
+}
+
+// ============================================================================
+// NEW: needs_apply vs apply comparison (the actual overhead we care about)
+// ============================================================================
+
+fn bench_needs_apply_overhead(c: &mut Criterion) {
+    let mut group = c.benchmark_group("needs_apply_overhead");
+
+    println!("\n┌────────────────────────────────────────────────────────────┐");
+    println!("│ 🔍 needs_apply vs apply Overhead");
+    println!("└────────────────────────────────────────────────────────────┘\n");
+
+    // Russian Transliterate
+    {
+        let label = "Russian Transliterate";
+        let base_text = "Privet mir ";
+        let lang = RUS;
+        let stage = Transliterate;
+
+        println!("  🔬 {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("needs_apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.needs_apply(&text, &ctx).unwrap()))
+            });
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+        }
+    }
+
+    // Turkish LowerCase
+    {
+        let label = "Turkish LowerCase";
+        let base_text = "istanbul igne ";
+        let lang = TUR;
+        let stage = LowerCase;
+
+        println!("  🔬 {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("needs_apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.needs_apply(&text, &ctx).unwrap()))
+            });
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+        }
+    }
+
+    // Vietnamese RemoveDiacritics
+    {
+        let label = "Vietnamese RemoveDiacritics";
+        let base_text = "Viet Nam Pho ";
+        let lang = VIE;
+        let stage = RemoveDiacritics;
+
+        println!("  🔬 {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("needs_apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.needs_apply(&text, &ctx).unwrap()))
+            });
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+        }
+    }
+
+    // English baseline
+    {
+        let label = "English baseline";
+        let base_text = "hello world ";
+        let lang = ENG;
+        let stage = LowerCase;
+
+        println!("  🔬 {}", label);
+
+        for config in LENGTH_CONFIGS {
+            let text = generate_text(base_text, config.target_bytes);
+            let ctx = Context::new(lang);
+            let bench_id = format!("{}/{}", label, config.name);
+
+            group.bench_function(BenchmarkId::new("needs_apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.needs_apply(&text, &ctx).unwrap()))
+            });
+
+            group.bench_function(BenchmarkId::new("apply", &bench_id), |b| {
+                b.iter(|| black_box(stage.apply(Cow::Borrowed(&text), &ctx).unwrap()))
+            });
+        }
+    }
+
+    group.finish();
+}
+
+// ============================================================================
+// Criterion Configuration
+// ============================================================================
 
 criterion_group!(
     name = focused_benches;
     config = Criterion::default()
         .measurement_time(Duration::from_secs(3))
         .warm_up_time(Duration::from_secs(1))
-        .sample_size(500)
+        .sample_size(200)
         .noise_threshold(0.015)
         .significance_level(0.05);
     targets =
@@ -268,6 +632,8 @@ criterion_group!(
         bench_transliterate_focused,
         bench_removediacritics_focused,
         bench_segmentwords_focused,
+        bench_construction_overhead,
+        bench_needs_apply_overhead,
         bench_fusion_overhead
 );
 
