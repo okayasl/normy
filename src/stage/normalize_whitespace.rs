@@ -568,48 +568,61 @@ pub struct WhitespacePreserveAdapter<I> {
 
 impl<I: Iterator<Item = char>> Iterator for WhitespacePreserveAdapter<I> {
     type Item = char;
+
     fn next(&mut self) -> Option<Self::Item> {
-        // Emit pending whitespace using cursor (no shifting)
-        if self.pending_idx < self.pending_ws.len() {
-            let c = self.pending_ws[self.pending_idx];
-            self.pending_idx += 1;
-            if self.pending_idx >= self.pending_ws.len() {
-                self.pending_ws.clear();
-                self.pending_idx = 0;
-            }
-            return Some(c);
-        }
-
-        if let Some(c) = self.next_char.take() {
-            self.started = true;
-            return Some(c);
-        }
-
-        let c = self.input.next()?;
-        if self.config.is_whitespace_for_config(c) {
-            let mut ws_run = SmallVec::<[char; 4]>::new();
-            ws_run.push(c);
-            loop {
-                match self.input.next() {
-                    Some(nc) if self.config.is_whitespace_for_config(nc) => ws_run.push(nc),
-                    Some(nc) => {
-                        self.next_char = Some(nc);
-                        break;
-                    }
-                    None => break,
+        loop {
+            // ✅ Main loop instead of recursion
+            // Emit pending whitespace
+            if self.pending_idx < self.pending_ws.len() {
+                let c = self.pending_ws[self.pending_idx];
+                self.pending_idx += 1;
+                if self.pending_idx >= self.pending_ws.len() {
+                    self.pending_ws.clear();
+                    self.pending_idx = 0;
                 }
+                return Some(c);
             }
-            if self.config.trim && (!self.started || self.next_char.is_none()) {
+
+            if let Some(c) = self.next_char.take() {
                 self.started = true;
-                return self.next();
+                return Some(c);
             }
-            self.pending_ws = ws_run;
-            self.pending_idx = 0; // Reset cursor
+
+            let c = self.input.next()?;
+
+            if self.config.is_whitespace_for_config(c) {
+                // Gather whitespace run
+                let mut ws_run = SmallVec::<[char; 4]>::new();
+                ws_run.push(c);
+
+                loop {
+                    match self.input.next() {
+                        Some(nc) if self.config.is_whitespace_for_config(nc) => {
+                            ws_run.push(nc);
+                        }
+                        Some(nc) => {
+                            self.next_char = Some(nc);
+                            break;
+                        }
+                        None => break,
+                    }
+                }
+
+                // Trim logic
+                if self.config.trim && (!self.started || self.next_char.is_none()) {
+                    self.started = true;
+                    continue; // ✅ Continue instead of recursion!
+                }
+
+                self.pending_ws = ws_run;
+                self.pending_idx = 0;
+                self.started = true;
+                continue; // ✅ Continue instead of recursion!
+            }
+
             self.started = true;
-            return self.next();
+            return Some(c);
         }
-        self.started = true;
-        Some(c)
     }
 }
 

@@ -62,11 +62,6 @@ impl<P: FusablePipeline> Normy<P> {
     ///
     /// This forces full materialization at each stage and disables
     /// iterator fusion, even when the pipeline supports it.
-    ///
-    /// Useful for:
-    /// - Benchmark comparisons
-    /// - Debugging stage behavior
-    /// - Semantic validation
     #[inline(always)]
     pub fn normalize_no_fusion<'a>(&'a self, text: &'a str) -> Result<Cow<'a, str>, NormyError> {
         #[cfg(debug_assertions)]

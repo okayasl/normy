@@ -15,8 +15,6 @@ macro_rules! define_languages {
         precomposed_to_base: [ $($sfrom:expr => $sto:expr),* $(,)? ],
         spacing_diacritics: [ $($d:expr),* $(,)? ],
         needs_word_segmentation: $needs_word_segmentation:expr,
-        requires_peek_ahead: $requires_peek_ahead:expr,
-        peek_pairs: [ $( ($pa:expr, $pb:expr => $pto:expr) ),* $(,)? ],
         segment_rules: [ $($sr:expr),* $(,)? ],
         unigram_cjk: $unigram:expr
     ),* $(,)?) => {
@@ -30,8 +28,6 @@ macro_rules! define_languages {
                 "- **Spacing diacritics:** [", stringify!($($d),*), "]\n",
                 "- **Needs word segmentation:** ", stringify!($needs_word_segmentation), "\n",
                 "- **Segment rules:** [", stringify!($($sr),*), "]\n",
-                "- **Requires peek-ahead:** ", stringify!($requires_peek_ahead), "\n",
-                "- **Peek pairs:** [", stringify!($(($pa, $pb => $pto)),*), "]\n",
                 "- **CJK unigram tokens:** ", stringify!($unigram), "\n",
             )]
             pub const $code: Lang = Lang { code: $code_str, name: $name };
@@ -63,14 +59,9 @@ macro_rules! define_languages {
                     pub static SPACING_DIACRITICS: &[char] = &[$($d),*];
 
                     pub const NEEDS_WORD_SEGMENTATION: bool = $needs_word_segmentation;
-                    pub const REQUIRES_PEEK_AHEAD: bool = $requires_peek_ahead;
 
                     pub static TRANSLITERATE_CHAR_SLICE: &[char] = &[$($tfrom),*];
                     pub static PRECOMPOSED_TO_BASE_CHAR_SLICE: &[char] = &[$($sfrom),*];
-
-                    pub static PEEK_PAIRS: &[(char, char, &'static str)] = &[
-                        $( ($pa, $pb, $pto) ),*
-                    ];
 
                     pub static SEGMENT_RULES: &[SegmentRule] = &[$($sr),*];
                     pub const UNIGRAM_CJK: bool = $unigram;
@@ -98,11 +89,6 @@ macro_rules! define_languages {
 
                     pub const HAS_DIACRITICS: bool = {
                         let arr: &[char] = &[$($d),*];
-                        !arr.is_empty()
-                    };
-
-                    pub const HAS_PEEK_PAIRS: bool = {
-                        let arr: &[(char, char, &'static str)] = &[$( ($pa, $pb, $pto) ),*];
                         !arr.is_empty()
                     };
 
@@ -200,12 +186,10 @@ macro_rules! define_languages {
                         has_transliterate_map: [<$code:lower _data>]::HAS_TRANSLITERATE_MAP,
                         has_pre_composed_to_base_map: [<$code:lower _data>]::HAS_PRECOMPOSED_TO_BASE_MAP,
                         has_spacing_diacritics: [<$code:lower _data>]::HAS_DIACRITICS,
-                        has_peek_pairs: [<$code:lower _data>]::HAS_PEEK_PAIRS,
                         has_segment_rules: [<$code:lower _data>]::HAS_SEGMENT_RULES,
                         has_one_to_one_folds: [<$code:lower _data>]::HAS_ONE_TO_ONE_FOLDS,
                         has_one_to_one_transliterate: [<$code:lower _data>]::HAS_ONE_TO_ONE_TRANSLITERATE,
                         needs_segmentation: [<$code:lower _data>]::NEEDS_WORD_SEGMENTATION,
-                        requires_peek_ahead: [<$code:lower _data>]::REQUIRES_PEEK_AHEAD,
                         unigram_cjk: [<$code:lower _data>]::UNIGRAM_CJK,
 
                         // === Data Arrays ===
@@ -217,7 +201,6 @@ macro_rules! define_languages {
                         spacing_diacritics: [<$code:lower _data>]::SPACING_DIACRITICS,
                         transliterate_char_slice: [<$code:lower _data>]::TRANSLITERATE_CHAR_SLICE,
                         pre_composed_to_base_char_slice: [<$code:lower _data>]::PRECOMPOSED_TO_BASE_CHAR_SLICE,
-                        peek_pairs: [<$code:lower _data>]::PEEK_PAIRS,
                         segment_rules: [<$code:lower _data>]::SEGMENT_RULES,
                     }
                 ),*
@@ -253,8 +236,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -265,8 +246,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -277,8 +256,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -289,8 +266,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -301,8 +276,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -313,8 +286,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -325,8 +296,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -354,8 +323,6 @@ define_languages! {
             '\u{0670}'  // Superscript Alef
         ],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -388,8 +355,6 @@ define_languages! {
             '\u{05C7}'  // Kamatz Katan
         ],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -444,8 +409,6 @@ define_languages! {
         ],
         spacing_diacritics: ['\u{0300}', '\u{0301}', '\u{0303}', '\u{0309}', '\u{0323}'],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -474,8 +437,6 @@ define_languages! {
         ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -501,8 +462,6 @@ define_languages! {
         ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -525,8 +484,6 @@ define_languages! {
         ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -548,8 +505,6 @@ define_languages! {
         ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -568,8 +523,6 @@ define_languages! {
         ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -580,8 +533,6 @@ define_languages! {
         precomposed_to_base: [ 'Á' => 'A', 'á' => 'a', 'É' => 'E', 'é' => 'e', 'Í' => 'I', 'í' => 'i', 'Ó' => 'O', 'ó' => 'o', 'Ú' => 'U', 'ú' => 'u', 'Ü' => 'U', 'ü' => 'u'],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -592,8 +543,6 @@ define_languages! {
         precomposed_to_base: [ 'À' => 'A', 'à' => 'a', 'Á' => 'A', 'á' => 'a', 'Â' => 'A', 'â' => 'a', 'Ã' => 'A', 'ã' => 'a', 'Ç' => 'C', 'ç' => 'c', 'É' => 'E', 'é' => 'e', 'Ê' => 'E', 'ê' => 'e', 'Í' => 'I', 'í' => 'i', 'Ó' => 'O', 'ó' => 'o', 'Ô' => 'O', 'ô' => 'o', 'Õ' => 'O', 'õ' => 'o', 'Ú' => 'U', 'ú' => 'u', 'Ü' => 'U', 'ü' => 'u' ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -604,8 +553,6 @@ define_languages! {
         precomposed_to_base: [ 'À' => 'A', 'à' => 'a', 'È' => 'E', 'è' => 'e', 'É' => 'E', 'é' => 'e', 'Ì' => 'I', 'ì' => 'i', 'Ò' => 'O', 'ò' => 'o', 'Ù' => 'U', 'ù' => 'u' ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -616,8 +563,6 @@ define_languages! {
         precomposed_to_base: [ 'Č' => 'C', 'č' => 'c', 'Ć' => 'C', 'ć' => 'c', 'Đ' => 'D', 'đ' => 'd', 'Š' => 'S', 'š' => 's', 'Ž' => 'Z', 'ž' => 'z', 'ǈ' => 'L', 'ǉ' => 'l', 'ǋ' => 'N', 'ǌ' => 'n' ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -628,8 +573,6 @@ define_languages! {
         precomposed_to_base: [ 'Ђ' => 'D', 'ђ' => 'd', 'Ј' => 'J', 'ј' => 'j', 'Љ' => 'L', 'љ' => 'l', 'Њ' => 'N', 'њ' => 'n', 'Ћ' => 'C', 'ћ' => 'c', 'Џ' => 'D', 'џ' => 'd', 'Ž' => 'Z', 'ž' => 'z' ],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -640,13 +583,10 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
     // No case_map needed: Unicode lowercase correctly handles final sigma (Σ → ς word-finally)
-    // No peek-ahead required: pure 1:1 mapping via char::to_lowercase()
     ELL, "ELL", "Greek",
         case: [],
         fold: [],
@@ -654,8 +594,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{0301}', '\u{0308}', '\u{0342}', '\u{0313}', '\u{0314}', '\u{0345}' ],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -666,8 +604,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{093C}', '\u{0901}', '\u{0902}', '\u{0903}', '\u{094D}' ],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -681,8 +617,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{09BC}', '\u{0981}', '\u{0982}', '\u{0983}', '\u{09CD}' ],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -696,8 +630,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{0BCD}' ],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -747,8 +679,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false,
 
@@ -759,8 +689,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -774,8 +702,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::CJKIdeographUnigram,
@@ -790,8 +716,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -815,8 +739,6 @@ define_languages! {
             '\u{0E3A}', '\u{0E4D}', '\u{0E4E}' // Rare marks
         ],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -830,8 +752,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{0EB1}', '\u{0EB4}', '\u{0EB5}', '\u{0EB6}', '\u{0EB7}', '\u{0EB8}', '\u{0EB9}', '\u{0EBB}', '\u{0EBC}', '\u{0EC8}', '\u{0EC9}', '\u{0ECA}', '\u{0ECB}', '\u{0ECC}', '\u{0ECD}' ],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -845,8 +765,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [ '\u{102B}', '\u{102C}', '\u{102D}', '\u{102E}', '\u{102F}', '\u{1030}', '\u{1031}', '\u{1032}', '\u{1036}', '\u{1037}', '\u{1038}', '\u{1039}', '\u{103A}', '\u{103B}', '\u{103C}', '\u{103D}', '\u{103E}' ],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -876,8 +794,6 @@ define_languages! {
             '\u{17DD}' // Rare
         ],
         needs_word_segmentation: true,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [
             SegmentRule::WesternToScript,
             SegmentRule::ScriptToWestern,
@@ -891,8 +807,6 @@ define_languages! {
         precomposed_to_base: [],
         spacing_diacritics: [],
         needs_word_segmentation: false,
-        requires_peek_ahead: false,
-        peek_pairs: [],
         segment_rules: [],
         unigram_cjk: false
 }

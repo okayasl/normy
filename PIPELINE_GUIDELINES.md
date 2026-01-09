@@ -157,7 +157,7 @@ This order guarantees predictable, conservative results while maximizing zero-co
 
 ## Performance: Fusion Optimization
 
-Normy automatically optimizes multi-stage pipelines through **iterator fusion**. When properly designed, this provides **6-42% performance improvement** with zero code changes.
+Normy can automatically optimize multi-stage pipelines through **iterator fusion**, which eliminates intermediate allocations by processing text in a single pass.
 
 ### How Fusion Works
 
@@ -201,51 +201,36 @@ let text = remove_diacritics(text);// Pass 3
 // Multiple passes + intermediate allocations
 ```
 
-### Fusion Performance Data
+### Controlling Fusion
 
-Real-world benchmarks on diverse languages show consistent improvements:
+Normy provides two execution methods:
 
-| Language | Pipeline | Stages | Fusion | Sequential | **Improvement** |
-| ---------- | ---------- | -------- | -------- | ------------ | ----------------- |
-| 🇯🇵 Japanese | Width + Punct + WS | 3 | 87ns | 150ns | **+42%** ✅ |
-| 🇫🇷 French | Case + Trans + Punct + Strip | 4 | 407ns | 665ns | **+39%** ✅ |
-| 🇷🇺 Russian | Case + Transliterate | 2 | 400ns | 583ns | **+31%** ✅ |
-| 🇩🇪 German | Case + Trans + Trim | 3 | 215ns | 272ns | **+21%** ✅ |
-| 🇵🇱 Polish | Case + Trans + Strip | 3 | 212ns | 247ns | **+14%** ✅ |
-| 🇻🇳 Vietnamese | Case + Strip Diacritics | 2 | 884ns | 996ns | **+11%** ✅ |
-| 🇸🇦 Arabic | Strip + Control | 2 | 137ns | 145ns | **+6%** ✅ |
+```rust
+// Automatic optimization (default) - uses fusion when supported
+let result = pipeline.normalize(text)?;
 
-Average improvement: ~23%
+// Force sequential processing
+let result = pipeline.normalize_no_fusion(text)?;
+```
 
-**Key insight**: More stages = bigger benefit. The 4-stage French pipeline is 39% faster through fusion!
+**When to use `.normalize_no_fusion()`**:
 
-### Non-Fusable Stages
+- You've benchmarked and found it faster for your specific workload
+- You need consistent behavior across library updates
+- Debugging performance regressions
 
-The following stages **do not support fusion** (`supports_static_fusion() = false`):
-
-**Format Stripping (complex parsing required):**
-
-- `StripHtml`
-- `StripMarkdown`
-
-**Unicode Normalization (batch processing is faster):**
-
-- `NFC`, `NFD`, `NFKC`, `NFKD`
-
-**Why these don't fuse:**
-
-- Format strippers need complex state machines (not expressible as char→char)
-- Unicode normalization: ICU4X's batch `normalize()` is 2-6x faster than streaming `normalize_iter()`
-
-**Important**: These stages use **highly optimized batch processing**. Not fusing is the *correct* choice for performance.
-
-### When Fusion Activates
+### Fusion Requirements
 
 Fusion automatically activates when **all** conditions are met:
 
 1. ✅ All stages return `supports_static_fusion() = true`
-2. ✅ Pipeline has 2 or more stages
+2. ✅ Pipeline has 2+ stages
 3. ✅ Built with static `NormyBuilder` (not `dynamic_builder()`)
+
+**Non-fusable stages** (use optimized batch processing instead):
+
+- `StripHtml`, `StripMarkdown` - complex state machines
+- `NFC`, `NFD`, `NFKC`, `NFKD` - batch processing is 2-6x faster
 
 **Examples:**
 
@@ -255,7 +240,6 @@ Normy::builder()
     .add_stage(CaseFold)
     .add_stage(RemoveDiacritics)
     .build()
-// Result: ~11% faster
 
 // ❌ FUSION DISABLED (NFC is non-fusable)
 Normy::builder()
@@ -284,7 +268,7 @@ Normy::builder()
     .add_stage(CaseFold)        // 1. Lowercase
     .add_stage(Transliterate)   // 2. Cyrillic->Latin
     .build()
-// Result: 31% faster through fusion ✅
+// Result: Faster with fusion ✅
 ```
 
 ❌ DON'T: Add redundant stages
@@ -309,14 +293,14 @@ Normy::builder()
     .add_stage(NormalizePunctuation)
     .add_stage(RemoveDiacritics)
     .build()
-// Result: 39% faster through fusion ✅
+// Result: Faster with fusion✅
 ```
 
 ✅ DO: Use language-specific text
 
 ```rust
 // Good: Stages actually transform the text
-let text = "МОСКВА";  // Russian Cyrillic
+let text = "РУССКАЯ ПИСЬМЕННОСТЬ";  // Russian Cyrillic
 pipeline.normalize(text)
 // Result: Every stage does work, fusion provides value
 ```
@@ -355,7 +339,7 @@ The `needs_apply()` check in each stage enables early-exit, making normalized in
 
 ```rust
 // Typical search/comparison pipeline
-// Performance: ~20-30% faster with fusion
+// Performance: faster with fusion
 let pipeline = Normy::builder()
     .lang(user_lang)
     .add_stage(CaseFold)          // Normalize case (includes lowercase)
@@ -382,7 +366,6 @@ let pipeline = Normy::builder()
 
 ```rust
 // Japanese/Chinese/Korean pipeline
-// Performance: ~40% faster with fusion
 let pipeline = Normy::builder()
     .lang(JPN)
     .add_stage(UnifyWidth)              // Fullwidth -> halfwidth
@@ -404,7 +387,6 @@ let pipeline = Normy::builder()
     .add_stage(StripControlChars)
     .build();
 // NFC uses fast batch processing
-// Remaining 4 stages fuse for ~30-40% speedup
 ```
 
 ## Summary
@@ -417,19 +399,29 @@ let pipeline = Normy::builder()
 ✅ **Place Unicode normalization early** (if needed for correctness)  
 ✅ **Test with representative text** (language-specific examples)
 
-### Performance Expectations
+### Performance Characteristics
 
-- **2-stage pipelines**: 6-31% faster with fusion
-- **3-stage pipelines**: 14-42% faster with fusion
-- **4+ stage pipelines**: 30-40% faster with fusion
-- **With Unicode normalization**: Uses optimal batch processing
-- **Already normalized text**: Zero-copy regardless of pipeline size
+**When fusion helps (typical: 5-25% faster):**
 
-### Trust the Optimizer
+- ✅ Multiple simple stages (2-4 stages)
+- ✅ Balanced stage costs (no single stage dominates)
+- ✅ Medium to large input sizes (500+ bytes)
 
-- **Don't avoid non-fusable stages** — they use optimal batch algorithms
-- **Don't split pipelines** to "force fusion" — unified pipelines are better
-- **Don't worry about fusion details** — it's automatic when beneficial
-- **Do focus on correctness** — performance optimization is automatic
+**When fusion may not help:**
+
+- ⚠️ Single dominant expensive stage (>80% of runtime)
+- ⚠️ Very small inputs (<100 bytes)
+- ⚠️ Stages with heavy per-character overhead
+
+**Note**: Performance varies significantly by language, text characteristics,
+and pipeline composition. Always benchmark with your actual workload.
+
+### Trust the Optimizer (But Verify)
+
+- ✅ **Do** focus on correctness and proper stage ordering
+- ✅ **Do** let Normy handle fusion automatically by default
+- ✅ **Do** benchmark your specific workload if performance is critical
+- ⚠️ **Don't** assume fusion is always faster
+- ⚠️ **Don't** avoid non-fusable stages (they use optimal algorithms)
 
 Normy's fusion is designed to "just work" when you build sensible pipelines. Focus on correctness and stage ordering; let Normy handle the optimization.

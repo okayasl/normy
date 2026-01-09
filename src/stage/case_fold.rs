@@ -39,46 +39,35 @@ impl Stage for CaseFold {
             return Ok(true);
         }
 
-        // If language requires peek-ahead, check for context-sensitive rules
-        if ctx.lang_entry.requires_peek_ahead() {
-            let mut chars = text.chars().peekable();
-            while let Some(c) = chars.next() {
-                if ctx
-                    .lang_entry
-                    .get_peek_fold(c, chars.peek().copied())
-                    .is_some()
-                {
-                    return Ok(true);
-                }
-            }
-        }
-
         Ok(false)
     }
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
-        // 1. Handle peek-ahead languages (Dutch, Greek)
-        if ctx.lang_entry.requires_peek_ahead() {
-            return apply_with_peek_ahead(text, ctx);
-        }
+        let capacity = if ctx.lang_entry.has_fold_map() {
+            text.len().saturating_mul(13).saturating_div(10)
+        } else {
+            text.len() // Exact for English
+        };
 
-        // 2. Fast path: Manual loop (The "Manual Slow-Path" Optimization)
-        let mut out = String::with_capacity(
-            text.len().saturating_mul(13).saturating_div(10), // 1.3x, integer math only
-        );
+        let mut out = String::with_capacity(capacity);
 
-        for c in text.chars() {
-            // Priority 1: Multi-char expansions (ß -> ss)
-            if let Some(to) = ctx.lang_entry.find_fold_map(c) {
-                out.push_str(to);
-            } else if let Some(to) = ctx.lang_entry.find_case_map(c) {
-                out.push(to);
-            } else {
-                for ch in c.to_lowercase() {
-                    out.push(ch);
+        if ctx.lang_entry.has_fold_map() || ctx.lang_entry.has_case_map() {
+            // Path for languages with special mappings
+            for c in text.chars() {
+                if let Some(to) = ctx.lang_entry.find_fold_map(c) {
+                    out.push_str(to);
+                } else if let Some(to) = ctx.lang_entry.find_case_map(c) {
+                    out.push(to);
+                } else {
+                    out.push(c.to_lowercase().next().unwrap_or(c));
                 }
             }
+        } else {
+            for c in text.chars() {
+                out.push(c.to_lowercase().next().unwrap_or(c));
+            }
         }
+
         Ok(Cow::Owned(out))
     }
 }
@@ -181,44 +170,6 @@ where
 }
 
 impl<'a, I: FusedIterator<Item = char>> FusedIterator for CaseFoldAdapter<'a, I> {}
-
-fn apply_with_peek_ahead<'a>(
-    text: Cow<'a, str>,
-    ctx: &Context,
-) -> Result<Cow<'a, str>, StageError> {
-    let mut out = String::with_capacity(text.len().saturating_mul(13).saturating_div(10));
-    let mut chars = text.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        // 1. Check for peek-ahead rules first (e.g., Dutch IJ → ij)
-        if let Some(target) = ctx.lang_entry.get_peek_fold(c, chars.peek().copied()) {
-            // Consume the peeked character.
-            // Note: The original code had an expensive byte-level comparison
-            // to check if it 'changed'. We can now skip that.
-            chars.next().unwrap();
-            out.push_str(target);
-            continue;
-        }
-
-        // 2. Check fold_map for multi-char expansions
-        if let Some(to) = ctx.lang_entry.find_fold_map(c) {
-            out.push_str(to);
-            continue;
-        }
-
-        // Check case_map (language-specific 1:1 mappings, e.g., Turkish İ→i)
-        if let Some(to) = ctx.lang_entry.find_case_map(c) {
-            out.push(to);
-            continue;
-        }
-
-        // 4. Fallback to Unicode lowercase
-        out.extend(c.to_lowercase());
-    }
-
-    // Since needs_apply returned true, we MUST return an Owned Cow.
-    Ok(Cow::Owned(out))
-}
 
 impl StageTestConfig for CaseFold {
     fn one_to_one_languages() -> &'static [Lang] {

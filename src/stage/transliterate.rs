@@ -44,9 +44,16 @@ impl Stage for Transliterate {
 
     fn apply<'a>(&self, text: Cow<'a, str>, ctx: &Context) -> Result<Cow<'a, str>, StageError> {
         let entry = ctx.lang_entry;
-        // Pre-calculate capacity: expansions are rare, but 1.1x is a safe starting point
-        let mut out = String::with_capacity(text.len() + (text.len() >> 3));
+        // Pre-calculate capacity
+        let capacity = if entry.has_one_to_one_transliterate() {
+            // Guaranteed to be close to or exactly text.len()
+            text.len()
+        } else {
+            // Growth required (e.g., German Ä -> ae)
+            text.len() + (text.len() >> 3)
+        };
 
+        let mut out = String::with_capacity(capacity);
         for c in text.chars() {
             if let Some(replacement) = entry.find_transliterate_map(c) {
                 out.push_str(replacement);

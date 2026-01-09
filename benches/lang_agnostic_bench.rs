@@ -252,11 +252,11 @@ fn bench_ws_full(c: &mut Criterion) {
     );
 }
 
-fn bench_collapse(c: &mut Criterion) {
+fn bench_ws_collapse(c: &mut Criterion) {
     bench_stage_length_scaling(c, "WS_Collapse", || COLLAPSE_WHITESPACE, TEXT_PADDING);
 }
 
-fn bench_collapse_uni(c: &mut Criterion) {
+fn bench_ws_collapse_uni(c: &mut Criterion) {
     bench_stage_length_scaling(
         c,
         "WS_Collapse_Uni",
@@ -265,11 +265,11 @@ fn bench_collapse_uni(c: &mut Criterion) {
     );
 }
 
-fn bench_trim(c: &mut Criterion) {
+fn bench_ws_trim(c: &mut Criterion) {
     bench_stage_length_scaling(c, "WS_Trim", || TRIM_WHITESPACE, TEXT_PADDING);
 }
 
-fn bench_trim_uni(c: &mut Criterion) {
+fn bench_ws_trim_uni(c: &mut Criterion) {
     bench_stage_length_scaling(c, "WS_Trim_Uni", || TRIM_WHITESPACE_UNICODE, TEXT_PADDING);
 }
 
@@ -286,8 +286,8 @@ criterion_group!(
     targets =
         bench_unify_width, bench_nfc, bench_nfd, bench_nfkc, bench_nfkd,
         bench_punct, bench_strip_ctrl, bench_strip_html,
-        bench_ws_full, bench_collapse, bench_collapse_uni,
-        bench_trim, bench_trim_uni
+        bench_ws_full, bench_ws_collapse, bench_ws_collapse_uni,
+        bench_ws_trim, bench_ws_trim_uni
 );
 
 criterion_main!(agnostic_benches);

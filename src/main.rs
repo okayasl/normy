@@ -44,7 +44,6 @@ mod tests {
         let mut transliterate = BTreeMap::<&str, usize>::new();
         let mut precomposed = BTreeMap::<&str, usize>::new();
         let mut spacing_diacritics = BTreeMap::<&str, usize>::new();
-        let mut peek_pairs = BTreeMap::<&str, usize>::new();
         let mut has_segment_rules = BTreeSet::<&str>::new();
         let mut needs_segmentation = BTreeSet::<&str>::new();
         let mut unigram_cjk = BTreeSet::<&str>::new();
@@ -67,9 +66,6 @@ mod tests {
             if e.has_spacing_diacritics() {
                 let cnt = e.spacing_diacritics().len();
                 *spacing_diacritics.entry(lang.code()).or_default() += cnt;
-            }
-            if e.has_peek_pairs() {
-                *peek_pairs.entry(lang.code()).or_default() += e.peek_pairs().len();
             }
             if e.has_segment_rules() {
                 has_segment_rules.insert(lang.code());
@@ -132,7 +128,6 @@ mod tests {
         print_set!(has_segment_rules, "segment_rules (any)");
         //print_set!(needs_segmentation, "needs_segmentation");
         print_set!(unigram_cjk, "unigram_cjk");
-        print_stat!(peek_pairs, "peek_pairs");
 
         let langs = all_langs();
         println!("all langs supported ({:?}): {:?}", langs.len(), langs);

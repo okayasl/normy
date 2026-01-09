@@ -36,7 +36,6 @@ pub struct LangEntry {
     has_transliterate_map: bool,
     has_pre_composed_to_base_map: bool,
     has_spacing_diacritics: bool,
-    has_peek_pairs: bool,
     has_segment_rules: bool,
 
     // Derived properties
@@ -45,7 +44,6 @@ pub struct LangEntry {
 
     // Already boolean from definition
     needs_segmentation: bool,
-    requires_peek_ahead: bool,
     unigram_cjk: bool,
 
     // === Data Arrays (Second Cache Line+) ===
@@ -57,7 +55,6 @@ pub struct LangEntry {
     spacing_diacritics: &'static [char],
     transliterate_map: &'static [(char, &'static str)],
     transliterate_char_slice: &'static [char],
-    peek_pairs: &'static [(char, char, &'static str)],
     segment_rules: &'static [SegmentRule],
 }
 
@@ -92,11 +89,6 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn has_peek_pairs(&self) -> bool {
-        self.has_peek_pairs
-    }
-
-    #[inline(always)]
     pub fn has_segment_rules(&self) -> bool {
         self.has_segment_rules
     }
@@ -125,11 +117,6 @@ impl LangEntry {
     #[inline(always)]
     pub fn needs_unigram_cjk(&self) -> bool {
         self.unigram_cjk
-    }
-
-    #[inline(always)]
-    pub fn requires_peek_ahead(&self) -> bool {
-        self.requires_peek_ahead
     }
 
     // ============================================================
@@ -224,11 +211,6 @@ impl LangEntry {
     }
 
     #[inline(always)]
-    pub fn peek_pairs(&self) -> &'static [(char, char, &'static str)] {
-        self.peek_pairs
-    }
-
-    #[inline(always)]
     pub fn segment_rules(&self) -> &'static [SegmentRule] {
         self.segment_rules
     }
@@ -317,35 +299,6 @@ impl LangEntry {
             to
         } else {
             c.to_lowercase().next().unwrap_or(c)
-        }
-    }
-
-    // Check if a two-character sequence needs special handling.
-    // Returns the target string if this is a context-sensitive fold.
-    #[inline]
-    pub fn get_peek_fold(&self, current: char, next: Option<char>) -> Option<&'static str> {
-        // Early-out for languages that never need peek-ahead
-        if !self.requires_peek_ahead {
-            return None;
-        }
-
-        let next_char = next?;
-
-        // Explicit peek-pairs (language-defined)
-        for (a, b, to) in self.peek_pairs {
-            if *a == current && *b == next_char {
-                return Some(to);
-            }
-        }
-
-        // Fallback heuristic – only for *single-char* expansions
-        let cur = self.fold_map.iter().find(|(from, _)| *from == current)?.1;
-        let nxt = self.fold_map.iter().find(|(from, _)| *from == next_char)?.1;
-
-        if cur == nxt && cur.chars().count() > 1 {
-            Some(cur)
-        } else {
-            None
         }
     }
 
@@ -486,24 +439,6 @@ impl LangEntry {
         self.needs_segmentation = needs;
     }
 
-    // Sets the requires_peek_ahead flag
-    #[inline]
-    pub fn set_requires_peek_ahead(&mut self, requires: bool) {
-        self.requires_peek_ahead = requires;
-    }
-
-    // Sets the peek_pairs and updates related fields
-    #[inline]
-    pub fn set_peek_pairs(&mut self, pairs: &'static [(char, char, &'static str)]) {
-        self.peek_pairs = pairs;
-        self.has_peek_pairs = !pairs.is_empty();
-
-        // Auto-enable peek_ahead if we have peek pairs
-        if self.has_peek_pairs {
-            self.requires_peek_ahead = true;
-        }
-    }
-
     // Sets the segment_rules and updates related fields
     #[inline]
     pub fn set_segment_rules(&mut self, rules: &'static [SegmentRule]) {
@@ -550,7 +485,6 @@ mod tests {
 
         // Metadata checks
         assert!(tur.has_one_to_one_folds());
-        assert!(!tur.requires_peek_ahead());
         assert!(!tur.case_map().is_empty(), "Turkish has custom case_map");
     }
 
@@ -565,11 +499,10 @@ mod tests {
 
         // Metadata
         assert!(!deu.has_one_to_one_folds());
-        assert!(!deu.requires_peek_ahead());
     }
 
     #[test]
-    fn dutch_peek_ahead_ligatures() {
+    fn dutch_case_fold_ligatures() {
         let nld = lang("NLD");
 
         // Ĳ→ij is multi-char fold
@@ -598,7 +531,6 @@ mod tests {
         assert_eq!(eng.apply_lowercase('A'), 'a');
 
         assert!(eng.has_one_to_one_folds());
-        assert!(!eng.requires_peek_ahead());
         assert!(eng.case_map().is_empty(), "English uses Unicode defaults");
     }
 
@@ -644,21 +576,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn peek_ahead_requirements() {
-        // Only Dutch requires peek-ahead for IJ ligature
-        // assert!(lang("NLD").requires_peek_ahead());
-
-        // Others don't need it
-        for code in ["ENG", "TUR", "DEU", "FRA", "ARA"] {
-            assert!(
-                !lang(code).requires_peek_ahead(),
-                "{} shouldn't need peek-ahead",
-                code
-            );
-        }
-    }
-
     // ============================================================
     // CATEGORY 3: Metadata Consistency Tests
     // ============================================================
@@ -667,15 +584,6 @@ mod tests {
     fn all_languages_metadata_valid() {
         for lang_info in all_langs() {
             let entry = lang(lang_info.code());
-
-            // Peek-ahead requires peek_pairs
-            if entry.requires_peek_ahead() {
-                assert!(
-                    !entry.peek_pairs().is_empty(),
-                    "{}: requires_peek_ahead but no peek_pairs",
-                    lang_info.code()
-                );
-            }
 
             // has_one_to_one_folds correctness
             if entry.has_one_to_one_folds() {

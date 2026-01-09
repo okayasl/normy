@@ -208,7 +208,7 @@ macro_rules! define_normy_pipeline {
 }
 
 define_normy_pipeline!(
-    NORMY_BERT,
+    NORMY_BERT_PIPELINE,
     NormyBertLikePipeline,
     lang: ZHO,
     modify_lang: |entry| {
@@ -355,7 +355,36 @@ fn bench_normy_bert(
     group.bench_function(BenchmarkId::new(name, scenario), |b| {
         b.iter(|| {
             total += 1;
-            let result = NORMY_BERT.normalize(black_box(corpus)).unwrap();
+            let result = NORMY_BERT_PIPELINE.normalize(black_box(corpus)).unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        });
+    });
+
+    let pct = if total > 0 {
+        (zero_copy_hits as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    println!("   {name:35} - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn bench_normy_bert_no_fusion(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    name: &str,
+    scenario: &str,
+    corpus: &str,
+) {
+    let mut zero_copy_hits = 0usize;
+    let mut total = 0usize;
+
+    group.bench_function(BenchmarkId::new(name, scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_BERT_PIPELINE.normalize_no_fusion(black_box(corpus)).unwrap();
             if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
                 zero_copy_hits += 1;
             }
@@ -385,6 +414,35 @@ fn bench_normy_fra(
         b.iter(|| {
             total += 1;
             let result = NORMY_FRA_PIPELINE.normalize(black_box(corpus)).unwrap();
+            if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
+                zero_copy_hits += 1;
+            }
+            black_box(result);
+        });
+    });
+
+    let pct = if total > 0 {
+        (zero_copy_hits as f64 / total as f64) * 100.0
+    } else {
+        0.0
+    };
+    println!("   {name:35} - {scenario:25}: zero-copy {zero_copy_hits:4}/{total:4} ({pct:5.2}%)");
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn bench_normy_fra_no_fusion(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    name: &str,
+    scenario: &str,
+    corpus: &str,
+) {
+    let mut zero_copy_hits = 0usize;
+    let mut total = 0usize;
+
+    group.bench_function(BenchmarkId::new(name, scenario), |b| {
+        b.iter(|| {
+            total += 1;
+            let result = NORMY_FRA_PIPELINE.normalize_no_fusion(black_box(corpus)).unwrap();
             if matches!(result, Cow::Borrowed(s) if s.as_ptr() == corpus.as_ptr() && s.len() == corpus.len()) {
                 zero_copy_hits += 1;
             }
@@ -436,7 +494,12 @@ fn bench_bert_normalizers(c: &mut Criterion) {
         println!("\n[BERT: {scenario}]");
 
         bench_normy_bert(&mut group, "Normy BERT (normalize)", scenario, corpus);
-
+        bench_normy_bert_no_fusion(
+            &mut group,
+            "Normy BERT (normalize_no_fusion)",
+            scenario,
+            corpus,
+        );
         bench_hf_normalizer(
             &mut group,
             "HuggingFace BertNormalizer",
@@ -464,6 +527,12 @@ fn bench_french_normalizers(c: &mut Criterion) {
         println!("\n[French: {scenario}]");
 
         bench_normy_fra(&mut group, "Normy FRA (normalize)", scenario, corpus);
+        bench_normy_fra_no_fusion(
+            &mut group,
+            "Normy FRA (normalize_no_fusion)",
+            scenario,
+            corpus,
+        );
 
         bench_hf_normalizer(
             &mut group,
@@ -499,13 +568,15 @@ mod tests {
             let hf_output: String = hf_ns.get().into();
 
             // Normy apply_only
-            let normy_apply = NORMY_BERT
+            let normy_apply = NORMY_BERT_PIPELINE
                 .normalize_no_fusion(input)
                 .expect("Normy apply_only failed");
             let normy_apply_output: String = normy_apply.clone().into_owned();
 
             // Normy fusion
-            let normy_fusion = NORMY_BERT.normalize(input).expect("Normy normalize failed");
+            let normy_fusion = NORMY_BERT_PIPELINE
+                .normalize(input)
+                .expect("Normy normalize failed");
             let normy_fusion_output: String = normy_fusion.clone().into_owned();
 
             assert_eq!(
@@ -579,7 +650,7 @@ mod tests {
         let normalized = "hello world this is lowercase ascii";
 
         // BERT pipeline
-        let result = NORMY_BERT.normalize(normalized).unwrap();
+        let result = NORMY_BERT_PIPELINE.normalize(normalized).unwrap();
         assert!(
             matches!(result, Cow::Borrowed(s) if s.as_ptr() == normalized.as_ptr()),
             "❌ BERT zero-copy failed on normalized input"
@@ -596,7 +667,7 @@ mod tests {
     #[test]
     fn test_corpus_semantic_correctness() {
         // BERT corpus
-        let normy_result = NORMY_BERT.normalize(&CORPUS_BERT_NEEDS).unwrap();
+        let normy_result = NORMY_BERT_PIPELINE.normalize(&CORPUS_BERT_NEEDS).unwrap();
         let mut hf_ns = NormalizedString::from(CORPUS_BERT_NEEDS.as_str());
         HF_BERT.normalize(&mut hf_ns).unwrap();
         let hf_result = hf_ns.get();
@@ -626,7 +697,7 @@ mod tests {
     #[test]
     fn test_normalized_corpus_zero_copy() {
         // BERT
-        let result = NORMY_BERT.normalize(&CORPUS_NORMALIZED).unwrap();
+        let result = NORMY_BERT_PIPELINE.normalize(&CORPUS_NORMALIZED).unwrap();
         assert!(
             matches!(result, Cow::Borrowed(s) if s.as_ptr() == CORPUS_NORMALIZED.as_ptr()),
             "❌ BERT zero-copy failed on normalized corpus"
