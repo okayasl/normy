@@ -27,11 +27,6 @@ tokenizers = "0.22.2"
 regex = "1.12.2"
 
 [[bench]]
-name = "cvb"
-path = "benches/casefold_variants_bench.rs"
-harness = false
-
-[[bench]]
 name = "cb"
 path = "benches/check_bench.rs"
 harness = false
@@ -74,11 +69,6 @@ harness = false
 [[bench]]
 name = "pb"
 path = "benches/process_bench.rs"
-harness = false
-
-[[bench]]
-name = "tvb"
-path = "benches/transliterate_variants_bench.rs"
 harness = false
 
 [[bench]]

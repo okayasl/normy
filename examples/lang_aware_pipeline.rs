@@ -10,11 +10,6 @@ use std::borrow::Cow;
 // ————————————————————————————————
 fn search_pipeline() -> NormyBuilder<impl FusablePipeline> {
     Normy::builder()
-        // No modify_lang() needed — your static tables already do it perfectly:
-        // • TUR has 'I'→'ı', 'İ'→'i'
-        // • DEU has 'ß'→"ss"
-        // • NLD has 'Ĳ'→"ij" via peek_pairs + requires_peek_ahead = true
-        // • ZHO has unigram_cjk = true
         .add_stage(NFKC)
         .add_stage(RemoveDiacritics)
         .add_stage(CaseFold) // ← uses your real fold_map + peek_ahead_fold

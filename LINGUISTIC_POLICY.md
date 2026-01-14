@@ -140,8 +140,7 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 | Tamil (TA)                | true               | false       | ZWSP at virama+consonant (no exceptions)                   |
 | Thai, Lao, Khmer, Myanmar | true               | false       | Script transitions only — no syllable breaking             |
 
-**Performance Guarantee**: Languages with `needs_segmentation = false` incur **zero overhead** — the stage is completely elided from the pipeline via `needs_apply()` returning false.
-
+**Performance Guarantee**: Languages with `needs_segmentation = false` incur **zero overhead**
 **Indic Script Details**:
 
 - **ZWSP Insertion**: Zero-Width Space (U+200B) inserted after virama when followed by consonant
@@ -152,17 +151,6 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
   - Example (Tamil): "பற்றி" → "பற்\u{200B}றி"
 
 **Southeast Asian Scripts**: No syllable-level segmentation (would require dictionaries). Use specialized tokenizers (PyThaiNLP, LaoNLP, etc.) for true word/syllable breaking.
-
----
-
-## RULE 7: `requires_peek_ahead` — Multi-Character Contextual Processing
-
-| Language | Rule | Include? | Reason                               |
-| -------- | ---- | -------- | ------------------------------------ |
-| All      | —    | No       | Dictionary-based logic not supported |
-
-> Normy treats all other digraph letters (Czech "ch", Slovak "dz/dž", Croatian "lj/nj", etc.) as **ordinary sequences** — they are **not** treated as atomic units because Unicode does not encode them as single codepoints.
-> Greek, Word-boundary detection for σ/ς, must peek ahead to determine if at word-end for correct sigma form (σ in word, ς at end) but it is not supported yet.
 
 ---
 
@@ -185,8 +173,6 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 | NFD (Decomposed)          | No (internal only)       | Used internally for diacritic operations, always recomposed to NFC |
 | NFKC/NFKD (Compatibility) | Optional stage           | Lossy compatibility decomposition (e.g., ﬁ→fi, ℃→°C) — opt-in only |
 
-**Guarantee**: All Normy output is in NFC unless NFKC is explicitly enabled.
-
 **Rationale**:
 
 - NFC is the W3C/WHATWG standard for web text
@@ -197,7 +183,7 @@ Populate **only** with marks that **never** form precomposed characters in NFC.
 
 ## Scope and Philosophy
 
-Normy is **linguistically conservative** and **non-destructive by default**. Aggressive ASCII fallbacks (e.g., ğ→g, č→c, ø→o, ł→l) belong in an optional `normy-compat-ascii` crate (opt-in, never enabled in presets).
+Normy is **linguistically conservative** and **non-destructive by default**.
 
 ### Explicitly Out of Scope
 

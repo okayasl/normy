@@ -1,30 +1,58 @@
-# Normy
+# Normy: Blazingly Fast, Text Normalization for Rust
 
-**Next-Generation Text Normalization for Rust**
+[![Crates.io](https://img.shields.io/crates/v/normy)](https://crates.io/crates/normy)  
+[![Docs.rs](https://img.shields.io/docsrs/normy)](https://docs.rs/normy)  
+[![License: MIT](https://img.shields.io/crates/l/normy)](https://github.com/armoleon/normy/blob/main/LICENSE)
 
-`Normy` is a **fast**, **accurate**, and **production-ready** normalization layer library for Rust, specifically designed for NLP pipelines, tokenizers, search indexing, and multilingual text processing.
+**Normy** is a **zero-copy**, **composable**, **extensible** text normalization library in Rust.
 
-It excels at **zero-copy** operations, **automatic iterator fusion** for 30-40% speedups on multi-stage pipelines, **locale-specific linguistic accuracy**, and **format-aware** cleaning (HTML/Markdown stripping without corrupting code).
+Normy delivers **extreme performance** through automatic iterator fusion and precise early-exit checks, while respecting language-specific rules (e.g., Turkish dotted/dotless I, German ß folding).
 
----
+- **Zero-copy** → Immediately returns without allocation when input needs no changes.
+- **Automatic fusion** → Can fuse eligible stages (>1 fusable stage) into a single pass for better cache locality.
+- **Locale-accurate** → Built-in rules for correctness across scripts.
+- **Format-aware** → Clean HTML/Markdown while preserving content.
 
-## Table of Contents
+## Why Normy?
 
-- [Normy](#normy)
-  - [Table of Contents](#table-of-contents)
-  - [Installation](#installation)
-  - [Quickstart](#quickstart)
-  - [Features](#features)
-  - [Pipeline Design](#pipeline-design)
-  - [Examples](#examples)
-    - [Search Normalization (Multilingual)](#search-normalization-multilingual)
-    - [CJK Pipeline](#cjk-pipeline)
-  - [Benchmarks](#benchmarks)
-  - [Documentation](#documentation)
-  - [Contributing](#contributing)
-  - [License](#license)
+Traditional normalizers allocate on every call—even for clean text. Normy eliminates this overhead:
 
----
+- On **already-normalized text** (common in production streams): **up to 51× higher throughput** than HuggingFace `tokenizers` normalizers due to true zero-copy.
+- On **text requiring transformation**: **3.7–4.1× faster** through fusion and optimized stages.
+
+## Performance Comparison
+
+### Complex Pipeline Bert like (Chinese + Strip + Whitespace + NFD + Diacritics + Lowercase)
+
+Already Normalized Text
+
+```bash
+Normy        ████████████████████ 19.3x faster (100% zero-copy)
+HuggingFace  █ baseline
+```
+
+Needs Transform
+
+```bash
+Normy        ████ 3.7x faster
+HuggingFace  █ baseline
+```
+
+### Simple Pipeline (French + Lowercase + Transliterate)
+
+Already Normalized Text
+
+```bash
+Normy        ██████████████████████████████████████████████████ 51.3x faster (100% zero-copy)
+HuggingFace  █ baseline
+```
+
+With Accents/Diacritics
+
+```bash
+Normy        ████ 4.1x faster
+HuggingFace  █ baseline
+```
 
 ## Installation
 
@@ -39,39 +67,89 @@ cargo add normy
 Normy uses a **fluent builder** pattern with automatic fusion detection.
 
 ```rust
-use normy::{Normy, stage::*};
-use normy::lang::{TUR, DEU, ENG};
+use std::error::Error;
 
-fn main() -> Result<(), normy::NormyError> {
-    // Turkish: locale-specific case folding (İ → i, I → ı)
-    let turkish = Normy::builder()
+use normy::{
+    COLLAPSE_WHITESPACE_UNICODE, CaseFold, DEU, FRA, JPN, LowerCase, Normy, RemoveDiacritics, SegmentWords,
+    TUR, Transliterate, UnifyWidth, ZHO,
+};
+
+fn main() -> Result<(), Box<dyn Error>> {
+    // ────────────────────────────────────────────────────────────────
+    // TURKISH (Turkic) – famous for its dotted/dotless I distinction
+    // ────────────────────────────────────────────────────────────────
+    let tur = Normy::builder()
         .lang(TUR)
-        .add_stage(CaseFold)
-        .add_stage(RemoveDiacritics)
+        .add_stage(LowerCase) // Critical: İ → i, I → ı
         .build();
 
-    assert_eq!(turkish.normalize("İstanbul")?, "istanbul");
+    println!(
+        "Turkish : {}",
+        tur.normalize("KIZILIRMAK NEHRİ TÜRKİYE'NİN EN UZUN NEHRİDİR.")?
+    );
+    // → kızılırmak nehri türkiye'nin en uzun nehridir.
 
-    // German: folding + transliteration + diacritics
-    let german = Normy::builder()
+    // ────────────────────────────────────────────────────────────────
+    // GERMAN (Germany/Austria/Switzerland) – ß and umlaut handling
+    // ────────────────────────────────────────────────────────────────
+    let deu = Normy::builder()
         .lang(DEU)
-        .add_stage(CaseFold)
-        .add_stage(Transliterate)
-        .add_stage(RemoveDiacritics)
+        .add_stage(CaseFold) // ß → ss
+        .add_stage(Transliterate) // Ä → ae, Ö → oe, Ü → ue
         .build();
 
-    assert_eq!(german.normalize("Größe")?, "groesse");
+    println!(
+        "German  : {}",
+        deu.normalize("Grüße aus München! Die Straße ist sehr schön.")?
+    );
+    // → gruesse aus muenchen! die strasse ist sehr schoen.
 
-    // Web content: strip HTML + normalize
-    let web = Normy::builder()
-        .lang(ENG)
-        .add_stage(StripHtml)
+    // ────────────────────────────────────────────────────────────────
+    // FRENCH (France/Belgium/Canada/etc.) – classic accented text
+    // ────────────────────────────────────────────────────────────────
+    let fra = Normy::builder()
+        .lang(FRA)
         .add_stage(CaseFold)
-        .add_stage(CollapseWhitespaceUnicode)
+        .add_stage(RemoveDiacritics) // é → e, ç → c, etc.
         .build();
 
-    let html = "<p>Hello <b>World</b> café!</p>";
-    assert_eq!(web.normalize(html)?, "hello world cafe!");
+    println!(
+        "French  : {}",
+        fra.normalize("Bonjour ! J'adore le café et les croissants à Paris.")?
+    );
+    // → bonjour ! j'adore le cafe et les croissants a paris.
+
+    // ────────────────────────────────────────────────────────────────
+    // CHINESE (Simplified – China) – fullwidth & word segmentation
+    // ────────────────────────────────────────────────────────────────
+    let zho = Normy::builder()
+        .lang(ZHO)
+        .add_stage(UnifyWidth)
+        .add_stage(COLLAPSE_WHITESPACE_UNICODE)
+        .add_stage(SegmentWords) // unigram segmentation
+        .build();
+
+    println!(
+        "Chinese : {}",
+        zho.normalize("北京的秋天特别美丽，长城非常壮观！")?
+    );
+    // → 北 京 的 秋 天 特 别 美 丽 , 长 城 非 常 壮 观 !
+
+    // ────────────────────────────────────────────────────────────────
+    // JAPANESE (Japan) – script transitions + width unification
+    // ────────────────────────────────────────────────────────────────
+    let jpn = Normy::builder()
+        .lang(JPN)
+        .add_stage(UnifyWidth)
+        .add_stage(COLLAPSE_WHITESPACE_UNICODE)
+        .add_stage(SegmentWords) // script boundary segmentation
+        .build();
+
+    println!(
+        "Japanese: {}",
+        jpn.normalize("東京は本当に素晴らしい街です！桜がとてもきれい。")?
+    );
+    // → 東京は本当に素晴らしい街です ! 桜がとてもきれい 。
 
     Ok(())
 }
@@ -79,100 +157,111 @@ fn main() -> Result<(), normy::NormyError> {
 
 When text is already normalized, Normy returns `Cow::Borrowed` — **zero allocation**.
 
----
-
 ## Features
 
-| Feature                        | Description                                                                 |
-| ------------------------------ | --------------------------------------------------------------------------- |
-| **Zero-Copy**                  | Early-exit via `needs_apply()` → no allocation on clean input               |
-| **Iterator Fusion**            | Automatic 30-40% speedup on 3+ fusable stages (monomorphized char iterators)|
-| **Locale-Accurate**            | Turkish İ/i, German ß→ss, Dutch Ĳ→ij, Arabic/Hebrew diacritics, etc.        |
-| **Format-Aware**               | Safe HTML/Markdown stripping (preserves `<code>`, fences, attributes)       |
-| **Composable Pipelines**       | Fluent builder + dynamic runtime stages                                     |
-| **Linguistically Conservative**| Non-destructive by default; aggressive ASCII in optional crates only        |
-| **Unicode NFC First**          | Always canonical composed form (W3C standard)                               |
-| **Segmentation**               | Word boundaries for CJK, Indic, Thai, Khmer, etc. (ZWSP insertion)          |
-| **Extensible**                 | Implement `Stage` trait for custom transformations                           |
+| Feature                  | Description                                                               |
+| ------------------------ | ------------------------------------------------------------------------- |
+| **Zero-Copy**            | No allocation on clean input                                              |
+| **Iterator Fusion**      | Automatic 25% speedup on 2+ fusable stages (monomorphized char iterators) |
+| **Locale-Accurate**      | Turkish İ/i, German ß→ss, Dutch Ĳ→ij, Arabic/Hebrew diacritics, etc.      |
+| **Format-Aware**         | Safe HTML/Markdown stripping (preserves `<code>`, fences, attributes)     |
+| **Composable Pipelines** | Fluent builder + dynamic runtime stages                                   |
+| **Segmentation**         | Word boundaries for CJK, Indic, Thai, Khmer, etc. (ZWSP insertion)        |
+| **Extensible**           | Implement `Stage` trait for custom transformations                        |
 
----
+## Available Normalization Stages
 
-## Pipeline Design
+Normy provides a rich set of composable, high-performance normalization stages.  
+Most stages support **static iterator fusion** for maximum speed (single-pass, zero-copy when possible).
 
-Correct stage order is crucial for both **correctness** and **performance**.
+| Stage                           | Description                                                                | Fusion Support |
+| ------------------------------- | -------------------------------------------------------------------------- | -------------- |
+| `CaseFold`                      | Locale-aware case folding (German ß→ss, etc.)                              | Yes            |
+| `LowerCase`                     | Locale-aware lowercasing (Turkish İ→i)                                     | Yes            |
+| `RemoveDiacritics`              | Removes combining/spacing diacritics (accents, tone marks, etc.)           | Yes            |
+| `Transliterate`                 | Language-specific character substitutions (Ä→ae, Ю→ju, etc.)               | Yes            |
+| `NormalizePunctuation`          | Normalizes dashes, quotes, ellipsis, bullets, etc. to standard forms       | Yes            |
+| `UnifyWidth`                    | Converts fullwidth → halfwidth (critical for CJK compatibility)            | Yes            |
+| `SegmentWords`                  | Inserts spaces at word/script boundaries (CJK unigram, Indic virama, etc.) | Yes            |
+| `StripControlChars`             | Removes all control characters (Unicode Cc category)                       | Yes            |
+| `StripFormatControls`           | Removes directional marks, joiners, ZWSP, invisible operators, etc.        | Yes            |
+| **Whitespace Variants**         |                                                                            |                |
+| • `COLLAPSE_WHITESPACE`         | Collapse consecutive ASCII whitespace → single space                       | Yes            |
+| • `COLLAPSE_WHITESPACE_UNICODE` | Collapse all Unicode whitespace → single space                             | Yes            |
+| • `NORMALIZE_WHITESPACE_FULL`   | Normalize + collapse + trim all Unicode whitespace                         | Yes            |
+| • `TRIM_WHITESPACE`             | Trim leading/trailing ASCII whitespace only                                | Yes            |
+| • `TRIM_WHITESPACE_UNICODE`     | Trim leading/trailing Unicode whitespace                                   | Yes            |
+| **Normalization Forms**         |                                                                            |                |
+| • `NFC`                         | Unicode canonical composed form (most compact, W3C recommended)            | **No**         |
+| • `NFD`                         | Unicode canonical decomposed form                                          | **No**         |
+| • `NFKC`                        | Unicode compatibility composed (lossy, e.g. ﬁ→fi, ℃→°C)                    | **No**         |
+| • `NFKD`                        | Unicode compatibility decomposed                                           | **No**         |
+| `StripHtml`                     | Strips HTML tags and decodes entities (format-aware)                       | **No**         |
+| `StripMarkdown`                 | Removes Markdown formatting while preserving content                       | **No**         |
 
-Recommended priority:
+Key notes
 
-1. Format stripping (`StripHtml`, `StripMarkdown`)
-2. Unicode normalization (`NFC`)
-3. Width unification (`UnifyWidth`)
-4. Case operations (`CaseFold`)
-5. Transliteration (`Transliterate`)
-6. Diacritic removal (`RemoveDiacritics`)
-7. Punctuation/whitespace normalization
-8. Control/format control removal
-9. Segmentation (`SegmentWords`) — always last
+- **Fusion** = static single-pass iterator fusion (zero-copy + minimal allocation when conditions met)
+- Non-fusable stages (`NFC`/`NFD`/`NFKC`/`NFKD`, `StripHtml`, `StripMarkdown`) use optimized batch processing and should usually be placed early in the pipeline
 
-Fusion works automatically when all stages implement `StaticFusableStage`.
+## Supported Languages
 
-See `PIPELINE_GUIDELINES.md` for detailed rationale.
+| Language           | Code  | Special Features                        |
+| ------------------ | ----- | --------------------------------------- |
+| **European**       |       |                                         |
+| Turkish            | `TUR` | Custom case rules (İ/i, I/ı)            |
+| German             | `DEU` | ß folding, umlauts transliteration      |
+| Dutch              | `NLD` | IJ digraph folding                      |
+| Danish             | `DAN` | Å/Æ/Ø transliteration                   |
+| Norwegian          | `NOR` | Å/Æ/Ø transliteration                   |
+| Swedish            | `SWE` | Å/Ä/Ö transliteration                   |
+| Icelandic          | `ISL` | Þ/Ð/Æ transliteration                   |
+| French             | `FRA` | Œ/Æ ligatures, accent handling          |
+| Spanish            | `SPA` | Accent normalization                    |
+| Portuguese         | `POR` | Comprehensive diacritics                |
+| Italian            | `ITA` | Grave/acute accents                     |
+| Catalan            | `CAT` | Ç transliteration                       |
+| Czech              | `CES` | Háček preservation, selective stripping |
+| Slovak             | `SLK` | Caron handling                          |
+| Polish             | `POL` | Ogonek & acute accents                  |
+| Croatian           | `HRV` | Digraph normalization                   |
+| Serbian            | `SRP` | Cyrillic diacritics                     |
+| Lithuanian         | `LIT` | Dot-above vowels                        |
+| Greek              | `ELL` | Polytonic diacritics (6 types)          |
+| Russian            | `RUS` | Cyrillic→Latin transliteration          |
+| **Middle Eastern** |       |                                         |
+| Arabic             | `ARA` | 15 diacritic types (tashkeel)           |
+| Hebrew             | `HEB` | 20 vowel points (nikud)                 |
+| **Asian**          |       |                                         |
+| Vietnamese         | `VIE` | Tone marks (5 tones × vowels)           |
+| Chinese            | `ZHO` | Word segmentation, CJK unigram          |
+| Japanese           | `JPN` | Word segmentation                       |
+| Korean             | `KOR` | Word segmentation                       |
+| Thai               | `THA` | Tone marks, word segmentation           |
+| Lao                | `LAO` | 15 combining marks, segmentation        |
+| Khmer              | `KHM` | 30+ combining marks, segmentation       |
+| Myanmar            | `MYA` | 17 combining marks, segmentation        |
+| **South Asian**    |       |                                         |
+| Hindi              | `HIN` | Devanagari diacritics, segmentation     |
+| Bengali            | `BEN` | Bengali diacritics, segmentation        |
+| Tamil              | `TAM` | Tamil diacritics, segmentation          |
+| **Other**          |       |                                         |
+| English            | `ENG` | Default/baseline                        |
 
----
+**Features Key:**
 
-## Examples
-
-### Search Normalization (Multilingual)
-
-```rust
-let search = Normy::builder()
-    .lang(detected_lang)
-    .add_stage(CaseFold)
-    .add_stage(Transliterate)
-    .add_stage(RemoveDiacritics)
-    .add_stage(CollapseWhitespaceUnicode)
-    .build();
-```
-
-### CJK Pipeline
-
-```rust
-let cjk = Normy::builder()
-    .lang(JPN)  // or ZHO, KOR
-    .add_stage(UnifyWidth)
-    .add_stage(NormalizePunctuation)
-    .add_stage(CollapseWhitespaceUnicode)
-    .add_stage(SegmentWords)
-    .build();
-```
-
-More examples in the `examples/` directory (coming soon).
-
----
-
-## Benchmarks
-
-Normy achieves **30-40% faster** multi-stage processing via fusion compared to naïve per-stage allocation.
-
-- Already-normalized text: **zero-copy** regardless of pipeline length
-- 4-stage pipelines: ~35% speedup with fusion
-- Heavy multilingual corpus: competitive with optimized C++ equivalents
-
-Run benchmarks locally:
-
-```bash
-cargo bench
-```
-
-See `BENCHMARKS.md` for detailed results.
-
----
+- **Word Segmentation**: Automatic boundary detection for non-space-delimited scripts
+- **CJK Unigram**: Character-level tokenization for Chinese ideographs
+- **Transliteration**: Script→Latin conversion (e.g., Cyrillic, ligatures)
+- **Diacritics**: Intelligent spacing/combining mark handling
 
 ## Documentation
 
-* Full API docs: [docs.rs/normy](https://docs.rs/normy) (once published)
-* Linguistic rules: `LINGUISTIC_POLICY.md`
-* Pipeline guidelines: `PIPELINE_GUIDELINES.md`
-* Generate local docs:
+- Full API docs: [docs.rs/normy](https://docs.rs/normy)
+- Linguistic rules: `LINGUISTIC_POLICY.md`
+- Pipeline guidelines: `PIPELINE_GUIDELINES.md`
+- Examples are in the `examples/` directory
+- Generate local docs:
 
 ```bash
 cargo doc --open
@@ -184,9 +273,9 @@ cargo doc --open
 
 Contributions are very welcome! See `CONTRIBUTING.md` for:
 
-* Code style (`rustfmt`, `clippy`)
-* Stage contract tests (`assert_stage_contract!`)
-* Adding new languages/stages
+- Code style (`rustfmt`, `clippy`)
+- Stage contract tests (`assert_stage_contract!`)
+- Adding new languages/stages
 
 ---
 
