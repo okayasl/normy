@@ -1,8 +1,19 @@
-# Normy: Blazingly Fast, Text Normalization for Rust
+<p align="center">
+  <a href="https://crates.io/crates/normy">
+    <img src="https://img.shields.io/crates/v/normy?style=flat-square" alt="Crates.io">
+  </a>
+  <a href="https://docs.rs/normy">
+    <img src="https://img.shields.io/docsrs/normy?style=flat-square" alt="Docs.rs">
+  </a>
+  <a href="https://github.com/okayasl/normy/actions/workflows/ci.yml">
+    <img src="https://github.com/okayasl/normy/actions/workflows/ci.yml/badge.svg?branch=main" alt="Build Status">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue?style=flat-square" alt="License: MIT OR Apache-2.0">
+  </a>
+</p>
 
-[![Crates.io](https://img.shields.io/crates/v/normy)](https://crates.io/crates/normy)  
-[![Docs.rs](https://img.shields.io/docsrs/normy)](https://docs.rs/normy)  
-[![License: MIT](https://img.shields.io/crates/l/normy)](https://github.com/armoleon/normy/blob/main/LICENSE)
+# Normy: Blazingly Fast, Text Normalization for Rust
 
 **Normy** is a **zero-copy**, **composable**, **extensible** text normalization library in Rust.
 
