@@ -53,6 +53,8 @@ With Accents/Diacritics
 
 ![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%274.1x%20faster%27,fontSize:10}}}&width=350&height=80)
 
+See **/benchmarks** for reproducible results.
+
 ## Installation
 
 Add Normy to your project:
