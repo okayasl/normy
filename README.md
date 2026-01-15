@@ -74,13 +74,13 @@ HuggingFace  █ baseline
 **Already Normalized Text**
 
 <p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27}}}&width=400&height=120" alt="Complex Normalized" />
+  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100" alt="Complex Normalized" />
 </p>
 
 **Needs Transform**
 
 <p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4}}]},title:{display:true,text:%273.7x%20faster%27}}}&width=400&height=120" alt="Complex Transform" />
+  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4}}]},title:{display:true,text:%273.7x%20faster%27}}}&width=300&height=100" alt="Complex Transform" />
 </p>
 
 ### Simple Pipeline (French + Lowercase + Transliterate)
@@ -88,13 +88,13 @@ HuggingFace  █ baseline
 **Already Normalized Text**
 
 <p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27}}}&width=400&height=120" alt="Simple Normalized" />
+  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100" alt="Simple Normalized" />
 </p>
 
 **With Accents/Diacritics**
 
 <p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5}}]},title:{display:true,text:%274.1x%20faster%27}}}&width=400&height=120" alt="Simple Accents" />
+  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5}}]},title:{display:true,text:%274.1x%20faster%27}}}&width=300&height=100" alt="Simple Accents" />
 </p>
 
 ---
@@ -105,21 +105,21 @@ HuggingFace  █ baseline
 
 **Already Normalized Text**
 
-![Complex Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27}}}&width=400&height=120)
+![Complex Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100)
 
 **Needs Transform**
 
-![Complex Transform](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4}}]},title:{display:true,text:%273.7x%20faster%27}}}&width=400&height=120)
+![Complex Transform](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4}}]},title:{display:true,text:%273.7x%20faster%27}}}&width=300&height=100)
 
 ### Simple Pipeline (French + Lowercase + Transliterate)
 
 **Already Normalized Text**
 
-![Simple Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27}}}&width=400&height=120)
+![Simple Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100)
 
 **With Accents/Diacritics**
 
-![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5}}]},title:{display:true,text:%274.1x%20faster%27}}}&width=400&height=120)
+![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5}}]},title:{display:true,text:%274.1x%20faster%27}}}&width=300&height=100)
 
 ## Installation
 
