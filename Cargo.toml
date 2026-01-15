@@ -82,7 +82,12 @@ simd = ["simdutf8"]
 ascii-fast = []
 
 [profile.release]
-lto = "fat"
+lto = true
+debug = false
 codegen-units = 1
 panic = "abort"
 opt-level = "s"   # or "z" if binary size matters more than last 3%
+
+# ── BADGES ────────────────────────────────────────────────────────────
+[badges]
+github-actions = { repository = "okayasl/normy", workflow = "CI" }
