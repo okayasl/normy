@@ -33,93 +33,25 @@ Traditional normalizers allocate on every call—even for clean text. Normy elim
 
 ## Performance Comparison
 
-### Complex Pipeline Bert like (Chinese + Strip + Whitespace + NFD + Diacritics + Lowercase)
+### Complex Pipeline Bert-like (Chinese + Strip + Whitespace + NFD + Diacritics + Lowercase)
 
 Already Normalized Text
 
-```bash
-Normy        ████████████████████ 19.3x faster (100% zero-copy)
-HuggingFace  █ baseline
-```
+![Complex Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27}}}&width=400&height=90)
 
 Needs Transform
 
-```bash
-Normy        ████ 3.7x faster
-HuggingFace  █ baseline
-```
+![Complex Transform](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4}}]},title:{display:true,text:%273.7x%20faster%27}}}&width=400&height=90)
 
 ### Simple Pipeline (French + Lowercase + Transliterate)
 
 Already Normalized Text
 
-```bash
-Normy        ██████████████████████████████████████████████████ 51.3x faster (100% zero-copy)
-HuggingFace  █ baseline
-```
+![Simple Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27}}}&width=400&height=90)
 
 With Accents/Diacritics
 
-```bash
-Normy        ████ 4.1x faster
-HuggingFace  █ baseline
-```
-
----
-
-## Performance Comparison
-
-### Complex Pipeline Bert-like (Chinese + Strip + Whitespace + NFD + Diacritics + Lowercase)
-
-**Already Normalized Text**
-
-<p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100" alt="Complex Normalized" />
-</p>
-
-**Needs Transform**
-
-<p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4}}]},title:{display:true,text:%273.7x%20faster%27}}}&width=300&height=100" alt="Complex Transform" />
-</p>
-
-### Simple Pipeline (French + Lowercase + Transliterate)
-
-**Already Normalized Text**
-
-<p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100" alt="Simple Normalized" />
-</p>
-
-**With Accents/Diacritics**
-
-<p align="center">
-  <img src="https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5}}]},title:{display:true,text:%274.1x%20faster%27}}}&width=300&height=100" alt="Simple Accents" />
-</p>
-
----
-
-## Performance Comparison
-
-### Complex Pipeline Bert-like (Chinese + Strip + Whitespace + NFD + Diacritics + Lowercase)
-
-**Already Normalized Text**
-
-![Complex Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100)
-
-**Needs Transform**
-
-![Complex Transform](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4}}]},title:{display:true,text:%273.7x%20faster%27}}}&width=300&height=100)
-
-### Simple Pipeline (French + Lowercase + Transliterate)
-
-**Already Normalized Text**
-
-![Simple Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27}}}&width=300&height=100)
-
-**With Accents/Diacritics**
-
-![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5}}]},title:{display:true,text:%274.1x%20faster%27}}}&width=300&height=100)
+![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5}}]},title:{display:true,text:%274.1x%20faster%27}}}&width=400&height=90)
 
 ## Installation
 
