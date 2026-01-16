@@ -15,7 +15,8 @@
 
 # 📦 Normy
 
-**Normy** is a **blazingly fast**, **zero-copy**, **composable** and **extensible** text normalization library in Rust.
+**Ultra-fast, zero-copy text normalization — built for Rust NLP pipelines & tokenizers**.
+Flexible enough for any high-throughput multilingual text processing (search, logs, APIs, data pipelines, …)
 
 Normy delivers **extreme performance** through automatic iterator fusion and precise early-exit checks, while respecting language-specific rules (e.g., Turkish dotted/dotless I, German ß folding).
 
@@ -32,6 +33,8 @@ Traditional normalizers allocate on every call—even for clean text. Normy elim
 - On **text requiring transformation**: **3.7–4.1× faster** through fusion and optimized stages.
 
 ## 🏆 Performance Comparison
+
+Measured against HuggingFace `tokenizers` normalizers on 64 KiB inputs (200 samples each).
 
 ### Complex Pipeline Bert-like (Chinese + Strip + Whitespace + NFD + Diacritics + Lowercase)
 
@@ -53,6 +56,7 @@ With Accents/Diacritics
 
 ![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%274.1x%20faster%27,fontSize:10}}}&width=300&height=80)
 
+Numbers represent geometric mean over 200 samples. Hardware, OS, and input distribution can affect results.
 See **/benches/comparison_tokenizers_bench.rs** for reproducible results.
 
 ## 💾 Installation
@@ -160,15 +164,15 @@ When text is already normalized, Normy returns `Cow::Borrowed` — **zero alloca
 
 ## ✨ Features
 
-| Feature                  | Description                                                               |
-| ------------------------ | ------------------------------------------------------------------------- |
-| **Zero-Copy**            | No allocation on clean input                                              |
-| **Iterator Fusion**      | Automatic speedup on 2+ fusable stages (monomorphized char iterators)     |
-| **Locale-Accurate**      | Turkish İ/i, German ß→ss, Dutch Ĳ→ij, Arabic/Hebrew diacritics, etc.      |
-| **Format-Aware**         | Safe HTML/Markdown stripping (preserves `<code>`, fences, attributes)     |
-| **Composable Pipelines** | Fluent builder + dynamic runtime stages                                   |
-| **Segmentation**         | Word boundaries for CJK, Indic, Thai, Khmer, etc. (ZWSP insertion)        |
-| **Extensible**           | Implement custom transformation stage                                     |
+| Feature                  | Description                                                           |
+| ------------------------ | --------------------------------------------------------------------- |
+| **Zero-Copy**            | No allocation on clean input                                          |
+| **Iterator Fusion**      | Automatic speedup on 2+ fusable stages (monomorphized char iterators) |
+| **Locale-Accurate**      | Turkish İ/i, German ß→ss, Dutch Ĳ→ij, Arabic/Hebrew diacritics, etc.  |
+| **Format-Aware**         | Safe HTML/Markdown stripping (preserves `<code>`, fences, attributes) |
+| **Composable Pipelines** | Fluent builder + dynamic runtime stages                               |
+| **Segmentation**         | Word boundaries for CJK, Indic, Thai, Khmer, etc. (ZWSP insertion)    |
+| **Extensible**           | Implement custom transformation stage                                 |
 
 ## 💼 Available Normalization Stages
 
@@ -284,4 +288,4 @@ See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
 
 ---
 
-**Normy** — Linguistically correct, blazingly fast text normalization for modern Rust NLP.
+**Normy** — Ultra-fast, linguistically correct normalization — the next-generation layer for Rust NLP & tokenizers
