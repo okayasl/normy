@@ -13,7 +13,7 @@
   </a>
 </p>
 
-# Normy
+# 📦 Normy
 
 **Normy** is a **blazingly fast**, **zero-copy**, **composable** and **extensible** text normalization library in Rust.
 
@@ -31,31 +31,31 @@ Traditional normalizers allocate on every call—even for clean text. Normy elim
 - On **already-normalized text** (common in production streams): **up to 51× higher throughput** than HuggingFace `tokenizers` normalizers due to true zero-copy.
 - On **text requiring transformation**: **3.7–4.1× faster** through fusion and optimized stages.
 
-## Performance Comparison
+## 🏆 Performance Comparison
 
 ### Complex Pipeline Bert-like (Chinese + Strip + Whitespace + NFD + Diacritics + Lowercase)
 
 Already Normalized Text
 
-![Complex Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27,fontSize:10}}}&width=350&height=80)
+![Complex Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[19.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:20,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%2719.3x%20faster%20(100%25%20zero-copy)%27,fontSize:10}}}&width=300&height=80)
 
 Needs Transform
 
-![Complex Transform](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%273.7x%20faster%27,fontSize:10}}}&width=350&height=80)
+![Complex Transform](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[3.7,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:4,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%273.7x%20faster%27,fontSize:10}}}&width=300&height=80)
 
 ### Simple Pipeline (French + Lowercase + Transliterate)
 
 Already Normalized Text
 
-![Simple Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27,fontSize:10}}}&width=350&height=80)
+![Simple Normalized](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[51.3,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:55,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%2751.3x%20faster%20(100%25%20zero-copy)%27,fontSize:10}}}&width=300&height=80)
 
 With Accents/Diacritics
 
-![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%274.1x%20faster%27,fontSize:10}}}&width=350&height=80)
+![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%274.1x%20faster%27,fontSize:10}}}&width=300&height=80)
 
 See **/benchmarks** for reproducible results.
 
-## Installation
+## 💾 Installation
 
 Add Normy to your project:
 
@@ -63,7 +63,7 @@ Add Normy to your project:
 cargo add normy
 ```
 
-## Quickstart
+## ⚡ Quickstart
 
 Normy uses a **fluent builder** pattern with automatic fusion detection.
 
@@ -158,7 +158,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 When text is already normalized, Normy returns `Cow::Borrowed` — **zero allocation**.
 
-## Features
+## ✨ Features
 
 | Feature                  | Description                                                               |
 | ------------------------ | ------------------------------------------------------------------------- |
@@ -170,7 +170,7 @@ When text is already normalized, Normy returns `Cow::Borrowed` — **zero alloca
 | **Segmentation**         | Word boundaries for CJK, Indic, Thai, Khmer, etc. (ZWSP insertion)        |
 | **Extensible**           | Implement `Stage` trait for custom transformations                        |
 
-## Available Normalization Stages
+## 💼 Available Normalization Stages
 
 Normy provides a rich set of composable, high-performance normalization stages.  
 Most stages support **static iterator fusion** for maximum speed (single-pass, zero-copy when possible).
@@ -205,7 +205,7 @@ Key notes
 - **Fusion** = static single-pass iterator fusion (zero-copy + minimal allocation when conditions met)
 - Non-fusable stages (`NFC`/`NFD`/`NFKC`/`NFKD`, `StripHtml`, `StripMarkdown`) use optimized batch processing and should usually be placed early in the pipeline
 
-## Supported Languages
+## 🆎 Supported Languages
 
 | Language           | Code  | Special Features                        |
 | ------------------ | ----- | --------------------------------------- |
@@ -256,7 +256,7 @@ Key notes
 - **Transliteration**: Script→Latin conversion (e.g., Cyrillic, ligatures)
 - **Diacritics**: Intelligent spacing/combining mark handling
 
-## Documentation
+## 📖 Documentation
 
 - Full API docs: [docs.rs/normy](https://docs.rs/normy)
 - Linguistic rules: `LINGUISTIC_POLICY.md`
@@ -270,13 +270,13 @@ cargo doc --open
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
 Contributions are very welcome! See `CONTRIBUTING.md`
 
 ---
 
-## License
+## 📜 License
 
 Dual-licensed under **MIT** or **Apache-2.0**, at your option.
 
