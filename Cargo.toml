@@ -27,11 +27,6 @@ tokenizers = "0.22.2"
 regex = "1.12.2"
 
 [[bench]]
-name = "cb"
-path = "benches/check_bench.rs"
-harness = false
-
-[[bench]]
 name = "cfb"
 path = "benches/comparison_fusing_bench.rs"
 harness = false
@@ -60,26 +55,6 @@ harness = false
 name = "leob"
 path = "benches/lang_entry_ops_bench.rs"
 harness = false
-
-[[bench]]
-name = "nb"
-path = "benches/normy_bench.rs"
-harness = false
-
-[[bench]]
-name = "pb"
-path = "benches/process_bench.rs"
-harness = false
-
-[[bench]]
-name = "wb"
-path = "benches/whitespace_bench.rs"
-harness = false
-
-[features]
-default = ["simd"]
-simd = ["simdutf8"]
-ascii-fast = []
 
 [profile.release]
 lto = true

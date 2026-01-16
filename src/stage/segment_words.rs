@@ -309,7 +309,7 @@ fn check_boundary_with_classes(
 }
 
 #[inline]
-pub fn needs_segmentation(text: &str, lang: &LangEntry) -> bool {
+fn needs_segmentation(text: &str, lang: &LangEntry) -> bool {
     let mut prev_class: Option<CharClass> = None;
     let mut prev_char: Option<char> = None;
 

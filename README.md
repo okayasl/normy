@@ -53,7 +53,7 @@ With Accents/Diacritics
 
 ![Simple Accents](https://quickchart.io/chart?c={type:%27horizontalBar%27,data:{labels:[%27Normy%27,%27HuggingFace%27],datasets:[{data:[4.1,1],backgroundColor:[%27rgba(75,192,75,0.8)%27,%27rgba(200,200,200,0.8)%27]}]},options:{legend:{display:false},scales:{xAxes:[{ticks:{beginAtZero:true,max:5,fontSize:9}}],yAxes:[{ticks:{fontSize:9}}]},title:{display:true,text:%274.1x%20faster%27,fontSize:10}}}&width=300&height=80)
 
-See **/benchmarks** for reproducible results.
+See **/benches/comparison_tokenizers_bench.rs** for reproducible results.
 
 ## 💾 Installation
 
@@ -163,12 +163,12 @@ When text is already normalized, Normy returns `Cow::Borrowed` — **zero alloca
 | Feature                  | Description                                                               |
 | ------------------------ | ------------------------------------------------------------------------- |
 | **Zero-Copy**            | No allocation on clean input                                              |
-| **Iterator Fusion**      | Automatic 25% speedup on 2+ fusable stages (monomorphized char iterators) |
+| **Iterator Fusion**      | Automatic speedup on 2+ fusable stages (monomorphized char iterators)     |
 | **Locale-Accurate**      | Turkish İ/i, German ß→ss, Dutch Ĳ→ij, Arabic/Hebrew diacritics, etc.      |
 | **Format-Aware**         | Safe HTML/Markdown stripping (preserves `<code>`, fences, attributes)     |
 | **Composable Pipelines** | Fluent builder + dynamic runtime stages                                   |
 | **Segmentation**         | Word boundaries for CJK, Indic, Thai, Khmer, etc. (ZWSP insertion)        |
-| **Extensible**           | Implement `Stage` trait for custom transformations                        |
+| **Extensible**           | Implement custom transformation stage                                     |
 
 ## 💼 Available Normalization Stages
 
