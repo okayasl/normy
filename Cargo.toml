@@ -3,6 +3,25 @@ name = "normy"
 version = "0.1.0"
 edition = "2024"
 
+# ── CRATE METADATA ───────────────────────────────────────────────────────────────
+authors = ["Okay Aslan <https://github.com/okayasl>"]
+description = "Ultra-fast, zero-copy text normalization for Rust NLP pipelines & tokenizers"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/okayasl/normy"
+readme = "README.md"
+homepage = "https://github.com/okayasl/normy"
+documentation = "https://docs.rs/normy"
+keywords = ["nlp", "normalization", "unicode", "zero-copy", "tokenizer"]
+categories = ["text-processing", "internationalization"]
+exclude = [
+    "target",
+    "Cargo.lock",
+    "benches/*",
+    "examples/*",
+    ".github/*",
+    "*.md",
+] # Keep .crate small (<10MB)
+
 [dependencies]
 thiserror = "2.0.17"
 rand = "0.9.2"
@@ -57,11 +76,12 @@ path = "benches/lang_entry_ops_bench.rs"
 harness = false
 
 [profile.release]
-lto = true
-debug = false
+lto = "fat"       # ← "fat" > "true" for better cross-crate opts
 codegen-units = 1
+opt-level = "s"   # or "z" if you want even smaller binaries
 panic = "abort"
-opt-level = "s"   # or "z" if binary size matters more than last 3%
+debug = false
+strip = true      # ← Strips debug symbols → smaller binary
 
 # ── BADGES ────────────────────────────────────────────────────────────
 [badges]
