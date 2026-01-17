@@ -11,7 +11,7 @@ repository = "https://github.com/okayasl/normy"
 readme = "README.md"
 homepage = "https://github.com/okayasl/normy"
 documentation = "https://docs.rs/normy"
-keywords = ["normalization", "tokenization", "llm", "nlp", "zero-copy", "tokenizer"]
+keywords = ["normalization", "llm", "nlp", "zero-copy", "tokenizer"]
 categories = ["text-processing", "internationalization"]
 exclude = [
     "target",
