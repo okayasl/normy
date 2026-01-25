@@ -644,7 +644,7 @@ dependencies = [
 
 [[package]]
 name = "normy"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "criterion",
  "html-escape",

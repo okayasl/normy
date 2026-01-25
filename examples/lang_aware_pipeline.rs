@@ -39,7 +39,7 @@ fn main() {
         ("hello <b>world</b>", &search_eng, "hello world", "ENG"),
         ("**café** ½-price", &search_eng, "café 1⁄2-price", "ENG"),
         ("family\u{200D}family", &search_eng, "familyfamily", "ENG"),
-        ("　一二三　", &search_zho, "一 二 三", "ZHO"),
+        ("　一二三　", &search_zho, "一二三", "ZHO"),
         ("clean ascii text", &search_eng, "clean ascii text", "ENG"), // ZERO ALLOCATION
     ];
 

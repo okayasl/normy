@@ -64,6 +64,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         "Chinese : {}",
         zho.normalize("北京的秋天特别美丽，长城非常壮观！")?
     );
+    // → 北京的秋天特别美丽 , 长城非常壮观 !
+
+    // ────────────────────────────────────────────────────────────────
+    // CHINESE (Simplified – China) – fullwidth & word segmentation & unigram cjk
+    // ────────────────────────────────────────────────────────────────
+    let zho = Normy::builder()
+        .lang(ZHO)
+        .modify_lang(|le| le.set_unigram_cjk(true))
+        .add_stage(UnifyWidth)
+        .add_stage(COLLAPSE_WHITESPACE_UNICODE)
+        .add_stage(SegmentWords) // unigram segmentation
+        .build();
+
+    println!(
+        "Chinese(unigram cjk) : {}",
+        zho.normalize("北京的秋天特别美丽，长城非常壮观！")?
+    );
     // → 北 京 的 秋 天 特 别 美 丽 , 长 城 非 常 壮 观 !
 
     // ────────────────────────────────────────────────────────────────

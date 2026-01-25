@@ -180,27 +180,17 @@ mod integration_tests {
     }
 
     #[test]
-    fn test_unigram_cjk_off_for_chinese_works() {
+    fn test_unigram_cjk_on_for_chinese_works() {
         use crate::Normy;
 
         let normy = Normy::builder()
             .lang(ZHO)
-            .modify_lang(|lang| lang.set_unigram_cjk(false))
+            .modify_lang(|lang| lang.set_unigram_cjk(true))
             .add_stage(SegmentWords)
             .build();
 
         let text = "Hello中华人民共和国";
         let result = normy.normalize(text).unwrap();
-        assert_eq!(&*result, "Hello 中华人民共和国");
+        assert_eq!(&*result, "Hello 中 华 人 民 共 和 国");
     }
-
-    // #[test]
-    // fn test_remove_html() {
-    //     let text = "Hello <b>world</b> <script>alert(1)</script>";
-    //     let normalized = Normy::builder().add_stage(RemoveHtml)
-    //         .build()
-    //         .normalize_with_stage(RemoveHtml, text)
-    //         .unwrap();
-    //     assert_eq!(normalized, "Hello world ");
-    // }
 }

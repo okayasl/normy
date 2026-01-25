@@ -406,7 +406,10 @@ Visit: https://example.com
     let cjk_text = "東京都渋谷区";
     println!("\nCJK segmentation:");
     println!("Input: {}", cjk_text);
-    let cjk_search_zh = cjk_search().lang(ZHO).build();
+    let cjk_search_zh = cjk_search()
+        .lang(ZHO)
+        .modify_lang(|le| le.set_unigram_cjk(true))
+        .build();
     println!(
         "  With UnigramCJK: {}",
         cjk_search_zh.normalize(cjk_text).unwrap()

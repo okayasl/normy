@@ -324,8 +324,11 @@ mod prop_tests {
 
         // Chinese unigram: every CJK char separated
         #[test]
-        fn chinese_unigram_segmentation(s in "[\u{4E00}-\u{9FFF}]{2,20}") {
-            let normy = Normy::builder().lang(ZHO).add_stage(SegmentWords).build();
+        fn custom_chinese_unigram_segmentation(s in "[\u{4E00}-\u{9FFF}]{2,20}") {
+            let normy = Normy::builder().
+                lang(ZHO).
+                modify_lang(|le| le.set_unigram_cjk(true)).
+                add_stage(SegmentWords).build();
             let result = normy.normalize(&s).unwrap();
 
             // Count spaces should be char_count - 1

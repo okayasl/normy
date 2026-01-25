@@ -373,10 +373,10 @@ impl StageTestConfig for SegmentWords {
     fn should_transform(lang: Lang) -> &'static [(&'static str, &'static str)] {
         match lang {
             ZHO => &[
-                ("你好", "你 好"),
-                ("世界", "世 界"),
-                ("Hello世界", "Hello 世 界"),
-                ("AI+区块链", "AI+ 区 块 链"),
+                ("你好", "你好"),
+                ("世界", "世界"),
+                ("Hello世界", "Hello 世界"),
+                ("AI+区块链", "AI+ 区块链"),
             ],
             JPN => &[
                 ("Hello世界", "Hello 世界"),
@@ -466,32 +466,33 @@ mod tests {
     }
 
     #[test]
-    fn test_chinese() {
+    fn test_chinese_continuous_default() {
         run_cases(
             ZHO,
             &[
-                ("Hello世界", "Hello 世 界"),
-                ("世界Hello", "世 界 Hello"),
-                ("你好世界", "你 好 世 界"),
-                ("", ""),
-                ("A", "A"),
-                ("中", "中"),
-                ("Hello你好World世界", "Hello 你 好 World 世 界"),
-                ("中华人民共和国", "中 华 人 民 共 和 国"),
-                ("人工智能是未来", "人 工 智 能 是 未 来"),
-                ("我爱你", "我 爱 你"),
-                ("今天天气很好", "今 天 天 气 很 好"),
-                ("Rust编程语言", "Rust 编 程 语 言"),
-                ("2025年北京奥运", "2025 年 北 京 奥 运"),
-                ("你好，世界！", "你 好 ， 世 界 ！"),
-                ("「你好」他说道", "「 你 好 」 他 说 道"),
-                ("中中中", "中 中 中"),
-                ("  你好  世界  ", "  你 好  世 界  "),
-                ("AI+区块链=未来", "AI+ 区 块 链 = 未 来"),
-                ("2025年，你好！", "2025 年 ， 你 好 ！"),
-                ("Rust×中文＝强大", "Rust× 中 文 ＝ 强 大"),
-                ("「人工智能」2025", "「 人 工 智 能 」 2025"),
-                ("Hello,世界!", "Hello, 世 界 !"),
+                // Pure CJK → continuous blocks (no internal ZWSP)
+                ("你好世界", "你好世界"),
+                ("中华人民共和国", "中华人民共和国"),
+                ("人工智能是未来", "人工智能是未来"),
+                ("我爱你", "我爱你"),
+                ("今天天气很好", "今天天气很好"),
+                ("中中中", "中中中"),
+                // Mixed script → break only at Latin ↔ CJK transitions
+                ("Hello世界", "Hello 世界"),
+                ("世界Hello", "世界 Hello"),
+                ("Hello你好World世界", "Hello 你好 World 世界"),
+                ("Rust编程语言", "Rust 编程语言"),
+                // With punctuation/symbols → preserved, no forced breaks
+                ("你好，世界！", "你好 ， 世界 ！"),
+                ("「你好」他说道", "「 你好 」 他说道"),
+                ("AI+区块链=未来", "AI+ 区块链 = 未来"),
+                ("2025年，你好！", "2025 年 ， 你好 ！"),
+                ("Rust×中文＝强大", "Rust× 中文 ＝ 强大"),
+                ("「人工智能」2025", "「 人工智能 」 2025"),
+                ("Hello,世界!", "Hello, 世界 !"),
+                // Whitespace preserved
+                (" 你好 世界 ", " 你好 世界 "),
+                ("2025年北京奥运", "2025 年北京奥运"),
             ],
         );
     }

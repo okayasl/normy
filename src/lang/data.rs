@@ -707,7 +707,7 @@ define_languages! {
             SegmentRule::CJKIdeographUnigram,
             SegmentRule::ScriptToWestern,
         ],
-        unigram_cjk: true,
+        unigram_cjk: false,
 
     KOR, "KOR", "Korean",
         case: [],
