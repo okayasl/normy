@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
-// #![deny(missing_docs, clippy::all)]
-// #![cfg_attr(docsrs, feature(doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
+//#![deny(missing_docs, clippy::all)]
 
 pub mod context;
 pub mod lang;
@@ -9,9 +9,8 @@ pub mod stage;
 pub mod testing;
 
 pub use lang::data::*;
-pub use normy::{DynamicNormyBuilder, Normy, NormyBuilder}; // All languages auto-exported
+pub use normy::{DynamicNormyBuilder, Normy, NormyBuilder, NormyError};
 
-// All stages — flat, zero nesting
 pub use stage::case_fold::CaseFold;
 pub use stage::lower_case::LowerCase;
 pub use stage::normalization::{NFC, NFD, NFKC, NFKD};
